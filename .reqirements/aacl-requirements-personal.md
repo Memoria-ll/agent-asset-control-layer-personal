@@ -169,6 +169,8 @@ Role
 
 Project Commonは空の一覧として作成する。そのProjectで共通して使うRuleは、Projectごとに既存のRuleから明示的に登録する。
 
+初期導入では、対象Projectで利用できるWorkflowと`useCase=true`のSkillについて、Claude Code向けには起動用Commandを`.claude/commands/`配下に、Codex向けには起動用Skillを`.codex/skills/`配下に配置する。これらはCanonical Assetの複製ではなく、対象Use Caseを特定してAACLへ処理を渡すためのRuntime固有の入口とする。
+
 ```text
 グローバルの紐づけ
         ↓ 初期導入時にコピー
@@ -195,6 +197,8 @@ Use Caseは、ユーザーが明示的に選択してRunを開始する入口と
 - `useCase=true`のSkill
 
 Use Caseの検索・選択では、この2種類を統一的に扱う。
+
+Claude Code / CodexからのUse Case起動では、Claude Codeの`.claude/commands/`配下に配置した起動用Command、またはCodexの`.codex/skills/`配下に配置した起動用Skillを入口として利用できる。この起動用表現から対象WorkflowまたはUse Case Skillを指定してAACLへ処理を渡すことも、Use Caseの明示選択として扱う。
 
 Workflowを選択したRunでは工程に沿って進行する。Use Case Skillを選択したRunでは、そのSkillの実行、結果・根拠の報告、完了という単位で扱う。
 
@@ -306,7 +310,7 @@ AIは次の流れで操作する。
 
 ユーザーは「このRuleの確認項目Aを削除して」のように、内容への変更として依頼する。変更箇所や過去の変更IDの調査はAIが担う。
 
-管理操作には、Assetと紐づけの検索・取得・作成・更新・削除、Project Commonの取得・編集、Use Case設定、Model metadataの更新、History・Provenanceの確認を含める。
+管理操作には、Assetの検索・取得・作成・更新、紐づけの検索・取得・作成・変更・解除、Project Commonの取得・編集、Use Case設定、Model metadataの更新、History・Provenanceの確認を含める。
 
 ---
 
@@ -335,9 +339,13 @@ Bootstrapは、MCP接続時にAIへAACLの存在と利用方法を知らせる�
 
 Bootstrapは繰り返し取得しても同じ案内として扱う。通常会話へ全Workflow・Skill・Ruleの本文を常時注入する用途にはしない。
 
-接続先で使う起動用のSkill / Command等の表現は、Canonical Assetを参照する入口として扱う。Workflowを起動するための表現と、Canonical AssetとしてのSkillを区別する。
+接続先で使う起動用表現は、Claude CodeではCommand、CodexではSkillとし、Canonical Assetを参照する入口として扱う。これらのRuntime固有の起動用表現と、Canonical AssetとしてのSkillを区別する。
 
-起動用表現は安定したAsset IDを参照し、表示名や接続先での表現形式が変わっても、参照するAssetの識別を維持する。
+AACLは、対象Projectで利用できる各Workflowと`useCase=true`のSkillについて、Claude Codeでは`.claude/commands/`配下に起動用Commandを、Codexでは`.codex/skills/`配下に起動用Skillを配置する。初期導入時に作成し、Use Caseの追加・削除・名称変更等で入口との対応関係が変わる場合は、Canonical Stateと一致するよう更新する。
+
+起動用表現の責務は、対象Use Caseを安定したAsset IDで特定し、AACLのMCP Interfaceへ処理を渡してUse Caseの取得・Run開始へ進ませることに限定する。Workflowの工程、Skill本文、Role / Rule、紐づけ、completion criteria、Context Resolution等の実行定義や判断ロジックを起動用表現へ複製しない。
+
+起動用表現はRuntime固有の生成物でありCanonical Assetではない。削除・再生成してもCanonical Stateを失わず、表示名や接続先での表現形式が変わっても、参照するAssetの識別を維持する。
 
 ---
 
@@ -557,7 +565,7 @@ Journal Reviewは、ユーザーが明示的に開始するUse Case Skillとす�
 - 明示参照の追加・変更・削除
 - グローバル／プロジェクトの資産と紐づけ
 - Project CommonのRule参照
-- 資産の削除や整理
+- 資産の整理
 - 提供Contextの削減
 
 Proposalには、observed context、proposed change、reason、evidence、affected assets、影響する紐づけとProjectを保持する。
@@ -640,7 +648,7 @@ MCPを通じて次のdomain operationを提供する。
 - Use Caseの検索・取得
 - Runの開始・取得・遷移・完了・cancel・fail
 - Contextの解決・取得・Roleへの引き渡し
-- Assetの検索・取得・作成・更新・削除
+- Assetの検索・取得・作成・更新
 - Skill本文・supporting filesの取得
 - Model metadataの取得・更新
 - 実Runtime・Model・使用状況・成果物等の報告
@@ -661,7 +669,7 @@ Read操作でAsset本体・紐づけ・Project Common・Runの進行状態は変
 
 AACLはsingle-userのlocalhost運用を基本とし、Canonical Assetと管理情報をローカルに保持する。
 
-Canonical Assetは、人間が本文を確認・diffするための形式で保存する。Runtime固有の表現はCanonical Assetを参照または生成元として扱う。
+Canonical Assetは、人間が本文を確認・diffするための形式で保存する。Runtime固有の表現はCanonical Assetを参照または生成元として扱う。`.claude/commands/`配下の起動用Commandと`.codex/skills/`配下の起動用SkillもRuntime固有の生成物とし、正本として扱わない。
 
 認証情報はClaude Code / Codexや外部Tool Provider側で管理する。Asset本文へcredential、access token、password、secret keyを保存しない。
 
@@ -720,7 +728,7 @@ AIによる具体的な改善提案
         ↓
 ユーザー判断
         ↓
-Asset・紐づけ・Project Commonの更新と変更理由の記録
+Asset・紐づけの更新と変更理由の記録
         ↓
 次のRun
 ```
