@@ -1,7 +1,7 @@
-# Agent Asset Control Layer — 開発要求 v15 Draft
+# Agent Asset Control Layer — 開発要求 v16 Draft
 
 作成日: 2026-09-15
-更新日: 2026-09-16
+更新日: 2026-09-17
 
 本書は、Agent Asset Control Layer（AACL）の完成形における製品の責務、管理対象、実行境界、観測と改善の仕組みを定義する。
 
@@ -9,7 +9,7 @@
 
 # 1. 目的と利用形態
 
-AACLは、ユーザーがClaude Code / Codexとの開発で繰り返し使う方法・知識・規則・役割を資産として一元管理し、明示的に選択したUse Caseから再利用・観測・改善するための、個人向けlocal-first MCP Serviceである。
+AACLは、ユーザーがClaude Code / Codexとの開発で繰り返し使う方法・知識・規則・役割をAssetとして管理し、Workflowの実行と、その実行から得たJournalを通じて開発方法を改善する個人向けシステムである。
 
 正式なExecution SurfaceはClaude CodeとCodexとする。ユーザーは両者との会話を通じてAACLを操作する。
 
@@ -21,19 +21,22 @@ Claude Code / Codex
 AACL Core
 ```
 
-AACLは次を担う。
+AACLは次を製品機能として提供する。
 
 - Workflow / Skill / Role / RuleをCanonical Assetとして保存する。
 - グローバルとプロジェクト別のAssetおよび紐づけを管理する。
-- 短い依頼から、明示されたUse CaseのRunを開始する。
+- Workflowを明示的に選択してRunを開始する。
+- useCaseが有効なSkillを、Run管理を伴わない直接起動可能なAssetとして提供する。
 - 明示参照を辿り、今回使う資産とそのrevisionを確定する。
 - 実行に必要なContextを段階的に渡し、渡した情報を記録する。
-- Runの進行、成果物、実行報告を追跡する。
+- Workflow Runの状態、Context提供、実行報告を追跡する。
 - Journalを提供Contextに関連づけ、開発方法の改善材料を蓄積する。
-- ユーザーが開始したJournal Reviewを通じて、根拠のある改善案を扱う。
+- ユーザーが開始したJournal Reviewで、Journalを横断した改善案を扱う。
 - ユーザー判断に基づく変更を保存し、変更内容と変更理由を追跡する。
 
-日常的な管理は、接続中AIがユーザーの自然言語を具体的なAACL操作へ変換して行う。
+初回実装では、本書に定義する管理・Workflow実行・Journal・Review・CLI・UI・export / Backupを一括して対象とする。個々の機能の優先順位による初回対象の縮小は行わない。
+
+ユーザーはUIまたは接続中AIを通じてAssetを管理できる。AI経由の管理では、接続中AIが自然言語の依頼を具体的なAACL操作へ変換する。保存内容の意味判断と開発作業はユーザーおよび接続先AIが担う。
 
 ---
 
@@ -41,7 +44,7 @@ AACLは次を担う。
 
 ## 2.1 ユーザーの決定権
 
-開発方法、Assetの意図、紐づけ、RoleとModelの組み合わせ、改善方針の最終決定主体はユーザーとする。
+開発方法、Assetの意図、紐づけ、Runtime上のModel選択、改善方針の最終決定主体はユーザーとする。
 
 依頼から対象・変更内容・適用先が一意に決まる場合、その依頼自体を変更意思として扱う。方針が一意に決まらない場合、AIが具体案を示してユーザーへ判断を戻す。
 
@@ -53,7 +56,7 @@ Claude Code / Codex側のAIは、自然言語の理解、既存情報の調査�
 
 ## 2.3 Coreの責務
 
-Coreは、Canonical State、Project Identity、紐づけ、Run State、Workflow State、revision、Snapshot、Journal、History、Provenance、Change Set、Diagnosticsを管理する。
+Coreは、Asset、Project Identity、紐づけ、Workflow Run、Snapshot、Journal、History、Provenance、Change Set、Diagnosticsを管理する。
 
 Coreは同じ明示状態に同じ検証・解決規則を適用する。資産の本文を意味解釈して、使う資産を推測・選別する責務は持たない。
 
@@ -63,18 +66,18 @@ Claude Code / Codexは、モデル起動、ファイル操作、shell・tool呼�
 
 ## 2.5 資産の正本とContext
 
-Canonical Assetは人間が内容を確認・diffするための正本とする。
+Canonical Assetと管理記録の正本はCoreが管理するCanonical Stateとする。Asset本文はUIで確認・編集でき、ユーザーが要求したときに人間可読形式で出力できる。
 
-Contextは、Project Commonと、選択したUse Case・現在の工程・Roleの紐づけに含まれる明示参照から構成する。Skill本文やsupporting filesは、AIが使う時点で取得する。
+Workflow RunのContextは、Project Commonと、選択Workflow・現在Stage・Roleの紐づけに含まれる明示参照から構成する。Skill本文やsupporting filesは、AIが使う時点で取得する。Runを伴わないSkillの直接取得では、指定されたCanonical Skill本文を返す。
 
 ---
 
 # 3. 管理対象の実行と通常利用
 
-AACLが実行の管理・観測・改善を行う対象は、ユーザーがUse Caseを一意かつ明示的に選択し、CoreがRunを作成した実行とする。
+AACLがRun、Snapshot、実行状態を管理する対象は、ユーザーがWorkflowを明示的に選択し、CoreがRunを作成した実行とする。
 
 ```text
-Use Caseの明示選択
+Workflowの明示選択
         ↓
 Runの開始
         ↓
@@ -85,11 +88,11 @@ Snapshot / Journal
 改善
 ```
 
-Use Caseの明示選択には、名前を含む自然言語依頼を含める。履歴や会話内容からAIが黙って選択することは、明示選択として扱わない。
+Workflowの明示選択には、名前を含む自然言語依頼を含める。履歴や会話内容からAIが黙って選択することは、明示選択として扱わない。
 
-Use Caseを選択していない通常利用で、何を行い、どこまで自律実行するかは、ユーザーと接続先AI本来の関係に委ねる。AACLは通常利用へ独自の許可・禁止規則やWorkflow Stateを適用せず、Use Caseの選択を催促して割り込まない。
+Workflowを選択していない通常利用で、何を行い、どこまで自律実行するかは、ユーザーと接続先AI本来の関係に委ねる。AACLは通常利用へ独自の許可・禁止規則やWorkflow Stateを適用せず、Workflowの選択を催促して割り込まない。
 
-通常利用へWorkflow / Skill / Rule等を暗黙適用することを標準動作としない。通常利用に対するRun、Snapshot、Journal、比較用の実行統計を自動作成せず、後から管理対象の実行として記録することもしない。
+通常利用へWorkflow / Skill / Rule等を暗黙適用しない。Runを伴わないSkillの直接利用も通常のSkill利用として扱い、Run、Snapshot、実行履歴、Journal、比較用の実行統計を自動作成しない。後からそのSkill利用を管理対象Runとして記録する機能も提供しない。
 
 Assetの検索・編集・資産化など、ユーザーが明示した管理操作はRun外でも扱う。変更・資産化を行った場合は、その依頼と変更理由をProvenanceへ記録する。
 
@@ -104,27 +107,31 @@ Canonical Assetは次の4種とする。
 - Role
 - Rule
 
-各Assetは、ID、name、description、revision、管理先、metadata、history、provenanceを持ち、種類ごとの本文・定義を保持する。
+各Assetは、ID、name、description、revision、管理先、metadata、history、provenanceを持ち、種類ごとの本文・定義を保持する。Skillに必須の内容項目はname、description、bodyとする。
+
+Assetの管理を終了する場合はAssetを削除・アーカイブせず、本文に「処置なし」等の空内容を示す記述を残す。Asset ID、revision履歴、既存の紐づけは保持する。
 
 管理先はグローバルまたは特定のプロジェクトとする。グローバルのAssetとプロジェクトのAssetで名前が重複していても、別のAssetとして識別する。利用するAssetは紐づけやProject Commonの明示参照によって決まり、参照先をAsset IDで特定する。
 
-Asset本体と、どのAsset・Modelを使うかを示す紐づけを分けて管理する。Asset本体の変更と紐づけの変更は、それぞれrevisionと変更理由を追跡する。
+Asset本体と、利用するAssetを示す紐づけを分けて管理する。ModelはCanonical Assetではなく、Modelへの紐づけやModel metadataの管理を行わない。Model名が明示的に渡された場合、Coreは不透明な文字列としてそのまま受け渡す。Asset本体と紐づけはそれぞれrevisionで履歴を保持する。
+
+revisionは履歴、Run、Snapshotの再現に用いる。通常のAsset Writeでは古いrevisionを理由に更新を拒否せず、現在状態を基に新しいrevisionを作成する。同じoperation IDによる再送は同一Writeとして扱う。過去revisionの復元は、その内容を新しいrevisionとして保存する。
 
 ---
 
 # 5. Project Identity
 
-AACL Projectはstable project IDで識別し、明示操作で登録する。
+AACL ProjectはCoreのProject registryに登録したstable project IDで識別する。ユーザーがProjectでaacl initを実行したとき、その時点で開いているProject rootを登録する。
 
 Projectは、プロジェクト資産の管理先、紐づけ、Project Common、Run、Snapshot、Journal、改善の適用先を識別するために用いる。
 
-Project rootに置くProject Markerを通じて、接続中AIが対象Projectを確認する。
+ProjectはRuntimeが示す開いているProject rootと登録済みrootとの完全一致で解決する。親ディレクトリ探索、Git root推測、Project Marker、path alias、symlink解決を用いない。Windows形式とLinux形式のpathはLinux表記へ正規化してから照合する。
 
 ## 5.1 Project Common
 
 Project Commonは、そのProjectで共通して使うRuleへの参照一覧を保持するProject設定である。Rule本文はCanonical Assetとして管理し、Project Commonには使うRuleのAsset IDを明示的に登録する。
 
-登録したRuleは、そのProjectで開始するWorkflowとUse Case Skillの両方の管理Runに含める。特定のRoleや工程で使うRuleは、そのRole / Workflow / Stageへの紐づけで指定する。
+登録したRuleは、そのProjectで開始するWorkflow RunのContextに含める。直接利用するSkillにはProject CommonやWorkflow Contextを自動では付与しない。特定のRoleや工程で使うRuleは、そのRole / Workflow / Stageへの紐づけで指定する。
 
 Project Commonの登録・解除には、revision、変更履歴、変更理由を保持する。
 
@@ -132,15 +139,15 @@ Project Commonの登録・解除には、revision、変更履歴、変更理由�
 
 # 6. グローバルとプロジェクト別の紐づけ
 
-AACLはグローバルの紐づけと、各プロジェクトの紐づけを別々に保存する。
+AACLはグローバルの紐づけと、各Projectの紐づけを別々に保存する。Project初期導入時にGlobalの紐づけをProject用として複製し、以後は独立して管理する。参照先のAsset本文は複製しない。
 
 紐づけは、使う対象を明示する定義であり、次の関係を扱う。
 
 - Workflow / Stage → Role / Skill / Rule
-- Role → Model / Skill / Rule
+- Role → Skill / Rule
 - Skill → Skill
 
-Workflowのentry roleとStageごとの担当Roleも紐づけで指定する。RoleとModelは、使用する紐づけの中で1対1とする。
+Workflowのentry roleとStageごとの担当Roleも紐づけで指定する。Model名はAsset間の紐づけに含めない。
 
 ProjectのRunでは、そのProjectに保存された紐づけを使う。グローバルとプロジェクトで同名のAssetが存在する場合も、紐づけに記録されたAssetを参照する。
 
@@ -189,18 +196,18 @@ Project Commonは空の一覧として作成する。そのProjectで共通し�
 
 # 8. Use Case
 
-Use Caseは、ユーザーが明示的に選択してRunを開始する入口とする。
+Workflowはユーザーが明示的に選択してRunを開始する入口とする。useCaseが有効なSkillは、Runを開始せずCanonical Skill本文を直接取得してAIへ渡す入口とする。
 
 次をUse Caseとして扱う。
 
 - Workflow
 - `useCase=true`のSkill
 
-Use Caseの検索・選択では、この2種類を統一的に扱う。
+Use Caseの検索ではWorkflowと直接起動可能なSkillを扱う。Run開始操作の対象はWorkflowに限る。
 
-Claude Code / CodexからのUse Case起動では、Claude Codeの`.claude/commands/`配下に配置した起動用Command、またはCodexの`.codex/skills/`配下に配置した起動用Skillを入口として利用できる。この起動用表現から対象WorkflowまたはUse Case Skillを指定してAACLへ処理を渡すことも、Use Caseの明示選択として扱う。
+Claude Code / CodexのRuntime入口は、Workflowを指定してRunを開始するか、直接起動Skillの本文を取得する。Skill入口からRunを開始しない。
 
-Workflowを選択したRunでは工程に沿って進行する。Use Case Skillを選択したRunでは、そのSkillの実行、結果・根拠の報告、完了という単位で扱う。
+Workflow Runは定義されたStageに沿って進行する。Skillの直接利用はユーザーとAIの通常のやりとりとして進み、Coreは実行状態や完了状態を管理しない。
 
 ---
 
@@ -211,17 +218,14 @@ Workflowは、複数工程からなる再利用可能な開発方法を定義す
 Workflowは次を保持する。
 
 - ID、name、description、revision
-- stages
 - task type / classification
 - transitions
 - retry / reject / return
-- 実行に必要なCapability
-- 成果物の要件
-- completion criteria
+- Stageの一覧と、各Stageに必須のcompletion_condition
 
 Workflow / Stageで使うRole・Skill・Ruleは紐づけで指定し、対象Projectの構成から取得する。
 
-Workflowは可能な進行と完了に至る経路を定義する。今回どのtransitionを選択するかは、ユーザーまたは接続中AIが判断する。
+StageをWorkflowの実行単位とする。Stageが参照するSkill、Role、Ruleは任意とする。completion_conditionはAIが完了を判断するための必須自由記述であり、Coreはその意味を判定しない。CoreはWorkflowのStage一覧と許可されたtransitionを管理し、完了判断後にAIまたはユーザーが選んだtransitionの構造と現在状態を検証する。
 
 ---
 
@@ -234,26 +238,23 @@ Skillは次を保持する。
 - ID、name、description、revision
 - body
 - supporting files
-- task type / classification
-- expected output
-- completion criteria
 - useCase
 
-別のSkillを使う関係は、Skill → Skillの紐づけで定義する。AACLはこの参照を辿り、参照先のSkillも利用対象へ含める。
+別のSkillを使う関係は、Skill → Skillの紐づけで定義する。Workflow RunのContext Resolutionでは明示参照を再帰的に辿る。
 
 本文とsupporting filesは、AIが必要時に取得する。利用対象になったことと、本文を取得したこと、実際に使ったことを区別する。
 
-`useCase=true`のSkillは直接起動するUse Caseとして扱い、成果物と完了条件に基づいてRunを進める。
+`useCase=true`のSkillは、直接起動できるSkillであることを示す。Runtime入口はAsset IDを指定し、Coreから取得したCanonical Skill本文をAIへ渡す。直接利用ではRunを作成せず、実行内容、結果、完了判断、Journalとの関連づけはCoreの管理対象にしない。
 
 ---
 
-# 11. RoleとModel
+# 11. RoleとModel名の受け渡し
 
 Roleは、実行主体が何者として振る舞い、何を担うかを定義する。共通の責務として複数のWorkflow / Stageから再利用する。
 
 RoleはID、name、description、revision、responsibilities、task type / classificationを保持する。responsibilitiesは、期待する責務・判断観点・成果責任を表す。
 
-Roleで使うSkill / Rule / Modelは、使用するグローバルまたはプロジェクト別の紐づけから取得する。Skill / Ruleの本文は独立したCanonical Assetとして管理し、Roleから参照する。
+Roleで使うSkill / Ruleは、使用するGlobalまたはProject scopeの紐づけから取得する。Skill / Ruleの本文は独立したCanonical Assetとして管理し、Roleから参照する。Modelとの紐づけは行わない。
 
 Coreは次をRole Contextとして構成する。
 
@@ -261,13 +262,8 @@ Coreは次をRole Contextとして構成する。
 - Roleから参照するSkill / Rule
 - Workflow / Stageで使うと明示されたSkill / Rule
 - Project Commonに登録されたRule
-- 紐づけられたModel
 
-Model metadataには、identifier、display name、provider、notes、provenanceを記録する。実際のモデル起動はClaude Code / Codexが担う。
-
-指定モデルを使えないと判明した場合、接続中AIは事実を提示し、ユーザーへ判断を戻す。実モデルの情報を取得できない状態とは区別する。
-
-指定したModelと、実行時に報告されたModelを区別して記録する。
+Modelとの紐づけやModel metadataは管理しない。Model名が明示的に与えられた場合、CoreはModel固有の情報として解釈せず、値をそのまま受け渡す。モデル選択と利用可否への対応はユーザーとRuntime / AIが担う。
 
 ---
 
@@ -287,17 +283,13 @@ Task Typeは作業の性質を表す分類情報とし、Workflow / Role / Skill
 
 # 13. Capability
 
-Capabilityは、Use Caseの実行に必要な外部能力を表すExecution Context情報とする。GitHub、browser、filesystem、shell、external API等が該当する。
-
-Capabilityを提供する主体はClaude Code / Codexの実行環境とし、AACLはその利用可能状態を扱う。
-
-状態はavailable / unavailable / degraded / conflictとして示し、Run開始、transition、completion validationで、定義された条件に従って参照する。
+外部能力（filesystem、shell、GitHub、browser、external API等）の定義、提供状態、実行可否はClaude Code / CodexのRuntimeとユーザーが扱う。CoreはCapabilityを管理・保存・検証せず、Run開始、Stage遷移、完了判定にも用いない。
 
 ---
 
 # 14. 自然言語によるAsset管理
 
-Asset・紐づけ・Project Commonの管理操作は、Claude Code / CodexからMCP経由で行う。
+AIがユーザー依頼を受けて行うAsset・紐づけ・Project Commonの管理操作は、Claude Code / CodexからMCP経由で行う。ユーザーはUIからもこれらを管理できる。
 
 AIは次の流れで操作する。
 
@@ -310,7 +302,7 @@ AIは次の流れで操作する。
 
 ユーザーは「このRuleの確認項目Aを削除して」のように、内容への変更として依頼する。変更箇所や過去の変更IDの調査はAIが担う。
 
-管理操作には、Assetの検索・取得・作成・更新、紐づけの検索・取得・作成・変更・解除、Project Commonの取得・編集、Use Case設定、Model metadataの更新、History・Provenanceの確認を含める。
+管理操作には、Assetの検索・取得・作成・更新、紐づけの検索・取得・作成・変更・解除、Project Commonの取得・編集、Skillの直接起動設定、History・Provenanceの確認を含める。Model metadataの登録・更新は行わない。
 
 ---
 
@@ -332,7 +324,7 @@ Bootstrapは、MCP接続時にAIへAACLの存在と利用方法を知らせる�
 
 - AACLの役割と通常利用との境界
 - Projectの確認方法
-- Use Caseの検索・開始方法
+- Workflow Runの開始方法と直接起動Skill本文の取得方法
 - Asset・紐づけの検索・編集・資産化方法
 - Run StateとContextの取得方法
 - JournalとJournal Reviewの操作方法
@@ -341,9 +333,11 @@ Bootstrapは繰り返し取得しても同じ案内として扱う。通常会�
 
 接続先で使う起動用表現は、Claude CodeではCommand、CodexではSkillとし、Canonical Assetを参照する入口として扱う。これらのRuntime固有の起動用表現と、Canonical AssetとしてのSkillを区別する。
 
-AACLは、対象Projectで利用できる各Workflowと`useCase=true`のSkillについて、Claude Codeでは`.claude/commands/`配下に起動用Commandを、Codexでは`.codex/skills/`配下に起動用Skillを配置する。初期導入時に作成し、Use Caseの追加・削除・名称変更等で入口との対応関係が変わる場合は、Canonical Stateと一致するよう更新する。
+AACLは、対象Projectで利用できる各Workflowと`useCase=true`のSkillについて、Claude Codeでは`.claude/commands/`配下に起動用Commandを、Codexでは`.codex/skills/`配下に起動用Skillを配置する。Global入口は各RuntimeのGlobal設定先に配置する。初期導入時に作成し、対象の追加・解除・名称変更等で入口との対応関係が変わる場合は、Canonical Stateと一致するよう更新する。
 
-起動用表現の責務は、対象Use Caseを安定したAsset IDで特定し、AACLのMCP Interfaceへ処理を渡してUse Caseの取得・Run開始へ進ませることに限定する。Workflowの工程、Skill本文、Role / Rule、紐づけ、completion criteria、Context Resolution等の実行定義や判断ロジックを起動用表現へ複製しない。
+Global設定先はRuntimeの標準位置から検出し、UIから追加できる。Windows側とWSL側のGlobal設定先は別々に扱う。新しい設定先には適用可能なUse Case入口を配置する。設定先を管理対象から外す場合は既存ファイルを残し、以後Coreの管理対象から外す。SkillのuseCaseをfalseに変更した場合は、そのSkillのRuntime入口を解除する。
+
+Workflow入口は対象Workflowを安定したAsset IDで特定し、MCP経由でRunを開始する。Skill入口は対象Skillの安定したAsset IDだけを指定し、MCP経由で取得したCanonical本文をAIへ渡す。Skill入口からRunを開始しない。いずれの入口にもCanonical本文やContext解決ロジックを複製しない。
 
 起動用表現はRuntime固有の生成物でありCanonical Assetではない。削除・再生成してもCanonical Stateを失わず、表示名や接続先での表現形式が変わっても、参照するAssetの識別を維持する。
 
@@ -351,33 +345,35 @@ AACLは、対象Projectで利用できる各Workflowと`useCase=true`のSkillに
 
 # 17. Runの開始と記録
 
-Runは、一回のUse Case実行を識別するCanonical Entityとする。
+Runは、一回のWorkflow実行を識別するCanonical Entityとする。直接起動するSkillにはRunを作成しない。
 
 Coreは次を検証し、Run IDと初期状態を作成した時点で管理対象の実行を開始する。
 
-- 明示選択されたUse Caseが存在し、そのrevisionを取得する。
+- 明示選択されたWorkflowが存在し、そのrevisionを取得する。
 - Definitionがvalidationを通る。
 - 対象Project、使用する紐づけ、Project Commonの参照を解決する。
-- 実行に必要なCapabilityの状態を判定する。
 - Context Resolutionに使うrevisionの基準を確立する。
 - Initial Stateを作成する。
 
 接続、validation、revision整合性等によりRunを作成できなかった場合は、開始失敗として扱う。
 
+1つのAI実行コンテキストに関連づくRunは1つとする。並列実行は別のAI実行コンテキストに関連づくRunとして扱い、Run同士の状態・Context・Snapshot・Journal関連を分離する。Run IDとContext HandleはCoreが発行し、接続層が以後のMCP操作へ自動的に関連づける。AIにIDの手入力を要求しない。
+
+CoreはRunごとにworkspaceを作成・分離せず、成果物やファイル変更の競合を管理しない。別workspaceやworktreeが必要な場合はユーザーまたはRuntimeが明示的に用意する。
+
 Runは次を保持する。
 
 - run id
-- use case type / id / revision
+- Workflow ID / revision
 - project
 - 使用する紐づけとそのrevision
 - 使用するProject Commonのrevision
 - instruction / target
-- task type / classification
 - resolution revision boundary
 - status
 - created at / updated at
-- Workflowの場合の現在Stage
-- 関連するSnapshot、Journal、実行報告、成果物
+- 現在Stage
+- 関連するSnapshot、Journal、実行報告
 
 ---
 
@@ -394,21 +390,19 @@ Runの状態を次のように扱う。
 
 Workflow Runでは、Coreが現在Stageを保持し、定義に従って可能なtransitionを示す。retry / reject / returnと、Run全体のfailedを区別する。
 
-Orchestratorは、進行管理を担うRoleとして定義する。その責務には、現在状態の理解、assignment、transitionの選択、retry、return、reject、fallback、完了判断を含める。
+現在Stage、許可されたtransition、Run状態はCoreが管理する。完了条件の意味的な評価、Stageの完了報告、利用可能なtransitionの選択はユーザーまたは接続中AIが行う。Coreはtransitionの構造と状態を検証して保存する。
 
-実際の進行判断と作業の割り当てはユーザーまたは接続中AIが行い、Coreが状態遷移を検証して保存する。
+Runの終端状態はcompleted、cancelled、failedとする。ユーザーによる中止はcancelled、継続不能の報告または非活動timeoutはfailedとする。timeoutは既定24時間とし、Global設定で変更できる。読み取りを含むRun関連MCP操作は非活動時間を更新する。同一操作の再送はduplicate、状態が進行した後の別transitionはstaleとして扱う。
 
 ---
 
 # 19. 完了条件と終了
 
-WorkflowとUse Case Skillは、Runをcompletedとして扱うためのcompletion criteriaを定義する。
+各Stageは、AIが完了を判断するための必須自由記述completion_conditionを持つ。
 
-Coreは、そのUse CaseのDefinitionで指定された完了条件を扱う。条件として、工程の完了、成果物の存在、レビュー結果、Roleの実行報告、Capabilityの結果、根拠の存在、未解決の差し戻し条件の解消を表現する。
+AIはcompletion_conditionを評価し、Stageを完了したと判断した場合、完了報告と任意の根拠・コメントを添えてCoreへtransitionを要求する。
 
-成果物の意味的な品質判断はAIが担い、完了要求と根拠をCoreへ送る。
-
-Coreは、状態遷移上の完了可否、定義された成果物・実行報告・根拠の存在、状態の整合性を検証する。
+CoreはAIの意味判断や根拠の真偽を評価せず、現在のRun状態、許可されたtransition、必須入力の構造を検証する。Workflowの終端Stageへの許可されたtransitionが受理されたとき、Runをcompletedにする。
 
 ユーザーは接続中AIを通じてRunのcancelを要求する。Runtime / AIは継続不能なRunをfailedとして終了報告する。
 
@@ -416,7 +410,7 @@ Coreは、状態遷移上の完了可否、定義された成果物・実行報�
 
 # 20. revisionの一貫性
 
-Run開始時にUse Caseのrevisionを固定し、資産・紐づけ・Project Commonの解決に使うstable revision boundaryを確立する。
+Run開始時にWorkflow、資産・紐づけ・Project Commonのrevisionを固定し、Context Resolutionに使うstable revision boundaryを確立する。
 
 同じRun内のContext Resolutionは、同じ基準を使う。途中で取得するSkill本文とsupporting filesも、そのRunの基準に従う。
 
@@ -428,7 +422,7 @@ Run開始時にUse Caseのrevisionを固定し、資産・紐づけ・Project Co
 
 # 21. Context Resolver
 
-Resolverは、Runで選択されたUse Case、現在Stage、Role、Projectの紐づけから明示参照を辿り、利用対象の資産を解決する。Project Commonに登録されたRuleも、その明示参照から解決する。
+ResolverはWorkflow RunのWorkflow、現在Stage、Role、Projectの紐づけから明示参照を辿り、利用対象の資産を解決する。Project Commonに登録されたRuleも、その明示参照から解決する。直接起動するSkillの取得は、指定されたAsset IDのCanonical Skill本文に限り、Workflow ContextやProject Commonを合成しない。
 
 RoleがSkill Aを参照し、Skill AがSkill Bを参照する場合、AとBを対象に含める。各参照には、そのRunで使う紐づけとrevisionの基準を適用する。
 
@@ -436,7 +430,7 @@ RoleがSkill Aを参照し、Skill AがSkill Bを参照する場合、AとBを�
 
 Coreは、参照先の存在、revisionの取得可否、紐づけ・Project Common・Run Stateの整合性を検証する。
 
-Resolutionの入力は、Project、使用する紐づけ、Project Common、Use Case、Workflow Stage、Role、およびRunで固定したrevisionの基準とする。Use Case SkillにはWorkflow Stageを設けない。
+Resolutionの入力は、Project、使用する紐づけ、Project Common、Workflow、Workflow Stage、Role、およびRunで固定したrevisionの基準とする。Runを伴わないSkill取得にはWorkflow StageやRunのrevision boundaryを設けない。
 
 ---
 
@@ -444,15 +438,14 @@ Resolutionの入力は、Project、使用する紐づけ、Project Common、Use 
 
 初期Contextには次を含める。
 
-- Use Case Definition
+- Workflow Definition
 - 紐づけとProject Commonで明示参照されたRule
 - 利用対象Skillのcatalog
-- 成果物の要件
-- completion criteria
+- 現在Stageとcompletion_condition
 
-Workflowの場合は現在Stageを含める。Roleが指定された実行には、そのRoleとresponsibilities、紐づけられたModelを含める。
+Roleが指定された実行には、そのRoleとresponsibilitiesを含める。Model名はRoleやAssetの紐づけとしてContextへ合成しない。
 
-Skill本文とsupporting filesは、AIが必要時に取得する。利用対象のSkill集合とrevisionをContextの一部として扱う。
+Workflow RunではSkill本文とsupporting filesをAIが必要時に取得し、利用対象のSkill集合とrevisionをContextの一部として扱う。直接起動Skillは指定Assetの本文を取得して渡す。
 
 AACLは、資産がどの参照経路から利用対象になったか、何を渡したか、取得できなかった対象と理由を説明する。
 
@@ -464,7 +457,7 @@ AACLは、資産がどの参照経路から利用対象になったか、何を�
 
 Workflowで別のRoleへ作業を委譲する場合、Coreは引き渡すContextを構成する。
 
-Contextには、run id、Use Caseとrevision、Stage、task、Roleとresponsibilities、Task Type、指定Model、使うRule、利用対象Skill、関連成果物、制約、expected output、completion criteriaを含める。
+Contextには、Run ID、Workflowとrevision、Stageとcompletion_condition、Roleとresponsibilities、明示参照されたRuleとSkillを含める。
 
 実際の割り当てと実行主体の起動は、接続中AIとRuntimeが担う。
 
@@ -472,36 +465,35 @@ Contextには、run id、Use Caseとrevision、Stage、task、Roleとresponsibil
 
 # 24. 提供情報と実行報告
 
-AACLが管理対象のRunに渡した情報と、AIから報告された実際の使用状況を、それぞれ記録して関連づける。
+AACLがWorkflow Runに渡した情報と、AIから報告された実際の使用状況を、それぞれ記録して関連づける。
 
 Execution Snapshotは、実行試行に提供したContextと、その構成を保持する。
 
 - run id
-- Use Caseとrevision
+- Workflowとrevision
 - resolution revision boundary
 - Project
 - 使用した紐づけとrevision
 - 使用したProject CommonのrevisionとRule参照
 - Workflowの場合のStage
-- Role、Task Type、Runtime
-- 指定Model
+- Role、Runtime
 - 利用対象のAssetとrevision
 - 提供したRuleとSkill catalog
-- 提供情報、関連成果物、参照経路と解決理由
+- 提供情報、参照経路と解決理由
 - 取得できなかったContextと理由
 - timestamp
 
 AACLはSkill本文・supporting filesの提供も記録し、Runと対応するContextに関連づける。
 
-Journalに記録する気づきには、実際に何をどう使ったかを補足する。Use Caseの完了条件に基づく実行報告は、そのDefinitionに従う。AACLは、Skillが利用対象になった状態、本文を取得した状態、実際に使ったという報告を区別して保持する。
+Journalに記録する気づきには、実際に何をどう使ったかを補足する。AACLは、Skillが利用対象になった状態、本文を取得した状態、実際に使ったという報告を区別して保持する。Runに成果物用workspaceを割り当てたり、成果物をRun間で分離したりしない。
 
-実Runtime・Modelを把握した場合は、接続中AIが報告する。指定Modelと報告された実Modelを分けて保持し、対象RunとSnapshotへ関連づける。
+Modelに関する情報はCoreの構造化管理対象に含めない。AIがJournal本文等へ記述した情報は自由記述として保持し、CoreはModel名として抽出・検証しない。
 
 ---
 
 # 25. Journal
 
-Journalは、管理対象のRunで得た、開発方法や道具の使い方に関する一次観測とする。
+Journalは、開発方法や道具の使い方に関する一次観測とする。Journal本文と、TaskまたはRunのいずれかへの関連づけを必須とする。
 
 既存journalの気づき中心の運用を保ち、明確な設計・実装タスクの区切りで、記録する気づきがある場合に残す。定番として確立した良さを毎回繰り返さず、書くことのない項目は省略する。
 
@@ -525,17 +517,19 @@ Journalには現行の情報を保持する。
 - 根拠となる実行結果・成果物・発言等
 - 観測や解釈の確かさ
 
-AACLはJournalを、Run、Use Caseとrevision、Stage、Role、報告されたModel、Snapshot、関連Assetと紐づけのrevisionへ関連づける。AACLが渡した情報はこの関連から辿り、AIが報告した実際の使用状況と併せて読む。
+Run Contextから作成されたJournalには、Coreが把握するProject、Run、Workflow revision、Stage、Snapshot、関連Assetと紐づけのrevisionを自動で関連づける。AIにCore IDやModel情報の入力を要求しない。Run Contextを伴わないJournalは、Taskへの関連づけを使う。
 
-記録の中心は、どう進め、道具や指示がどう働いたかとする。気づきのない実行に成功報告を求めず、Journalへの記載がないことだけを未使用・不要の根拠として扱わない。
+Journal Skillは固定見出しMarkdownの記載テンプレートをAIへ渡す。AIはJournal本文を送信し、構造化JSONやCore IDを組み立てない。Coreは既知見出しを機械的に構造化し、重複した既知見出しは出現順に連結する。未知見出しや構造化できない内容は自由記述へ保持し、入力原文も保存する。意味の推測による項目割り当ては行わない。
+
+記録の中心は、どう進め、道具や指示がどう働いたかとする。気づきのない実行に成功報告を求めず、Journalへの記載がないことだけを未使用・不要の根拠として扱わない。Run終了後のJournal追加では、ユーザーまたはAIが対象Runを明示的に指定する。
 
 ---
 
 # 26. Journal Review
 
-Journal Reviewは、ユーザーが明示的に開始するUse Case Skillとする。
+Journal Reviewはユーザーが明示的に開始するSkillとして提供する。直接起動のReview自体にはRun、Snapshot、実行履歴を作成しない。
 
-新しいJournalと、以前のレビューで保留した気づきの全体を対象とする。AIはJournalを横断してテーマ別に集約し、Snapshot、Runの進行記録、Assetと紐づけの履歴、Provenanceを併せて読む。
+AIはCoreから新しいJournalと以前のレビューで保留した気づきを読み、Journalを横断してテーマ別に集約する。参照可能なJournal関連のSnapshot、Runの進行記録、Assetと紐づけの履歴、Provenanceも併せて読む。Review自体は記録対象にしないが、Proposalや採否・適用状態は明示的なMCP操作によってCoreに保存する。
 
 集約では次を扱う。
 
@@ -560,7 +554,7 @@ Journal Reviewは、ユーザーが明示的に開始するUse Case Skillとす�
 改善提案は次を対象とする。
 
 - Workflowの工程・遷移・完了条件
-- Roleの責務とModelの指定
+- Roleの責務
 - Skill / Ruleの内容
 - 明示参照の追加・変更・削除
 - グローバル／プロジェクトの資産と紐づけ
@@ -590,7 +584,7 @@ Provenanceでは次を追跡する。
 - decision
 - related change set
 
-Run外のAsset・紐づけ・Project Commonの変更にも、依頼、理由、判断、Change Setを記録する。
+Run外でAI経由により行うAsset・紐づけ・Project Commonの変更にも、依頼、理由、判断、Change Setを記録する。UIからの過去revision復元は復元元revisionを履歴に記録し、AIへの報告や理由入力を要求しない。
 
 Asset・紐づけ・Project Commonについて、一つの意思決定で行う複数の変更はChange Setとしてまとめる。Change SetはID、origin type、対象、operations、reason、user request、proposal reference、approval information、history referenceを保持する。
 
@@ -600,11 +594,9 @@ Revision Historyは何が変わったか、Provenanceはなぜ変えたかを示
 
 # 29. 過去の状態の復元
 
-AACLはAssetの過去revisionの復元と、Change Setに基づく復元を扱う。復元も新しい変更として理由と履歴を残す。
+AACLはAssetの過去revisionの復元と、Change Setに基づく復元をUIから扱う。復元内容は新しいrevisionとして保存し、履歴には復元元revisionを記録する。復元にユーザーからAIへの報告や理由入力を要求しない。
 
-AIはユーザーが戻したい内容を理解し、履歴を調べ、対象と変更内容を具体化する。対象が一意に決まらない場合は、その内容を示してユーザーへ判断を戻す。
-
-現在の内容に対する修正依頼は、通常のAsset・紐づけ・Project Commonの更新として扱う。
+ユーザーはUIで復元対象revisionを選択する。内容修正は通常のAsset・紐づけ・Project Commonの編集として扱う。
 
 ---
 
@@ -624,15 +616,15 @@ Diagnosticsは、明示状態と実行記録から機械的に確認する問題
 
 # 31. Context Costと改善の比較軸
 
-Context Costは、AACLが実際に渡した情報量とする。Run / Use Case / Stage / Role単位で比較し、提供Contextを増やしすぎていないかを確認する。
+Context Costは、AACLが実際に渡した情報量とする。Workflow Run / Stage / Role単位で比較し、提供Contextを増やしすぎていないかを確認する。
 
 利用対象のcatalogに載っていても、取得されていないSkill本文は提供情報量に含めない。
 
 改善判断では、情報量に加えて、Journalに記録された品質上の問題、手戻り、不足Context、Runのretry・review returnを併せて見る。
 
-主要な改善軸はUse Caseとする。WorkflowではStage / Role / Assetへ分解し、Use Case Skillでは一回のRunの単位で観測する。
+主要な改善軸はWorkflow Runとする。WorkflowではStage / Role / Assetへ分解して観測する。Runを伴わないSkillの直接利用は実行統計や比較の対象にしない。
 
-比較では、Use Case revision、resolution revision boundary、資産・紐づけ・Project Commonのrevision、Runtime、報告されたModel、Project、Stage / Role、Task Typeを参照する。
+比較では、Workflow revision、resolution revision boundary、資産・紐づけ・Project Commonのrevision、Runtime、Project、Stage / Roleを参照する。CoreはModelを比較軸として保持しない。
 
 ---
 
@@ -645,13 +637,13 @@ MCPを通じて次のdomain operationを提供する。
 - Bootstrapの取得
 - Projectの確認とProject Commonの取得・編集
 - グローバル／プロジェクトの紐づけの検索・取得・編集
-- Use Caseの検索・取得
-- Runの開始・取得・遷移・完了・cancel・fail
+- Workflowの検索・取得・Run開始
+- 直接起動Skillの検索・Canonical本文取得
+- Runの取得・遷移・完了・cancel・fail
 - Contextの解決・取得・Roleへの引き渡し
 - Assetの検索・取得・作成・更新
 - Skill本文・supporting filesの取得
-- Model metadataの取得・更新
-- 実Runtime・Model・使用状況・成果物等の報告
+- Runtimeと使用状況の報告
 - Snapshotと提供情報の確認
 - Journalの作成・取得とJournal Reviewの支援
 - Proposal、ユーザー判断、改善反映、保留・処理済みの記録
@@ -659,33 +651,39 @@ MCPを通じて次のdomain operationを提供する。
 
 具体的なtool名は実装で定める。
 
-Read操作でAsset本体・紐づけ・Project Common・Runの進行状態は変更しない。これらの変更は明示的なWrite操作で行う。管理対象のRunへContextやSkillを渡した事実は、取得に伴う提供記録として残す。
+Read操作はAsset、紐づけ、Project Common、Stage、Runの進行状態を変更しない。Workflow RunにContextやSkillを渡したReadは、提供記録を追記し、Runの非活動timeoutを更新する。これらの運用記録はCanonical AssetやWorkflow状態のWriteとは分けて扱う。
 
-更新時には対象のrevisionを用いて競合を検出し、再送によって同じ状態変更が重複しないよう扱う。
+Asset Writeでは古いrevisionを理由に更新を拒否しない。現在状態から新しいrevisionを作成し、同じoperation IDによる再送は冪等に扱う。Run transitionは現在状態と許可された遷移を検証し、同じ操作の再送をduplicate、進行後の別要求をstaleとして扱う。
 
 ---
 
 # 33. 保存、CLI、閲覧UI
 
-AACLはsingle-userのlocalhost運用を基本とし、Canonical Assetと管理情報をローカルに保持する。
+AACLはsingle-userのlocalhost運用を基本とし、Canonical Assetと管理情報をCoreで管理する。Global AssetとProject AssetはCore内の別scopeとして扱い、Project内に共有用または正本用のAACLフォルダーを要求しない。初回対応環境はWSL上のLinux Coreとし、Windowsホストおよび同じWSL内のLinuxからClaude Code / CodexのMCP接続を利用できる。
 
-Canonical Assetは、人間が本文を確認・diffするための形式で保存する。Runtime固有の表現はCanonical Assetを参照または生成元として扱う。`.claude/commands/`配下の起動用Commandと`.codex/skills/`配下の起動用SkillもRuntime固有の生成物とし、正本として扱わない。
+Serviceはlocalhostのloopback interfaceだけで待ち受け、初回実装ではユーザー認証を設けない。外部LANからの接続は受け付けない。UIはJavaScriptが有効なChromium系ブラウザーで、Windowsホストまたは同じWSL内から利用する。
+
+アンインストールの削除対象はAACLが管理するアプリケーション・データ用フォルダーに限る。Claude Code / Codex設定先に生成したRuntime入口はアンインストールで削除しない。
+
+Canonical AssetはUIから確認・編集し、直接ファイル編集をCanonicalな更新経路として扱わない。Runtime固有の起動用Command / SkillはCanonical AssetのIDを参照する生成物とし、正本として扱わない。
 
 認証情報はClaude Code / Codexや外部Tool Provider側で管理する。Asset本文へcredential、access token、password、secret keyを保存しない。
 
-CLIはCoreの起動、Projectの初期導入、health・接続確認、保守、診断の補助操作を提供する。
+CLIはCoreの起動、Project初期導入、health・接続確認、保守、診断、明示的なexport / Backupを提供する。Project初期導入は現在開いているProject rootでaacl initを実行して行う。
 
-GUIは、Asset、グローバル／プロジェクトの紐づけ、Project Common、Run、Snapshot、Journal、Provenance、Diagnostics、Historyを閲覧・確認する用途に使う。
+Coreの起動にはaacl serveを利用できる。MCPまたはCLIからCoreを利用するとき、Serviceが未起動なら起動する。AssetとJournalのexportはMarkdownとYAML front matter、Run・Snapshot・History等の機械記録はJSONを基本形式とする。ExportとBackupはUIまたはCLIからユーザーが明示し、出力先はユーザーが指定する。自動Backupは要求しない。
 
-Runtime差は、Runtime identifier、Model identifier、利用可能なCapability、Runtime固有Bootstrapとして扱う。
+UIはAsset、Global / Projectの紐づけ、Project Common、Workflow Run、Snapshot、Journal、Proposal、Provenance、Diagnostics、Historyを閲覧・編集する。変更はCoreへ送信する。Runを伴わないSkill利用自体は管理画面の実行記録として表示しない。
+
+Runtime差は、Runtime identifierとRuntime固有Bootstrapとして扱う。ModelとCapabilityの存在・利用可否・metadataはCoreが管理する情報ではない。
 
 ---
 
 # 34. ユーザーが育てるUse Case
 
-Use Caseの定義はユーザーが所有し、作成・変更する。
+WorkflowとSkillの定義はユーザーが所有し、作成・変更する。
 
-Workflowの例として、issue-developmentやrefactoringがある。Use Case Skillの例として、architecture-review、security-review、test-review、journal-reviewがある。
+Workflowの例として、issue-developmentやrefactoringがある。直接起動Skillの例として、architecture-review、security-review、test-review、journal-reviewがある。直接起動Skillの実行はRunを作らず、Journal Reviewの提案等は個別のMCP操作で管理する。
 
 issue-developmentを定義する場合の工程例を示す。
 
@@ -703,7 +701,7 @@ issue-developmentを定義する場合の工程例を示す。
 完了    実装へ戻る
 ```
 
-実際の工程、Role、Model、Skill、Ruleと紐づけは、ユーザーの開発方法に合わせて定義する。
+実際のWorkflow工程とRole、Skill、Ruleの紐づけは、ユーザーの開発方法に合わせて定義する。利用するModelはRuntime側で選択する。
 
 ---
 
@@ -712,9 +710,9 @@ issue-developmentを定義する場合の工程例を示す。
 ```text
 ユーザー所有のAssetと紐づけ
         ↓
-Use Caseの明示選択
+Workflowの明示選択
         ↓
-Runとrevisionの固定
+Workflow Runとrevisionの固定
         ↓
 明示参照によるContextの提供
         ↓
@@ -730,7 +728,7 @@ AIによる具体的な改善提案
         ↓
 Asset・紐づけの更新と変更理由の記録
         ↓
-次のRun
+次のWorkflow Run
 ```
 
 このループによって、ユーザー自身がClaude Code / Codexと作ってきた開発方法を蓄積し、実際の利用から改善し続ける。

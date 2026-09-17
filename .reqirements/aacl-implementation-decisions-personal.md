@@ -3,18 +3,18 @@
 更新日: 2026-09-17
 状態: Draft
 
-本書は、[aacl-requirements-personal.md](aacl-requirements-personal.md)で定義された製品要求を実装へ落とすために、2026-09-17時点で決定した事項をまとめる。製品要求書の代替ではなく、実装方針、責務境界、実装上の制約を定義する。
+本書は、[aacl-requirements-personal.md](aacl-requirements-personal.md) v16で定義された製品要求に対して、2026-09-17時点で合意した実装判断を要約する。製品の振る舞いは要求書、技術的な実装条件は実装設計書を参照する。
 
 ## 1. 初回実装の範囲
 
-初回実装は製品要求書v15 Draftの全機能を対象とする。最小版へ分割せず、次の領域を同じ実装対象として扱う。
+初回実装は開発要求v16に定義した対象機能一式とし、最小版へ分割しない。
 
 - CoreとMCP Service
 - Claude Code / Codex対応
 - Asset、紐づけ、Project Commonの管理
-- Project登録とUse Case入口の生成
-- Use Case、Workflow、Run、Context、Snapshot
-- Model名の受け渡し、Runtime、実行報告
+- Project登録とRuntime入口の生成
+- Workflow Run、直接Skillの本文取得、Context、Snapshot
+- 不透明なModel名の受け渡し、Runtime、実行報告
 - Journal、Journal Review、Proposal、Provenance、History、Change Set
 - Diagnostics
 - CLI、localhost UI、Backup / export
@@ -39,7 +39,7 @@
 - UIはlocalhostのWeb UIとする。
 - 初回対応ブラウザはJavaScriptが有効なChromium系ブラウザとする。
 - UIはWindowsホストまたは同じWSL内から利用する。
-- UIはAsset、紐づけ、Project Common、Run、Snapshot、Journal、History、Provenance、Diagnosticsを閲覧・編集・確認する。
+- UIはAsset、紐づけ、Project Common、Workflow Run、Snapshot、Journal、Proposal、History、Provenance、Diagnosticsを閲覧・編集・確認する。
 - Canonical AssetやJournalの変更はUIからCoreへ送る。
 - 管理データを直接ファイル編集する運用は提供しない。
 
@@ -60,8 +60,8 @@
 ### 3.1 Projectの認識
 
 - ProjectはCoreが管理するProject registryへ登録する。
-- `aacl init`を実行した現在ディレクトリをProject rootとして登録する。
-- Project rootは現在位置との完全一致で解決する。
+- `aacl init`を実行した時点で開いているProject rootを登録する。
+- Project rootはRuntimeが示す開いているProject rootとの完全一致で解決する。
 - Windows形式またはLinux形式で渡されたpathはLinux形式へ変換し、`.`・`..`と区切り文字を正規化してから登録済みpathと照合する。path aliasは作らず、symlinkも解決しない。
 - 親ディレクトリの探索やGit rootからの推測は行わない。
 - Project Markerは配置しない。
@@ -104,7 +104,7 @@ Canonical AssetはWorkflow、Skill、Role、Ruleの4種とする。
 - 更新は現在状態から新しいrevisionを作る。
 - 過去revisionの復元は、過去内容を現在の新しいrevisionとして保存する。
 - 同じWrite操作の再送はoperation IDで冪等に扱う。
-- Run開始時にはUse Case、Asset、紐づけ、Project Commonの解決基準を固定する。
+- Run開始時にはWorkflow、Asset、紐づけ、Project Commonの解決基準を固定する。
 - Run中にAssetが更新されても、進行中Runは開始時のrevision基準を使う。
 
 ### 4.3 schemaの対象
@@ -129,7 +129,6 @@ Canonical AssetはWorkflow、Skill、Role、Ruleの4種とする。
 - 名前変更やscope変更では古い生成物を整理する。
 - 入口を解除してもCanonical Assetは削除しない。
 - 生成・更新・解除に失敗した場合は、Canonical Stateを壊さずDiagnosticsへ記録する。
-- Use Case対象外へ切り替えた場合は管理対象の入口を解除し、Canonical Asset自体は保持する。
 
 ## 6. WorkflowとRun
 
@@ -139,7 +138,7 @@ Canonical AssetはWorkflow、Skill、Role、Ruleの4種とする。
 - WorkflowはStage一覧と許可するtransitionを定義する。
 - Stageは実行に必要な定義情報と、Stage固有の`completion_condition`を持つ。
 - `completion_condition`は必須入力とする。
-- Stageが参照するSkill、Role、Ruleの必須・任意条件は未確定とする。
+- Stageが参照するSkill、Role、Ruleは任意とする。
 - 完了条件はAIへContextとして提供する自由記述であり、Coreは条件の意味を解釈しない。
 - CoreはStage、transition、Runの構造と状態を管理する。
 
@@ -158,9 +157,7 @@ Canonical AssetはWorkflow、Skill、Role、Ruleの4種とする。
 - RunごとにRun状態、Context、Snapshot、Journal関連、イベント履歴を分離する。
 - 同じProjectの複数Runを並列処理できる。
 - 通常は同じProject作業領域で実行する。
-- worktreeや別workspaceが必要な場合は、ユーザーまたはRuntimeが明示的に指定する。
-- Coreはworkspaceを自動作成・削除せず、指定されたworkspace情報をRunへ記録する。
-- 実ファイルや成果物の競合管理はRuntime、Git、ユーザーの責務とする。
+- Coreはworkspaceの作成・記録・分離、実ファイル変更、ファイル競合管理を行わない。別workspaceやworktreeの準備はユーザーまたはRuntimeが行う。
 
 ### 6.4 同一Runのtransition競合
 
@@ -177,20 +174,19 @@ Canonical AssetはWorkflow、Skill、Role、Ruleの4種とする。
 
 - `run.start`でCoreがRun IDとRun Context Handleを発行する。
 - Runtimeが以後のMCP操作へRun Contextを自動付与する。
-- Run Context Handleの具体的なMCP接続への結び付け方法、および一つのAI実行コンテキストで複数Runを扱うかは未確定とする。
+- 一つのAI実行コンテキストに関連づくRunは1つとする。Run Context HandleをMCP接続へ結び付ける具体方式は未確定とする。
 - 採用するMCP transportはStreamable HTTPであり、Runの関連づけはMCP protocol sessionに依存させず、アプリケーション側のContextで扱う。
 - AIはRun ID、Snapshot ID、Asset revisionを各操作へ手入力しない。
 - CoreはContext Handleから対象Runを特定する。
-- Context ResolutionはUse Case、現在Stage、Role、Project scopeの紐づけ、Project Common、固定revision基準から明示参照を辿る。
+- Context ResolutionはWorkflow、現在Stage、Role、Project scopeの紐づけ、Project Common、固定revision基準から明示参照を辿る。
 - Skill参照は再帰的に辿る。
 - 同じAsset IDは重複排除する。
 - Skill参照の循環を検出した場合はRun開始またはContext解決を失敗させ、Diagnosticsへ記録する。
-- 必須Asset、紐づけ、Project Common、Use Case revisionが解決できない場合はRunを開始しない。
+- 必須Asset、紐づけ、Project Common、Workflow revisionが解決できない場合はRunを開始しない。
 - 任意のsupporting file等が取得できない場合は、理由付きの未取得情報としてContextへ返す。
 
 ## 8. Journal
 
-- Journalは管理対象Runで得た開発方法・道具の一次観測として扱う。
 - JournalはTaskまたはRunへの関連と本文を必須とし、それ以外の構造化項目は適用可能な場合だけ持つ。
 - Journal Skillが記載テンプレートをAIへ渡す。
 - AIからのJournal本文は、Task、実際に使ったもの、良かった点、困った点、改善の種、根拠・確かさを含む固定見出しのMarkdownとする。
@@ -199,7 +195,8 @@ Canonical AssetはWorkflow、Skill、Role、Ruleの4種とする。
 - 未知の見出しや既知形式として扱えない内容は自由記述欄へ保持する。入力原文も保存する。
 - Coreは内容を意味解釈しない。
 - Journal Reviewは構造化項目と自由記述欄の両方を対象にする。
-- Journal作成時のRun、Use Case、Stage、Role、Snapshot、Asset revision等の関連はCoreが自動で付与する。
+- 直接起動SkillであるJournal Review自体にRunやReview実行履歴を作らず、Proposal等は個別の明示操作で保存する。
+- Run Contextから作成されたJournalのProject、Workflow revision、Stage、Snapshot、Asset revision等の関連はCoreが自動で付与する。
 - AIにRun ID、Snapshot ID、Asset revisionの入力を要求しない。
 - Run終了後のJournal追加は、明示的なPost-run Journal操作として扱う。
 - Journal Reviewの気づき・提案は`pending`、`processed`、`rejected`で管理する。Reviewを実施しただけでは処理済みにせず、合意した変更の適用と対応する気づきの処理済み更新を一連の操作として扱う。
@@ -216,32 +213,23 @@ Canonical AssetはWorkflow、Skill、Role、Ruleの4種とする。
 
 ## 10. Coreが保持する情報とRuntime報告
 
-- Model名はユーザーまたはAIから渡された文字列をそのまま受け渡し・記録する。CoreはModelの存在、利用可能性、provider、metadata、指定値と実使用値の一致を判断しない。
-- Runtime identifier、使用したTool、成果物、実行報告はRuntimeから受け取り、RunとSnapshotへ関連づける。
-- Modelが利用できない等の判断や対応はユーザーとAIが行う。CoreはModelに関する判断・処理を行わない。
+- Model名がCoreへ渡された場合は不透明な文字列として受け渡す。Model用recordやmetadataを作らず、利用可否、provider、指定値と実使用値の照合を行わない。
+- Runtime identifier、使用したTool、実行報告はRuntimeから受け取り、管理対象Runへ関連づける。
+- Modelの選択・利用可否への対応はユーザーとRuntime / AIが行う。
 - Credential、access token、password、secret keyはCoreのAsset・Journal・Snapshotへ保存しない。
 
 ## 11. 未確定事項
 
 次の事項は、本書では未確定として扱う。
 
-- Skill、Journal、Workflow、Stageの具体的な保存schema、schema version、拡張fieldの扱い。
-- WorkflowおよびStageの必須field、StageにおけるSkill / Role / Rule参照の必須条件、Use Case Skill固有の必須field。
-- Run Context Handleの接続方式、および一つのAI実行コンテキストで扱うRun数。
+- Workflow、Stage、Skill、Journalの具体的な保存schema、schema version、拡張fieldの扱い。
+- Run Context HandleをMCP接続へ自動付与する方式。
 - MCPの具体的なtool名、Request / Response schema、Bootstrapの詳細文面。
-- Core管理フォルダーの既定pathと、Global / Project Runtime入口の具体的なOS上の設定path。
+- Runtime標準設定先を検出する具体方式と生成entry名・衝突回避。
 - UIの画面一覧、編集フォーム、revision表示、diff表示の詳細。
 - Journalの見出し文字列と、既知見出し内で構造として扱えない部分の細かな解析規則。
 - Backupのファイル形式と、SQLiteからの復元操作。
 
-## 12. 製品要求書との整合待ち
+## 12. 要求書と実装資料の参照関係
 
-実装方針として次を採用しているため、製品要求書側の表現を後で整合させる必要がある。
-
-- Project Markerを使わず、`aacl init`とCoreのProject registry・正確なpathでProjectを識別する。
-- SQLiteを正本とし、人間向けMarkdown / JSONを要求時に生成する。
-- CapabilityはCoreの処理・保存対象としない。
-- Model名は不透明な文字列として受け渡し、CoreでModel情報の解釈・利用可否判定をしない。
-- Workflowの実行単位をStageとし、独立したTaskエンティティを設けない。
-- Project pathはWindows / Linux表記からLinux形式へ整えて照合する。
-- Journalは固定見出しMarkdownで受け取り、未知内容と原文を保持する。
+製品上の動作は開発要求v16を参照する。技術基盤、保存方式、Runtime接続、内部schema、実装時の検証条件は実装設計書を参照する。本書は両資料で合意した実装判断の短い一覧とする。

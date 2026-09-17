@@ -9,7 +9,7 @@
 
 ### AACL
 
-Agent Asset Control Layerの略称。ユーザーがClaude Code / Codexで使う開発方法、知識、規則、役割をAssetとして管理し、明示的に選択したUse Caseの実行、Context提供、観測、改善を管理するlocal-firstの個人向けMCP Service。
+Agent Asset Control Layerの略称。ユーザーがClaude Code / Codexで使う開発方法、知識、規則、役割をAssetとして管理し、Workflow Runと直接起動Skillの本文提供、Journal、改善を支援する個人向けシステム。
 
 ### Asset
 
@@ -27,7 +27,7 @@ Assetの適用範囲。Global scopeまたは特定ProjectのProject scopeを表�
 
 ### Bootstrap
 
-MCP接続時にAIへ渡すAACLの利用案内。AACLの責務、通常利用との境界、Project確認、Use Case開始、Asset管理、Run、Context、Journalの操作方法を案内する。
+MCP接続時にAIへ渡すAACLの利用案内。AACLの責務、通常利用との境界、Project確認、Workflow Run開始、直接起動Skill取得、Asset管理、Context、Journalの操作方法を案内する。
 
 ## C
 
@@ -41,15 +41,15 @@ filesystem、shell、GitHub、browser、external API等、Runtimeが提供する
 
 ### Context
 
-RunでAIへ渡す実行情報。Use Case Definition、現在Stage、Role、Rule、Skill catalog、成果物要件、completion condition等を含む。モデル名が渡された場合は、その文字列をそのまま含める。
+Workflow RunでAIへ渡す実行情報。Workflow Definition、現在Stageとcompletion_condition、Role、明示参照されたRuleとSkill等を含む。Model名や成果物要件をAssetから自動的に合成しない。直接起動Skillの取得は指定Assetの本文を返す。
 
 ### Context Handle
 
-Runに対応する実行コンテキストを識別する情報。MCP操作を正しいRunへ自動的に関連づけるために使う。Streamable HTTPのprotocol sessionには依存させず、具体的な接続方法と一つのAI実行コンテキストで扱うRun数は未確定である。
+Runに対応する実行コンテキストを識別する情報。MCP操作を正しいRunへ自動的に関連づける。一つのAI実行コンテキストにはRunを一つだけ関連づける。Streamable HTTPのprotocol sessionには依存させず、Handleを接続へ付与する具体方式は未確定である。
 
 ### Context Resolution
 
-Use Case、Stage、Role、Projectの紐づけ、Project Common、revision boundaryから、Runで利用対象となるAssetとContextを決定する処理。名前や本文の意味からAssetを選ばず、明示参照だけを辿る。
+Workflow、Stage、Role、Projectの紐づけ、Project Common、revision boundaryから、Workflow Runで利用対象となるAssetとContextを決定する処理。名前や本文の意味からAssetを選ばず、明示参照だけを辿る。
 
 ## D
 
@@ -65,7 +65,7 @@ AIが完了判断や実行報告に添える根拠。Artifact、Snapshot、Repor
 
 ### Execution Snapshot
 
-Runの実行試行時に提供したContextと、その構成を保持する不変記録。Use Case revision、resolution revision boundary、Project、Role、利用対象Asset、提供情報、参照経路、未取得情報等を含む。モデル名が含まれる場合も、その値は不透明な文字列として保持する。
+Workflow Runの実行試行時に提供したContextと、その構成を保持する不変記録。Workflow revision、resolution revision boundary、Project、Role、利用対象Asset、提供情報、参照経路、未取得情報等を含む。Model情報は構造化して保持しない。
 
 ## G
 
@@ -83,7 +83,7 @@ Runの実行試行時に提供したContextと、その構成を保持する不�
 
 ### Journal
 
-管理対象Runで得た、開発方法や道具の使い方に関する一次観測。実際に使ったTool、Skill、Rule、良かった点、困った点、改善の種、根拠、確かさ等を記録する。
+開発方法や道具の使い方に関する一次観測。本文とTaskまたはRunへの関連づけを持つ。実際に使ったTool、Skill、Rule、良かった点、困った点、改善の種、根拠、確かさ等を記録する。Model情報はCoreの構造化fieldにしない。
 
 ### Journal template
 
@@ -91,17 +91,17 @@ AIがJournalを記述するための固定見出しMarkdown。Task、実際に�
 
 ### Journal Review
 
-ユーザーが明示的に開始するレビュー。新しいJournalと保留中の気づきを横断し、繰り返す摩擦、価値あるパターン、Assetや紐づけの改善候補をまとめる。気づきと提案は`pending`、`processed`、`rejected`で管理する。
+ユーザーが明示的に開始するSkillによるレビュー。Review自体のRunや実行履歴は作らず、新しいJournalと保留中の気づきを横断して改善候補をまとめる。Proposalと気づきの状態は個別のMCP操作で保存し、`pending`、`processed`、`rejected`で管理する。
 
 ## M
 
 ### MCP Interface
 
-Claude Code / CodexとAACL Coreを接続する主要なIntegration Interface。Bootstrap、Asset、Project、Run、Context、Journal、History、Provenance等のdomain operationを提供する。
+Claude Code / CodexとAACL Coreを接続する主要なIntegration Interface。Bootstrap、Asset、Project、Workflow Run、直接起動Skill本文取得、Context、Journal、History、Provenance等のdomain operationを提供する。
 
 ### Model
 
-ユーザーまたはAIが指定・報告するモデル名の文字列。Coreは値をそのまま受け渡し・記録し、モデルの存在、利用可能性、provider、metadata、指定値と実使用値の一致を判断しない。モデルの選択と利用可否はユーザーとRuntime / AI側の責務とする。
+ユーザーまたはAIが指定・報告するモデル名の文字列。Coreへ値が渡された場合はそのまま受け渡し、Model用recordやmetadataを作成しない。モデルの存在、利用可能性、provider、指定値と実使用値の一致は判断せず、モデルの選択と利用可否はユーザーとRuntime / AI側の責務とする。
 
 ## O
 
@@ -125,7 +125,7 @@ Projectで共通して使うRuleの明示参照一覧。Rule本文は独立し�
 
 ### Project root
 
-`aacl init`で登録したProjectのルートディレクトリ。Windows形式またはLinux形式の入力をLinux形式へ変換し、通常のpath表記を整えてから現在位置と完全一致で照合する。別表記のaliasは作らず、親ディレクトリからの自動探索やsymlinkの解決は行わない。
+`aacl init`で登録したProjectのルートディレクトリ。Windows形式またはLinux形式の入力をLinux形式へ変換し、通常のpath表記を整えてからRuntimeが示す開いているProject rootと完全一致で照合する。別表記のaliasは作らず、親ディレクトリからの自動探索やsymlinkの解決は行わない。
 
 ### Provenance
 
@@ -139,11 +139,11 @@ Projectで共通して使うRuleの明示参照一覧。Rule本文は独立し�
 
 ### Run
 
-一回のUse Case実行を識別するCanonical Entity。Use Case revision、Project、紐づけ、Project Common、Context解決基準、状態、Stage、Snapshot、Journal、実行報告を関連づける。
+一回のWorkflow実行を識別するCanonical Entity。Workflow revision、Project、紐づけ、Project Common、Context解決基準、状態、Stage、Snapshot、Journal、実行報告を関連づける。直接起動するSkillにはRunを作成しない。
 
 ### Run Context Handle
 
-Run単位のMCP操作を正しいRunへ自動的に関連づけるContext識別情報。並列RunのContext、Journal、報告を分離する。具体的な接続方法と一つのAI実行コンテキストで扱うRun数は未確定である。
+Run単位のMCP操作を正しいRunへ自動的に関連づけるContext識別情報。並列RunのContext、Journal、報告を分離する。一つのAI実行コンテキストには一つのRunを関連づける。接続方法は未確定である。
 
 ### Runtime
 
@@ -153,7 +153,7 @@ Claude Code / Codexの実行環境。モデル起動、filesystem、shell、Git�
 
 ### Skill
 
-再利用する手順、専門知識、範囲の定まった作業を表すCanonical Asset。必須情報はname、description、body。`useCase`設定で直接起動対象にするかを切り替える。Use Case固有の追加必須情報とその他の任意項目は未確定である。
+再利用する手順、専門知識、範囲の定まった作業を表すCanonical Asset。必須情報はname、description、body。`useCase`設定で直接起動対象にするかを切り替える。
 
 ### Snapshot
 
@@ -165,13 +165,13 @@ Coreが受け付けるデータの構造と、保存時に確認する項目の�
 
 ### Stage
 
-Workflow内の工程であり、Workflowの実行単位。Stage固有の必須`completion_condition`を持ち、Runの現在位置として管理される。Skill、Role、Rule参照の必須条件は未確定であり、WorkflowがStage一覧とtransitionを定義する。
+Workflow内の工程であり、Workflowの実行単位。Stage固有の必須`completion_condition`を持ち、Runの現在位置として管理される。Skill、Role、Rule参照は任意であり、WorkflowがStage一覧と許可するtransitionを定義する。
 
 ## T
 
 ### Task
 
-WorkflowのStageを指す作業上の呼称。保存・schema・Run管理ではStageとして扱い、独立したTaskエンティティは設けない。
+Workflow上のTaskはStageに対応し、独立したTaskエンティティは設けない。JournalテンプレートのTask欄は自由記述の作業名とし、独立Task recordではない。
 
 ### Task Type
 
@@ -185,7 +185,7 @@ Workflowの現在Stageから別のStageまたは終端状態へ進む定義。Co
 
 ### Use Case
 
-ユーザーが明示的に選択してRunを開始する入口。Workflowまたは`useCase=true`のSkillを指す。
+ユーザーが明示的に選択する起動対象。WorkflowはRunを開始し、`useCase=true`のSkillはRunを伴わずCanonical本文を直接取得する。
 
 ### useCase
 
@@ -199,7 +199,7 @@ Skillが直接起動可能なUse Caseであることを示す設定値。trueへ
 
 ### Workspace
 
-Runが実際の作業で使うディレクトリまたはGit worktree。通常はProjectの作業領域を使い、分離が必要な場合だけユーザーまたはRuntimeが明示する。Coreはworkspaceの情報を記録するが、作成・削除は行わない。
+Runが実際の作業で使うディレクトリまたはGit worktree。選択・作成・分離はユーザーまたはRuntimeが行い、CoreはWorkspaceを管理・記録しない。
 
 ## その他
 
@@ -221,7 +221,7 @@ Asset、紐づけ、Project Common等の状態を識別する単調増加整数�
 
 ### revision boundary
 
-Run開始時に固定する、Use Case、Asset、紐づけ、Project Commonの解決基準。Run中のContext解決は同じ基準を使う。
+Run開始時に固定する、Workflow、Asset、紐づけ、Project Commonの解決基準。Run中のContext解決は同じ基準を使う。
 
 ### 紐づけ
 
