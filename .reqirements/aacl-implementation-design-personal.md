@@ -177,7 +177,7 @@ Claude Code / Codex (Windows または同一WSL内のLinux)
 - MCP tool名、各payload、Bootstrap本文、HTTP endpointの構成
 - Run Context HandleをRun単位MCP operationのtyped inputへ含めるpayload field名と、Runtime別の起動方法
 - Runtime別標準設定先の検出方法、設定先追加画面、生成ファイル名と衝突回避
-- UI画面構成、編集フォーム、diff表示、エラー表示
+- UI画面構成、部品配置、紐づけ・useCaseの編集操作、diff表示、エラー表示の具体形
 - Journal見出しの確定文字列、Task参照のpayload表現、気づきの抽出単位とMarkdown構文処理の詳細
 - SnapshotおよびContext delivery recordの物理schema、提供内容の保持形式と保存先
 - Backup形式、オンライン取得時の整合性確保、復元フロー
