@@ -1,6 +1,6 @@
 # Agent Asset Control Layer — 用語定義
 
-作成日: 2026-09-16  
+更新日: 2026-09-17
 状態: Draft
 
 本書は、Agent Asset Control Layerの製品要求書と実装決定書で使用する用語を統一するための定義書である。
@@ -13,7 +13,7 @@ Agent Asset Control Layerの略称。ユーザーがClaude Code / Codexで使う
 
 ### Asset
 
-AACLが管理する再利用可能なCanonical Asset。Workflow、Skill、Role、Ruleの4種がある。
+AACLが管理する再利用可能なCanonical Asset。Workflow、Skill、Role、Ruleの4種がある。内容を実質的に取り下げる場合もAsset IDと紐づけを残し、本文に`処置なし`等の空内容を示す記述を保存する。
 
 ### Asset ID
 
@@ -37,15 +37,15 @@ AACLが正本として管理するWorkflow、Skill、Role、Rule。Runtime固有
 
 ### Capability
 
-Use Caseの実行に必要な外部能力を表す情報。filesystem、shell、GitHub、browser、external API等が該当する。能力の提供・利用可能性の判断はRuntime / AI側が担い、Coreの管理対象には含めない。
+filesystem、shell、GitHub、browser、external API等、Runtimeが提供する実行能力。提供・利用可能性の判断はRuntime / AI側が担い、Coreの処理・保存対象には含めない。
 
 ### Context
 
-RunでAIへ渡す実行情報。Use Case Definition、現在Stage、Role、Rule、Skill catalog、Model、成果物要件、completion condition等を含む。
+RunでAIへ渡す実行情報。Use Case Definition、現在Stage、Role、Rule、Skill catalog、成果物要件、completion condition等を含む。モデル名が渡された場合は、その文字列をそのまま含める。
 
 ### Context Handle
 
-Runに対応する実行コンテキストをRuntimeが保持する識別情報。MCP操作を正しいRunへ関連づけるために使う。具体的なMCP sessionとの結合方法は未確定である。
+Runに対応する実行コンテキストを識別する情報。MCP操作を正しいRunへ自動的に関連づけるために使う。Streamable HTTPのprotocol sessionには依存させず、具体的な接続方法と一つのAI実行コンテキストで扱うRun数は未確定である。
 
 ### Context Resolution
 
@@ -65,7 +65,7 @@ AIが完了判断や実行報告に添える根拠。Artifact、Snapshot、Repor
 
 ### Execution Snapshot
 
-Runの実行試行時に提供したContextと、その構成を保持する不変記録。Use Case revision、resolution revision boundary、Project、Role、Model、利用対象Asset、提供情報、参照経路、未取得情報等を含む。
+Runの実行試行時に提供したContextと、その構成を保持する不変記録。Use Case revision、resolution revision boundary、Project、Role、利用対象Asset、提供情報、参照経路、未取得情報等を含む。モデル名が含まれる場合も、その値は不透明な文字列として保持する。
 
 ## G
 
@@ -85,9 +85,13 @@ Runの実行試行時に提供したContextと、その構成を保持する不�
 
 管理対象Runで得た、開発方法や道具の使い方に関する一次観測。実際に使ったTool、Skill、Rule、良かった点、困った点、改善の種、根拠、確かさ等を記録する。
 
+### Journal template
+
+AIがJournalを記述するための固定見出しMarkdown。Task、実際に使ったもの、良かった点、困った点、改善の種、根拠・確かさ等を含む。Coreは既知見出しから構造化し、重複見出しは出現順に連結する。未知見出しや構造化できない内容と入力原文は保持する。
+
 ### Journal Review
 
-ユーザーが明示的に開始するレビュー。新しいJournalと保留中の気づきを横断し、繰り返す摩擦、価値あるパターン、Assetや紐づけの改善候補をまとめる。
+ユーザーが明示的に開始するレビュー。新しいJournalと保留中の気づきを横断し、繰り返す摩擦、価値あるパターン、Assetや紐づけの改善候補をまとめる。気づきと提案は`pending`、`processed`、`rejected`で管理する。
 
 ## M
 
@@ -97,7 +101,7 @@ Claude Code / CodexとAACL Coreを接続する主要なIntegration Interface。B
 
 ### Model
 
-Roleや実行に関連づけるモデル情報。Coreは指定Model metadataと、Runtimeから報告された実Modelを分けて保持する。実際のモデル起動はRuntimeが担う。
+ユーザーまたはAIが指定・報告するモデル名の文字列。Coreは値をそのまま受け渡し・記録し、モデルの存在、利用可能性、provider、metadata、指定値と実使用値の一致を判断しない。モデルの選択と利用可否はユーザーとRuntime / AI側の責務とする。
 
 ## O
 
@@ -121,7 +125,7 @@ Projectで共通して使うRuleの明示参照一覧。Rule本文は独立し�
 
 ### Project root
 
-`aacl init`で登録したProjectのルートディレクトリ。Project解決は現在位置との完全一致で行い、親ディレクトリからの自動探索は行わない。
+`aacl init`で登録したProjectのルートディレクトリ。Windows形式またはLinux形式の入力をLinux形式へ変換し、通常のpath表記を整えてから現在位置と完全一致で照合する。別表記のaliasは作らず、親ディレクトリからの自動探索やsymlinkの解決は行わない。
 
 ### Provenance
 
@@ -131,7 +135,7 @@ Projectで共通して使うRuleの明示参照一覧。Rule本文は独立し�
 
 ### Role
 
-実行主体が何者として振る舞い、何を担うかを定義するCanonical Asset。責務、判断観点、成果責任を保持し、Skill、Rule、Modelと紐づく。
+実行主体が何者として振る舞い、何を担うかを定義するCanonical Asset。責務、判断観点、成果責任を保持し、SkillとRuleを参照できる。モデル名が明示された場合は不透明な文字列として受け渡す。
 
 ### Run
 
@@ -139,7 +143,7 @@ Projectで共通して使うRuleの明示参照一覧。Rule本文は独立し�
 
 ### Run Context Handle
 
-RuntimeがRun単位のMCP操作へ自動付与するContext識別情報。並列RunのContext、Journal、報告を分離するために使う。
+Run単位のMCP操作を正しいRunへ自動的に関連づけるContext識別情報。並列RunのContext、Journal、報告を分離する。具体的な接続方法と一つのAI実行コンテキストで扱うRun数は未確定である。
 
 ### Runtime
 
@@ -149,7 +153,7 @@ Claude Code / Codexの実行環境。モデル起動、filesystem、shell、Git�
 
 ### Skill
 
-再利用する手順、専門知識、範囲の定まった作業を表すCanonical Asset。本文、supporting files、Task Type、expected output、completion condition、useCase等を保持する。
+再利用する手順、専門知識、範囲の定まった作業を表すCanonical Asset。必須情報はname、description、body。`useCase`設定で直接起動対象にするかを切り替える。Use Case固有の追加必須情報とその他の任意項目は未確定である。
 
 ### Snapshot
 
@@ -161,7 +165,7 @@ Coreが受け付けるデータの構造と、保存時に確認する項目の�
 
 ### Stage
 
-Workflow内の工程であり、Workflowの実行単位。実行に必要な定義情報、Stage固有の`completion_condition`、利用可能なtransitionを持ち、Runの現在位置として管理される。
+Workflow内の工程であり、Workflowの実行単位。Stage固有の必須`completion_condition`を持ち、Runの現在位置として管理される。Skill、Role、Rule参照の必須条件は未確定であり、WorkflowがStage一覧とtransitionを定義する。
 
 ## T
 
@@ -191,7 +195,7 @@ Skillが直接起動可能なUse Caseであることを示す設定値。trueへ
 
 ### Workflow
 
-複数のStageとtransitionからなる再利用可能な開発方法を定義するCanonical Asset。各Stageに必須の`completion_condition`を持つ。
+複数のStageとtransitionからなる再利用可能な開発方法を定義するCanonical Asset。各Stageは必須の`completion_condition`を持つ。
 
 ### Workspace
 
@@ -205,7 +209,7 @@ Runが実際の作業で使うディレクトリまたはGit worktree。通常�
 
 ### Core
 
-AACLの状態管理・検証・解決・保存を担う中心Service。SQLite、Project registry、Asset、Run、Context、Snapshot、Journal、History、Provenance、Diagnosticsを管理する。AIや外部Toolを実行しない。
+AACLの状態管理・検証・解決・保存を担う中心Service。アプリケーションとデータを同じAACL管理フォルダーに置き、その中のSQLite、Project registry、Asset、Run、Context、Snapshot、Journal、History、Provenance、Diagnosticsを管理する。AIや外部Toolを実行しない。
 
 ### completion_condition
 
@@ -221,4 +225,4 @@ Run開始時に固定する、Use Case、Asset、紐づけ、Project Commonの�
 
 ### 紐づけ
 
-Workflow / StageとRole / Skill / Rule、RoleとModel / Skill / Rule、SkillとSkill等の明示的な参照関係。Coreは本文の意味から参照を追加・削除しない。
+Workflow / StageとRole / Skill / Rule、RoleとSkill / Rule、SkillとSkill等の明示的な参照関係。Coreは本文の意味から参照を追加・削除しない。モデル名はAsset間の紐づけではなく、不透明な文字列として扱う。
