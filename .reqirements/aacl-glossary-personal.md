@@ -45,7 +45,7 @@ Workflow RunでAIへ渡す実行情報。Workflow Definition、現在Stageとcom
 
 ### Context Handle
 
-Runに対応する実行コンテキストを識別する情報。MCP操作を正しいRunへ自動的に関連づける。一つのAI実行コンテキストにはRunを一つだけ関連づける。Streamable HTTPのprotocol sessionには依存させず、Handleを接続へ付与する具体方式は未確定である。
+CoreがRunごとに発行し、`run.start`の応答で返す識別子。以後のRun単位MCP操作に入力として含め、Coreが対象Runを特定する。一つのHandleは一つのRunに対応し、並行するAI実行コンテキストはそれぞれのRunのHandleを使う。
 
 ### Context Resolution
 
@@ -143,7 +143,7 @@ Projectで共通して使うRuleの明示参照一覧。Rule本文は独立し�
 
 ### Run Context Handle
 
-Run単位のMCP操作を正しいRunへ自動的に関連づけるContext識別情報。並列RunのContext、Journal、報告を分離する。一つのAI実行コンテキストには一つのRunを関連づける。接続方法は未確定である。
+Run単位のMCP操作で対象Runを識別するContext Handle。`run.start`の応答で受け取り、同じAI実行コンテキストの後続操作へ渡す。並行RunのContext、Journal、報告はHandleに対応するRunごとに分離する。
 
 ### Runtime
 

@@ -1,6 +1,6 @@
 # Agent Asset Control Layer — 実装設計書（個人用）
 
-更新日: 2026-09-17
+更新日: 2026-09-18
 状態: Draft
 
 本書は、[AACL 開発要求 v16](aacl-requirements-personal.md)を実装するための技術要件と内部設計をまとめる。利用者に見える機能・責務・動作の正本は開発要求書とし、本書ではそれらを再定義しない。
@@ -96,8 +96,8 @@ Claude Code / Codex (Windows または同一WSL内のLinux)
 ### 6.1 Run開始とContext
 
 - Workflow Run開始用とSkill本文取得用に、別々のtyped MCP operationを実装する。Skill取得operationはRun Contextを生成しない。
-- `run.start`の応答にRun IDとRun Context Handleを含める。IDを各AI要求に再入力させないよう、Runtime接続層で以後の要求にHandleを付与する。
-- 一つのRuntime実行Contextから一つのRun Handleだけを利用できるようbindingを分離する。
+- `run.start`の応答にRun IDとRun Context Handleを含め、CoreはRun IDとHandleの対応を保存する。
+- Run単位のMCP operationはContext Handleを必須入力として受け取り、その値から対象Runを解決する。AIは`run.start`から受け取ったHandleを同じAI実行Contextの後続operationへ渡す。
 - Run開始transactionでWorkflowと参照revisionの境界を固定し、変更不能なExecution Snapshotを作成する。Snapshotにはrun id、Workflowとrevision、resolution revision boundary、Project、使用した紐づけとrevision、Project CommonのrevisionとRule参照、該当するStage、Role、Runtime、利用対象Assetとrevision、提供したRuleとSkill catalog、timestampを保持する。
 - Resolution recordには、利用対象になった各Assetの参照経路と解決理由を保持する。取得できなかったContextと理由も記録し、初期Contextに渡した情報と区別する。
 - Initial ContextはWorkflow Definition、現在Stageとcompletion_condition、該当するRoleとresponsibilities、明示参照されたRule、利用対象Skill catalogで構成する。Model名をContextへ合成しない。
@@ -109,8 +109,8 @@ Claude Code / Codex (Windows または同一WSL内のLinux)
 ### 6.2 MCPのRun関連づけ
 
 - 採用transportはStreamable HTTPとする。MCP 2026-07-28仕様はprotocol sessionを使わないため、Run関連づけはアプリケーション側のContextとして実装する。[MCP Transport仕様](https://modelcontextprotocol.io/specification/2026-07-28/basic/transports)
-- Run Context HandleをRuntime / 接続層が各操作へ自動付与し、AIの手入力を不要にする。
-- 具体的なRuntime接続方式・Context注入方式は内部設計事項とし、Claude Code / Codexの双方でRunが混線しないことを結合試験で確認する。
+- Run単位の各MCP operationはRun Context Handleをtyped inputとして受け取り、CoreはHandleからRun IDを解決する。
+- AIは`run.start`応答のHandleを同じ実行Contextからの後続MCP operationへ渡す。Claude CodeとCodexのそれぞれで、同一Runtime内の複数チャットから並行操作しても各Handleが別のRunへ解決されることを結合試験で確認する。
 
 ### 6.3 実行状態と遷移
 
@@ -128,9 +128,9 @@ Claude Code / Codex (Windows または同一WSL内のLinux)
 
 ### 7.1 Journal入力
 
-- Journal write APIはMarkdown bodyを受け、Run Context Handleまたは明示されたpost-run targetからRun associationを決定する。Run Contextを伴わないJournalにはTask associationを必須とする。AIにCore IDの手入力を要求しない。
-- Journal recordにはRunまたはTaskのassociationを保持する。Run Contextから作成する場合はCoreがProject、Workflow revision、Stage、Snapshot、関連Assetと紐づけのrevisionも付与する。
-- AIが報告した実利用はJournal内の該当気づきとして記録し、Run Contextから把握できるSnapshotと関連Asset revisionへ結び付ける。Resolutionの対象または提供記録だけから実利用を判定しない。
+- Journal write APIはMarkdown bodyを受け、Run Context Handleまたは明示されたpost-run Run IDからRun associationを決定する。Run Context HandleはMCP入力として受け取り、Journal bodyからCore IDを解析しない。Handleもpost-run Run IDも伴わないJournalにはTask associationを必須とする。
+- Journal recordにはRunまたはTaskのassociationを保持する。Context Handleを伴う場合はCoreが対象Runを特定し、Project、Workflow revision、Stage、Snapshot、関連Assetと紐づけのrevisionも付与する。
+- AIが報告した実利用はJournal内の該当気づきとして記録し、Context Handleから解決したRunに対応するSnapshotと関連Asset revisionへ結び付ける。Resolutionの対象または提供記録だけから実利用を判定しない。
 - Parserは固定見出しを文字列として照合する。見出し対応、重複見出しの順序連結、未知見出しの自由記述格納、原文保存をunit testで固定する。
 - Parseに失敗した断片を破棄・推測分類しない。raw bodyと構造化部分を同一Journal revisionへ保存する。
 - Review対象の気づきはJournal全体と別の識別単位で保持し、それぞれを`pending`、`processed`、`rejected`の状態で管理する。同じJournal内の各気づきは独立して状態更新できる。
@@ -147,6 +147,7 @@ Claude Code / Codex (Windows または同一WSL内のLinux)
 ## 8. UI、CLI、MCP
 
 - UI、CLI、MCPはCore Serviceのapplication APIだけを利用する。UIからの変更も同じvalidation・transaction pathへ送る。
+- UIは開発要求§33の視覚・操作要件を満たし、Workflow / Stage視点とAsset視点の紐づき確認・編集、SkillのuseCase切替、許可遷移の図示を実装する。
 - MCP adapterはpurpose-specific typed operationを登録し、generic action dispatchやSQL passthroughを実装しない。
 - Request / Responseの型と内容schemaは内部契約として管理し、Skill、Journal、Workflow、Stageのpayloadを検証する。
 - CLI bootstrapはService起動、Project登録、health確認、診断、export / Backup commandを提供する。
@@ -163,6 +164,7 @@ Claude Code / Codex (Windows または同一WSL内のLinux)
 
 - `C03`、`C08`、`C17`、`C20`、`C24`、`C35`：Workflowを明示選択してRunを開始し、固定revisionでContextを提供・記録し、Journal Reviewの変更を次のRunで確認する。並行RunのContextと記録は混線しない。
 - `C08`、`C10`、`C16`：Workflow入口はRunを開始し、直接起動Skill入口は指定Assetの本文だけを取得する。後者にRun、Snapshot、実行記録、Journalを作らない。
+- `C33`：UIでStage / Assetの双方から紐づきを確認・変更し、SkillのuseCaseを切り替える。Workflow図に次工程、差し戻し、retry等の自己ループを含む許可遷移が表示され、リキッドグラス風の視覚表現を満たすことを受入確認する。
 - `C21`–`C24`、`C31`：解決理由、提供した情報、取得失敗理由、実際に提供した量を記録し、対象になっただけの情報や未取得本文を提供量へ数えない。
 - `C25`–`C27`：Task関連JournalをReviewでき、同一Journal内の保留分を次回へ残しながら選択した気づきと合意変更だけを処理済みにする。提案判断、Change Set適用、処理状態の整合を確認する。
 - `C01`–`C35`：§12の全確認条件を、対応する実装/API領域の試験で満たす。MCP toolの具体名はAPI契約確定時に確認IDへ対応づける。
@@ -173,7 +175,7 @@ Claude Code / Codex (Windows または同一WSL内のLinux)
 
 - SQLiteテーブル、内部schema表現、migration方式、index、operation IDの形式
 - MCP tool名、各payload、Bootstrap本文、HTTP endpointの構成
-- Streamable HTTP接続にRun Contextを自動結び付ける具体策と、両Runtimeでの起動方法
+- Run Context HandleをRun単位MCP operationのtyped inputへ含めるpayload field名と、Runtime別の起動方法
 - Runtime別標準設定先の検出方法、設定先追加画面、生成ファイル名と衝突回避
 - UI画面構成、編集フォーム、diff表示、エラー表示
 - Journal見出しの確定文字列、Task参照のpayload表現、気づきの抽出単位とMarkdown構文処理の詳細
@@ -203,7 +205,7 @@ Claude Code / Codex (Windows または同一WSL内のLinux)
 | C14 | §14 自然言語によるAsset管理 | MCP Asset / Binding / Project Common API、UI編集API、Provenance | 検索・取得・作成・更新・解除の変更が明示操作で保存され、依頼と変更理由へ関連づく。 |
 | C15 | §15 既存情報と通常利用からの資産化 | Asset write、Provenance API | 明示依頼で資産化した元資料をProvenanceから確認でき、通常利用をRunやJournalへ遡及変換しない。 |
 | C16 | §16 Bootstrapと実行の入口 | Bootstrap API、Runtime adapter、entry writer | Bootstrap再取得で同じ案内を返し、入口はAsset IDを参照する。追加・解除・名称変更時に対応を更新し、管理解除した既存ファイルを残す。 |
-| C17 | §17 Runの開始と記録 | `run.start`、Context Handle binding | 不正なWorkflow・参照では開始せず、成功時はRun ID、Handle、revision境界、初期状態を作成する。並行Contextが分離される。 |
+| C17 | §17 Runの開始と記録 | `run.start`、Context Handle返却・Run単位operation入力 | 不正なWorkflow・参照では開始せず、成功時はRun ID、Handle、revision境界、初期状態を作成する。並行Contextが別Handleで分離される。 |
 | C18 | §18 Runの状態とWorkflowの進行 | Run read、transition、cancel、fail API | activeから許可された終端状態へ遷移し、再送をduplicate、進行後の別要求をstaleとして状態を壊さず記録する。 |
 | C19 | §19 完了条件と終了 | completion report、transition API | completion_conditionを必須保存し、Coreは意味の正しさを判定せず、終端への許可遷移でのみcompletedにする。 |
 | C20 | §20 revisionの一貫性 | revision resolver、Snapshot API | Run中の更新後も全Resolutionと取得が固定境界を使い、既存Snapshotは変わらず、次Runは新revisionを使う。 |
@@ -219,6 +221,6 @@ Claude Code / Codex (Windows または同一WSL内のLinux)
 | C30 | §30 Diagnostics | Diagnostics API、evidence link | 欠落参照、取得不能revision、不整合、反復遷移、Context量を対象と根拠付きで提示し、意味的修正を自動適用しない。 |
 | C31 | §31 Context Costと改善の比較軸 | Delivery record aggregation、comparison API | 実際に渡した情報だけをWorkflow / Stage / Role等で比較し、未取得本文と直接Skill実行を統計へ含めない。Modelを比較軸にしない。 |
 | C32 | §32 MCP Interface | Typed domain operations、idempotent Write、Run-scoped Read | 要求書のdomain operation群を提供し、ReadはCanonical stateを変えず、Run向け提供記録と活動時刻のみを更新する。Write再送は冪等となる。 |
-| C33 | §33 保存、CLI、閲覧UI | Core service、SQLite、CLI、UI、Export / Backup | WSL上のCoreへWindows / Linux clientから接続できる。loopback境界、削除範囲、credential除外、明示的なExport / Backupを確認する。 |
+| C33 | §33 保存、CLI、閲覧UI | Core service、SQLite、CLI、UI、Export / Backup | WSL上のCoreへWindows / Linux clientから接続できる。loopback境界、削除範囲、credential除外、明示的なExport / Backupを確認する。UIではStage / Assetの双方から紐づきを確認・変更でき、useCase切替と許可遷移の図示を備え、リキッドグラス風の視覚表現を満たす。 |
 | C34 | §34 ユーザーが育てるUse Case | Workflow / Skill CRUD、Runtime entry | ユーザー定義のWorkflowと直接Skillを作成・変更して起動できる。例示された工程やAssetを組み込み必須データにしない。 |
 | C35 | §35 改善ループ | Run、Snapshot、Journal、Review、Proposal、Change Set、次Run | Runの実際の提供記録とJournalをReviewへ渡し、ユーザー判断に沿う変更を記録した後、次RunのContextへ反映する。 |

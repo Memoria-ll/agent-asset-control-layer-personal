@@ -1,7 +1,7 @@
 # Agent Asset Control Layer — 開発要求 v16 Draft
 
 作成日: 2026-09-15
-更新日: 2026-09-17
+更新日: 2026-09-18
 
 本書は、Agent Asset Control Layer（AACL）の完成形における製品の責務、管理対象、実行境界、観測と改善の仕組みを定義する。
 
@@ -326,7 +326,7 @@ Bootstrapは、MCP接続時にAIへAACLの存在と利用方法を知らせる�
 - Projectの確認方法
 - Workflow Runの開始方法と直接起動Skill本文の取得方法
 - Asset・紐づけの検索・編集・資産化方法
-- Run StateとContextの取得方法
+- Run StateとContextの取得方法、およびrun.startが返すContext Handleを後続のRun単位操作へ渡す方法
 - JournalとJournal Reviewの操作方法
 
 Bootstrapは繰り返し取得しても同じ案内として扱う。通常会話へ全Workflow・Skill・Ruleの本文を常時注入する用途にはしない。
@@ -357,13 +357,14 @@ Coreは次を検証し、Run IDと初期状態を作成した時点で管理対�
 
 接続、validation、revision整合性等によりRunを作成できなかった場合は、開始失敗として扱う。
 
-1つのAI実行コンテキストに関連づくRunは1つとする。並列実行は別のAI実行コンテキストに関連づくRunとして扱い、Run同士の状態・Context・Snapshot・Journal関連を分離する。Run IDとContext HandleはCoreが発行し、接続層が以後のMCP操作へ自動的に関連づける。AIにIDの手入力を要求しない。
+1つのAI実行コンテキストに関連づくRunは1つとする。並列実行は別のAI実行コンテキストに関連づくRunとして扱い、Run同士の状態・Context・Snapshot・Journal関連を分離する。CoreはRun IDとContext Handleを発行し、`run.start`の応答で返す。以後のRun単位MCP操作はContext Handleを必須入力として受け取り、その値から対象Runを特定する。AIは`run.start`から受け取ったHandleを同じAI実行コンテキストの後続操作へ渡し、ユーザーにHandleの入力を求めない。
 
 CoreはRunごとにworkspaceを作成・分離せず、成果物やファイル変更の競合を管理しない。別workspaceやworktreeが必要な場合はユーザーまたはRuntimeが明示的に用意する。
 
 Runは次を保持する。
 
 - run id
+- context handle
 - Workflow ID / revision
 - project
 - 使用する紐づけとそのrevision
@@ -517,11 +518,11 @@ Journalには現行の情報を保持する。
 - 根拠となる実行結果・成果物・発言等
 - 観測や解釈の確かさ
 
-Run Contextから作成されたJournalには、Coreが把握するProject、Run、Workflow revision、Stage、Snapshot、関連Assetと紐づけのrevisionを自動で関連づける。AIにCore IDやModel情報の入力を要求しない。Run Contextを伴わないJournalは、Taskへの関連づけを使う。
+Run Context Handleを伴うJournal作成操作では、CoreがHandleから対象Runを特定し、Project、Workflow revision、Stage、Snapshot、関連Assetと紐づけのrevisionを自動で関連づける。Journal本文にCore IDやModel情報を記述させず、Run Context HandleはMCP操作の入力として渡す。Run Context Handleもpost-run targetも指定しないJournalはTaskへ関連づける。
 
-Journal Skillは固定見出しMarkdownの記載テンプレートをAIへ渡す。AIはJournal本文を送信し、構造化JSONやCore IDを組み立てない。Coreは既知見出しを機械的に構造化し、重複した既知見出しは出現順に連結する。未知見出しや構造化できない内容は自由記述へ保持し、入力原文も保存する。意味の推測による項目割り当ては行わない。
+Journal Skillは固定見出しMarkdownの記載テンプレートをAIへ渡す。AIはJournal本文をMarkdownで送信し、Journal内容を構造化JSONやCore IDへ変換しない。Run Context HandleはJournal本文と分離したMCP操作入力として渡す。Coreは既知見出しを機械的に構造化し、重複した既知見出しは出現順に連結する。未知見出しや構造化できない内容は自由記述へ保持し、入力原文も保存する。意味の推測による項目割り当ては行わない。
 
-記録の中心は、どう進め、道具や指示がどう働いたかとする。気づきのない実行に成功報告を求めず、Journalへの記載がないことだけを未使用・不要の根拠として扱わない。Run終了後のJournal追加では、ユーザーまたはAIが対象Runを明示的に指定する。
+記録の中心は、どう進め、道具や指示がどう働いたかとする。気づきのない実行に成功報告を求めず、Journalへの記載がないことだけを未使用・不要の根拠として扱わない。Run終了後のJournal追加では、MCP入力で対象Run IDを明示する。
 
 ---
 
@@ -653,7 +654,7 @@ MCPを通じて次のdomain operationを提供する。
 
 Read操作はAsset、紐づけ、Project Common、Stage、Runの進行状態を変更しない。Workflow RunにContextやSkillを渡したReadは、提供記録を追記し、Runの非活動timeoutを更新する。これらの運用記録はCanonical AssetやWorkflow状態のWriteとは分けて扱う。
 
-Asset Writeでは古いrevisionを理由に更新を拒否しない。現在状態から新しいrevisionを作成し、同じoperation IDによる再送は冪等に扱う。Run transitionは現在状態と許可された遷移を検証し、同じ操作の再送をduplicate、進行後の別要求をstaleとして扱う。
+Asset Writeでは古いrevisionを理由に更新を拒否しない。現在状態から新しいrevisionを作成し、同じoperation IDによる再送は冪等に扱う。Run transitionは現在状態と許可された遷移を検証し、同じ操作の再送をduplicate、進行後の別要求をstaleとして扱う。Run単位のMCP操作はContext Handleを入力として受け取り、CoreはそのHandleに対応するRunを特定する。
 
 ---
 
@@ -674,6 +675,12 @@ CLIはCoreの起動、Project初期導入、health・接続確認、保守、診
 Coreの起動にはaacl serveを利用できる。MCPまたはCLIからCoreを利用するとき、Serviceが未起動なら起動する。AssetとJournalのexportはMarkdownとYAML front matter、Run・Snapshot・History等の機械記録はJSONを基本形式とする。ExportとBackupはUIまたはCLIからユーザーが明示し、出力先はユーザーが指定する。自動Backupは要求しない。
 
 UIはAsset、Global / Projectの紐づけ、Project Common、Workflow Run、Snapshot、Journal、Proposal、Provenance、Diagnostics、Historyを閲覧・編集する。変更はCoreへ送信する。Runを伴わないSkill利用自体は管理画面の実行記録として表示しない。
+
+UIの視覚表現はリキッドグラス風とする。画面構成や個別の操作部品などの詳細は実装に委ね、次の操作性を備える。
+
+- Workflow / StageごとにRole、Skill、Ruleの紐づきを一覧でき、各Assetからも関連するWorkflow / Stageを確認できる。Stageへの直接参照と担当Role経由の参照を区別して示す。
+- UIから紐づけを追加・解除・付け替えでき、SkillのuseCase設定を有効・無効に簡単に切り替えられる。現在の設定状態を見分けられる。
+- WorkflowのStage間の許可された遷移を図で表示する。次工程への遷移、差し戻し、retry等の自己ループを含む遷移元・遷移先・種別が分かる。
 
 Runtime差は、Runtime identifierとRuntime固有Bootstrapとして扱う。ModelとCapabilityの存在・利用可否・metadataはCoreが管理する情報ではない。
 
