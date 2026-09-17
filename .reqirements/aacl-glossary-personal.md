@@ -1,9 +1,9 @@
 # Agent Asset Control Layer — 用語定義
 
-更新日: 2026-09-17
+更新日: 2026-09-18
 状態: Draft
 
-本書は、Agent Asset Control Layerの製品要求書と実装決定書で使用する用語を統一するための定義書である。
+本書は、Agent Asset Control Layerの開発要求書と実装設計書で使用する用語を統一するための定義書である。
 
 ## A
 
