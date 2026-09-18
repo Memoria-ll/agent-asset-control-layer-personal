@@ -64,7 +64,7 @@ MCP endpointはStreamable HTTP、protocol revisionは`2026-07-28`です。Runの
 
 ServiceへのHTTP接続だけでは停止中のプロセスを起動できないため、Runtime入口はMCP操作の前に`aacl ensure`を実行します。Windows側の入口は`wsl.exe`経由で実行します。Windowsからの利用では、同じWSLのServiceへlocalhostで到達でき、WSL内のPATHから`aacl`を呼べる必要があります。
 
-Projectで`aacl init`を実行すると、Globalの紐づけをProject用にコピーし、`.claude/commands/`と`.codex/skills/`へ入口を生成します。Global設定先はUIで標準候補を確認して登録できます。生成入口にはAsset IDと取得手順を記載し、Canonical本文はSQLiteから取得します。生成後に利用者が編集した入口は自動上書きせず、診断へ記録します。
+Projectで`aacl init`を実行すると、Globalの紐づけをProject用にコピーし、Project scopeのAsset用Runtime設定先を登録します。Project内にはProject専用の入口だけを配置し、Global入口はGlobal設定先に置きます。Global設定先はUIで標準候補を確認して登録できます。生成入口にはAsset IDと取得手順を記載し、Canonical本文はSQLiteから取得します。生成後に利用者が編集した入口は自動上書きせず、診断へ記録します。
 
 Asset、紐づけ、Project Commonの書き込みでは、新しい`operationId`を使用してください。同じ操作の再送時だけ、同じIDと同じ入力を再利用します。AI経由の資産変更には`provenance.origin: "ai"`と`userRequest`・`reason`が必要です。用途別のtool一覧と入力schemaはMCPの`tools/list`から取得できます。
 

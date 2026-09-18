@@ -94,12 +94,26 @@ test('C05 C06 C07: exact Project identity and independent copied bindings / comm
   assert.equal(normalizeRoot('C:\\work\\x\\..\\app\\'), '/mnt/c/work/app');
   assert.equal(normalizeRoot('\\\\wsl.localhost\\Ubuntu\\home\\me\\app'), '/home/me/app');
   assert.throws(() => normalizeRoot('relative/path'));
+  const globalRoot = mkdtempSync(join(tmpdir(), 'aacl-global-runtime-'));
+  await f.call('runtime.register', { runtime: 'claude', platform: 'wsl', scope: 'global', path: join(globalRoot, '.claude') });
+  await f.call('runtime.register', { runtime: 'codex', platform: 'wsl', scope: 'global', path: join(globalRoot, '.codex') });
   const root = mkdtempSync(join(tmpdir(), 'aacl-project-'));
   const { project } = await f.call<{ project: Project }>('project.init', { root, name: 'Project' });
   assert.equal(f.core.common(project.id).ruleIds.length, 0);
   const copy = f.core.bindings(project.id)[0];
   assert.equal(copy.targetId, s.id); assert.notEqual(copy.id, globalBinding.id);
   assert.equal(f.store.list('asset').length, 3);
+  const projectTargets = f.store.list<RuntimeTarget>('runtime-target').filter(target => target.scope === project.id);
+  assert.equal(projectTargets.length, 2);
+  assert.ok(existsSync(join(globalRoot, '.claude/commands/issue-development.md')));
+  assert.ok(existsSync(join(globalRoot, '.codex/skills/issue-development/SKILL.md')));
+  assert.ok(!existsSync(join(root, '.claude/commands/issue-development.md')));
+  assert.ok(!existsSync(join(root, '.codex/skills/issue-development/SKILL.md')));
+  const projectSkill = await f.asset('skill', { scope: project.id, name: 'project-only', useCase: true });
+  assert.ok(existsSync(join(root, '.claude/commands/project-only.md')));
+  assert.ok(existsSync(join(root, '.codex/skills/project-only/SKILL.md')));
+  assert.ok(!existsSync(join(globalRoot, '.claude/commands/project-only.md')));
+  assert.ok(!existsSync(join(globalRoot, '.codex/skills/project-only/SKILL.md')));
   await f.call('binding.remove', { id: globalBinding.id, provenance });
   assert.equal(f.core.bindings(project.id).length, 1);
   assert.equal((await f.call<{ project: Project | null }>('project.resolve', { root: `${root}/child` })).project, null);
@@ -110,8 +124,7 @@ test('C05 C06 C07: exact Project identity and independent copied bindings / comm
   const count = f.store.list('project').length;
   await assert.rejects(f.call('project.init', { root, name: '重複' }));
   assert.equal(f.store.list('project').length, count);
-  assert.ok(existsSync(join(root, '.claude/commands', 'issue-development.md')));
-  assert.ok(existsSync(join(root, '.codex/skills', 'issue-development', 'SKILL.md')));
+  assert.equal(projectSkill.scope, project.id);
 });
 
 test('C03 C08 C10 C16 C34: direct Skill retrieval never creates a managed execution', async t => {

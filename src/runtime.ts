@@ -71,7 +71,7 @@ export class RuntimeEntries {
   sync() {
     const results: { targetId: string; assetId: string; ok: boolean; message?: string }[] = [];
     for (const target of this.core.store.list<RuntimeTarget>('runtime-target').filter(t => t.enabled)) {
-      const assets = this.core.store.list<Asset>('asset').filter(a => !a.deletedAt && (a.scope === 'global' || a.scope === target.scope) && (a.kind === 'workflow' || a.kind === 'skill' && a.useCase));
+      const assets = this.core.store.list<Asset>('asset').filter(a => !a.deletedAt && a.scope === target.scope && (a.kind === 'workflow' || a.kind === 'skill' && a.useCase));
       const names = runtimeNames(assets);
       const previous = this.core.store.list<Entry>('runtime-entry').filter(e => e.targetId === target.id && e.active);
       const ids = new Set([...assets.map(a => a.id), ...previous.map(e => e.assetId)]);
