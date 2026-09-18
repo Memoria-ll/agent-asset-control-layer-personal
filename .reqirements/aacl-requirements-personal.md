@@ -333,7 +333,7 @@ Bootstrapは繰り返し取得しても同じ案内として扱う。通常会�
 
 接続先で使う起動用表現は、Claude CodeではCommand、CodexではSkillとし、Canonical Assetを参照する入口として扱う。これらのRuntime固有の起動用表現と、Canonical AssetとしてのSkillを区別する。
 
-AACLは、対象Projectで利用できる各Workflowと`useCase=true`のSkillについて、Claude Codeでは`.claude/commands/`配下に起動用Commandを、Codexでは`.codex/skills/`配下に起動用Skillを配置する。Global入口は各RuntimeのGlobal設定先に配置する。初期導入時に作成し、対象の追加・解除・名称変更等で入口との対応関係が変わる場合は、Canonical Stateと一致するよう更新する。
+AACLは、対象Projectで利用できる各Workflowと`useCase=true`のSkillについて、Claude Codeでは`.claude/commands/`配下に起動用Commandを、Codexでは`.codex/skills/`配下に起動用Skillを配置する。Global入口は各RuntimeのGlobal設定先に配置する。入口名は対象Asset名をRuntimeで使える形式に整えて生成し、同一設定先で名前が衝突する場合だけAsset IDを末尾に付ける。配置単位はWorkflow全体または直接起動Skillとし、StageやWorkflow内で参照する通常SkillはWorkflowの構成要素として扱う。初期導入時に作成し、対象の追加・解除・名称変更等で入口との対応関係が変わる場合は、Canonical Stateと一致するよう更新する。
 
 Global設定先はRuntimeの標準位置から検出し、UIから追加できる。Windows側とWSL側のGlobal設定先は別々に扱う。新しい設定先には適用可能なUse Case入口を配置する。設定先を管理対象から外す場合は既存ファイルを残し、以後Coreの管理対象から外す。SkillのuseCaseをfalseに変更した場合は、そのSkillのRuntime入口を解除する。
 

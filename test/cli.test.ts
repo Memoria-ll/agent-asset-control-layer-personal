@@ -33,7 +33,7 @@ test('C16 C25 C26 C33: CLI setup / custom directory / auto-start / init / backup
   const installAgain = await fetch(`http://127.0.0.1:${port}/api/setup.skills`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ operationId: randomUUID() }) });
   assert.deepEqual((await installAgain.json() as { installed: unknown[] }).installed, []);
   mkdirSync(project); const init = await run(['init'], project); assert.ok(JSON.parse(init.stdout).project.id);
-  const entry = join(project, '.codex/skills', `aacl-${list.assets[0].id}`, 'SKILL.md'); assert.ok(existsSync(entry));
+  const entry = join(project, '.codex/skills', list.assets[0].name, 'SKILL.md'); assert.ok(existsSync(entry));
   await run(['backup', join(root, 'copy.sqlite')]);
   await run(['export', join(root, 'export')]); assert.ok(existsSync(join(root, 'export/records.json')));
   await run(['stop']);

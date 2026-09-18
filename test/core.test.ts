@@ -1,9 +1,9 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { randomUUID } from 'node:crypto';
-import { mkdtempSync, readFileSync, existsSync, mkdirSync, writeFileSync, symlinkSync } from 'node:fs';
+import { createHash, randomUUID } from 'node:crypto';
+import { mkdtempSync, readFileSync, existsSync, mkdirSync, rmdirSync, unlinkSync, writeFileSync, symlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { Store } from '../src/store.ts';
 import { Core, normalizeRoot } from '../src/core.ts';
 import { Operations } from '../src/operations.ts';
@@ -44,7 +44,8 @@ test('C02 C04 C13 C14 C15 C28 C29: schema / stable identity / idempotent writes 
 });
 
 test('C05 C06 C07: exact Project identity and independent copied bindings / common', async t => {
-  const f = fixture(t), w = await f.workflow(), s = await f.asset('skill'), rule = await f.asset('rule');
+  const f = fixture(t), originalWorkflow = await f.workflow(), s = await f.asset('skill'), rule = await f.asset('rule');
+  const w = (await f.call<{ entities: Asset[] }>('asset.save', { id: originalWorkflow.id, asset: { ...f.core.assetPayload(originalWorkflow), name: 'issue-development' }, provenance })).entities[0];
   const globalBinding = await f.bind(w, s);
   assert.equal(normalizeRoot('C:\\work\\x\\..\\app\\'), '/mnt/c/work/app');
   assert.equal(normalizeRoot('\\\\wsl.localhost\\Ubuntu\\home\\me\\app'), '/home/me/app');
@@ -65,8 +66,8 @@ test('C05 C06 C07: exact Project identity and independent copied bindings / comm
   const count = f.store.list('project').length;
   await assert.rejects(f.call('project.init', { root, name: '重複' }));
   assert.equal(f.store.list('project').length, count);
-  assert.ok(existsSync(join(root, '.claude/commands', `aacl-${w.id}.md`)));
-  assert.ok(existsSync(join(root, '.codex/skills', `aacl-${w.id}`, 'SKILL.md')));
+  assert.ok(existsSync(join(root, '.claude/commands', 'issue-development.md')));
+  assert.ok(existsSync(join(root, '.codex/skills', 'issue-development', 'SKILL.md')));
 });
 
 test('C03 C08 C10 C16 C34: direct Skill retrieval never creates a managed execution', async t => {
@@ -185,20 +186,21 @@ test('C01 C26 C27 C28 C35: review approval applies changes and selected insights
 });
 
 test('C16 C33: Runtime entries are thin, owned, updated and retained on unregistration', async t => {
-  const f = fixture(t), skill = await f.asset('skill', { useCase: true, body: 'CANONICAL_ONLY_CONTENT_928' });
+  const f = fixture(t), skill = await f.asset('skill', { name: 'journal-review', useCase: true, body: 'CANONICAL_ONLY_CONTENT_928' });
   const root = mkdtempSync(join(tmpdir(), 'aacl-runtime-'));
   const { target } = await f.call<{ target: RuntimeTarget }>('runtime.register', { runtime: 'codex', platform: 'wsl', scope: 'global', path: root });
-  const path = join(root, 'skills', `aacl-${skill.id}`, 'SKILL.md');
+  const path = join(root, 'skills', 'journal-review', 'SKILL.md');
   const content = readFileSync(path, 'utf8');
-  assert.match(content, new RegExp(skill.id)); assert.ok(!content.includes(skill.body)); assert.ok(!content.includes('aacl_run_start'));
-  await f.call('asset.save', { id: skill.id, asset: { ...f.core.assetPayload(skill), name: '新しい名前' }, provenance });
-  assert.match(readFileSync(path, 'utf8'), /新しい名前/);
-  await f.call('skill.usecase', { assetId: skill.id, enabled: false, provenance }); assert.equal(existsSync(path), false);
-  await f.call('skill.usecase', { assetId: skill.id, enabled: true, provenance }); assert.equal(existsSync(path), true);
-  await f.call('runtime.unregister', { targetId: target.id }); assert.equal(existsSync(path), true);
-  await f.call('skill.usecase', { assetId: skill.id, enabled: false, provenance }); assert.equal(existsSync(path), true);
+  assert.match(content, new RegExp(skill.id)); assert.match(content, /^name: journal-review$/m); assert.ok(!content.includes(skill.body)); assert.ok(!content.includes('aacl_run_start'));
+  const renamedPath = join(root, 'skills', 'security-review', 'SKILL.md');
+  await f.call('asset.save', { id: skill.id, asset: { ...f.core.assetPayload(skill), name: 'security-review' }, provenance });
+  assert.equal(existsSync(path), false); assert.match(readFileSync(renamedPath, 'utf8'), /^name: security-review$/m);
+  await f.call('skill.usecase', { assetId: skill.id, enabled: false, provenance }); assert.equal(existsSync(renamedPath), false); assert.equal(existsSync(dirname(renamedPath)), false);
+  await f.call('skill.usecase', { assetId: skill.id, enabled: true, provenance }); assert.equal(existsSync(renamedPath), true);
+  await f.call('runtime.unregister', { targetId: target.id }); assert.equal(existsSync(renamedPath), true);
+  await f.call('skill.usecase', { assetId: skill.id, enabled: false, provenance }); assert.equal(existsSync(renamedPath), true);
   const collision = join(root, 'other'); mkdirSync(join(collision, 'commands'), { recursive: true });
-  const w = await f.workflow(), blocked = join(collision, 'commands', `aacl-${w.id}.md`);
+  const w = await f.workflow(), blocked = join(collision, 'commands', 'workflow.md');
   writeFileSync(blocked, '利用者のファイル');
   const result = await f.call<{ runtimeSync: { ok: boolean }[] }>('runtime.register', { runtime: 'claude', platform: 'wsl', scope: 'global', path: collision });
   assert.ok(result.runtimeSync.some(r => !r.ok)); assert.equal(readFileSync(blocked, 'utf8'), '利用者のファイル');
@@ -208,6 +210,59 @@ test('C16 C33: Runtime entries are thin, owned, updated and retained on unregist
   writeFileSync(blocked, f.ops.runtime.body(w, 'claude'));
   await f.call('runtime.sync');
   assert.ok(!f.core.diagnostics().diagnostics.some(d => d.target === f.store.list<RuntimeTarget>('runtime-target').find(t => t.path === collision)!.id));
+});
+
+test('Runtime entry names come from Workflow and direct Skill names, with IDs only for collisions', async t => {
+  const f = fixture(t), workflow = await f.workflow();
+  await f.call('asset.save', { id: workflow.id, asset: { ...f.core.assetPayload(workflow), name: 'shared-review' }, provenance });
+  const sharedSkill = await f.asset('skill', { name: 'shared-review', useCase: true });
+  const anotherSharedSkill = await f.asset('skill', { name: 'shared-review', useCase: true });
+  const uniqueSkill = await f.asset('skill', { name: 'architecture-review', useCase: true });
+  const longName = `${'a'.repeat(26)}-review`;
+  const longSkill = await f.asset('skill', { name: longName, useCase: true });
+  const anotherLongSkill = await f.asset('skill', { name: longName, useCase: true });
+  const internalSkill = await f.asset('skill', { name: 'design-review', useCase: false });
+  const claudeRoot = mkdtempSync(join(tmpdir(), 'aacl-runtime-claude-'));
+  const codexRoot = mkdtempSync(join(tmpdir(), 'aacl-runtime-codex-'));
+  await f.call('runtime.register', { runtime: 'claude', platform: 'wsl', scope: 'global', path: claudeRoot });
+  await f.call('runtime.register', { runtime: 'codex', platform: 'wsl', scope: 'global', path: codexRoot });
+  const names = [workflow.id, sharedSkill.id, anotherSharedSkill.id].map(id => `shared-review-${id}`);
+  for (const name of names) {
+    assert.ok(existsSync(join(claudeRoot, 'commands', `${name}.md`)));
+    assert.ok(existsSync(join(codexRoot, 'skills', name, 'SKILL.md')));
+    assert.match(readFileSync(join(codexRoot, 'skills', name, 'SKILL.md'), 'utf8'), new RegExp(`^name: ${name}$`, 'm'));
+  }
+  for (const name of [longSkill.id, anotherLongSkill.id].map(id => `${'a'.repeat(26)}-${id}`)) {
+    assert.ok(name.length <= 64); assert.ok(!name.includes('--'));
+    assert.ok(existsSync(join(claudeRoot, 'commands', `${name}.md`)));
+    assert.ok(existsSync(join(codexRoot, 'skills', name, 'SKILL.md')));
+  }
+  assert.ok(existsSync(join(claudeRoot, 'commands', 'architecture-review.md')));
+  assert.ok(existsSync(join(codexRoot, 'skills', 'architecture-review', 'SKILL.md')));
+  assert.ok(!existsSync(join(claudeRoot, 'commands', 'aacl-' + uniqueSkill.id + '.md')));
+  assert.ok(!existsSync(join(codexRoot, 'skills', `aacl-${uniqueSkill.id}`)));
+  assert.ok(!existsSync(join(claudeRoot, 'commands', 'design-review.md')));
+  assert.ok(!existsSync(join(codexRoot, 'skills', 'design-review')));
+  assert.ok(!existsSync(join(claudeRoot, 'commands', `${internalSkill.id}.md`)));
+});
+
+test('Runtime sync moves an owned ID-named entry to its asset name', async t => {
+  const f = fixture(t), skill = await f.asset('skill', { name: 'security-review', useCase: true });
+  const root = mkdtempSync(join(tmpdir(), 'aacl-runtime-migrate-'));
+  const { target } = await f.call<{ target: RuntimeTarget }>('runtime.register', { runtime: 'codex', platform: 'wsl', scope: 'global', path: root });
+  const currentPath = join(root, 'skills', 'security-review', 'SKILL.md');
+  const oldPath = join(root, 'skills', `aacl-${skill.id}`, 'SKILL.md');
+  const oldBody = f.ops.runtime.body(skill, 'codex', 'wsl', `aacl-${skill.id}`);
+  unlinkSync(currentPath); rmdirSync(dirname(currentPath)); mkdirSync(dirname(oldPath)); writeFileSync(oldPath, oldBody);
+  const entry = f.store.list<{ id: string; targetId: string; assetId: string; path: string; hash: string; active: boolean }>('runtime-entry').find(item => item.targetId === target.id && item.assetId === skill.id)!;
+  f.store.put('runtime-entry', { ...entry, path: oldPath, hash: createHash('sha256').update(oldBody).digest('hex') });
+  writeFileSync(oldPath, '利用者による変更');
+  const blocked = await f.call<{ runtimeSync: { ok: boolean }[] }>('runtime.sync');
+  assert.ok(blocked.runtimeSync.some(result => !result.ok)); assert.equal(readFileSync(oldPath, 'utf8'), '利用者による変更'); assert.equal(existsSync(currentPath), false);
+  writeFileSync(oldPath, oldBody);
+  await f.call('runtime.sync');
+  assert.equal(existsSync(oldPath), false); assert.equal(existsSync(dirname(oldPath)), false);
+  assert.match(readFileSync(currentPath, 'utf8'), /^name: security-review$/m);
 });
 
 test('C29 C33: Change Set restoration / persistent SQLite / export / consistent Backup restore', async t => {
