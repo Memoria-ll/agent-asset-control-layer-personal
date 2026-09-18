@@ -20,6 +20,11 @@ test('C02 C17 C32 C33: real HTTP / typed MCP / loopback / two concurrent chat Ha
   const rpc = async (method: string, params: object, name?: string, extraHeaders: Record<string, string> = {}) => {
     return fetch(`${base}/mcp`, { method: 'POST', headers: { 'Content-Type': 'application/json', Accept: 'application/json, text/event-stream', 'MCP-Protocol-Version': '2026-07-28', 'Mcp-Method': method, ...(name ? { 'Mcp-Name': name } : {}), ...extraHeaders }, body: JSON.stringify({ jsonrpc: '2.0', id: randomUUID(), method, params: { ...params, _meta: { 'io.modelcontextprotocol/protocolVersion': '2026-07-28', 'io.modelcontextprotocol/clientInfo': { name: 'aacl-integration-test', version: '1' }, 'io.modelcontextprotocol/clientCapabilities': {} } } }) });
   };
+  const legacyRpc = (method: string, params: object, protocolVersion?: string) => fetch(`${base}/mcp`, { method: 'POST', headers: { 'Content-Type': 'application/json', Accept: 'application/json, text/event-stream', ...(protocolVersion ? { 'MCP-Protocol-Version': protocolVersion } : {}) }, body: JSON.stringify({ jsonrpc: '2.0', id: randomUUID(), method, params }) });
+  const legacyResult = async <T>(response: Response) => {
+    const body = await response.text(), message = response.headers.get('content-type')?.includes('text/event-stream') ? body.match(/^data: (.+)$/m)?.[1] ?? '' : body;
+    return JSON.parse(message) as T;
+  };
   const tool = async <T>(name: string, input: object): Promise<T> => {
     const response = await rpc('tools/call', { name, arguments: input }, name);
     assert.equal(response.status, 200, await response.clone().text());
@@ -35,6 +40,11 @@ test('C02 C17 C32 C33: real HTTP / typed MCP / loopback / two concurrent chat Ha
   assert.equal(await new Promise<number | undefined>((resolve, reject) => { const req = request(`${base}/health`, { headers: { Host: 'attacker.example' } }, res => { res.resume(); resolve(res.statusCode); }); req.on('error', reject); req.end(); }), 403);
   assert.equal((await fetch(`${base}/api/asset.list`, { method: 'POST', body: '{}' })).status, 415);
   assert.equal((await fetch(`${base}/mcp`)).status, 405);
+  const initialized = await legacyRpc('initialize', { protocolVersion: '2024-11-05', capabilities: {}, clientInfo: { name: 'legacy-client', version: '1' } });
+  assert.equal(initialized.status, 200, await initialized.clone().text()); assert.equal(initialized.headers.get('mcp-session-id'), null);
+  const legacyInit = await legacyResult<{ result: { protocolVersion: string } }>(initialized); assert.equal(legacyInit.result.protocolVersion, '2024-11-05');
+  const legacyListed = await legacyRpc('tools/list', {}, '2024-11-05'); assert.equal(legacyListed.status, 200, await legacyListed.clone().text());
+  assert.ok((await legacyResult<{ result: { tools: unknown[] } }>(legacyListed)).result.tools.length >= 40);
   const listed = await rpc('tools/list', {});
   assert.equal(listed.status, 200, await listed.clone().text());
   const tools = (await listed.json() as { result: { tools: { name: string; inputSchema: { required?: string[] } }[] } }).result.tools;

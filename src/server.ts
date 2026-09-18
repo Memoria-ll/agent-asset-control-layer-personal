@@ -42,7 +42,7 @@ export async function serve(directory: string, port = 4318) {
       });
     }
     return server;
-  }, { legacy: 'reject' });
+  });
   const mcpHandler = toNodeHandler(mcp), validateHost = localhostHostValidation();
   const packageRoot = fileURLToPath(new URL(existsSync(new URL('../../package.json', import.meta.url)) ? '../../' : '../', import.meta.url));
   const staticFiles = new Map([

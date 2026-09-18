@@ -28,7 +28,7 @@
 自動試験に加えて、利用するRuntimeとWindows／WSLの組み合わせで次を確認する。
 
 1. WindowsホストのChromiumからWSLのUIへlocalhostで接続できる。
-2. Claude CodeとCodexのそれぞれからMCP 2026-07-28で接続し、Bootstrapを取得できる。
+2. Claude CodeとCodexのそれぞれからMCP接続し、Bootstrapを取得できる。protocol 2026-07-28と旧protocolのstateless fallbackは自動試験で確認する。
 3. 各Runtimeで2つのチャットを同時に開き、別々にRunを開始する。各チャットが自身のHandleを後続操作へ渡し、Context・Journal・遷移が混線しない。
 4. Global／Projectの生成入口をRuntimeが認識し、Windows側ではWSL経由でServiceの起動を確認できる。Skill入口は本文だけを取得し、Workflow入口はRunを開始する。
 5. Stage側とAsset側の参照表示・編集、直接参照とRole経由の表示、SkillのuseCase切り替え、次工程・差し戻し・自己ループの図、リキッドグラス風の見た目を利用者が確認する。

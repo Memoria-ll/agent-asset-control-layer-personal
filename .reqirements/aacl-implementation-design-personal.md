@@ -108,7 +108,7 @@ Claude Code / Codex (Windows または同一WSL内のLinux)
 
 ### 6.2 MCPのRun関連づけ
 
-- 採用transportはStreamable HTTPとする。MCP 2026-07-28仕様はprotocol sessionを使わないため、Run関連づけはアプリケーション側のContextとして実装する。[MCP Transport仕様](https://modelcontextprotocol.io/specification/2026-07-28/basic/transports)
+- Streamable HTTPでMCP 2026-07-28を提供し、旧protocol requestはSDKのstateless fallbackで処理する。protocol sessionをRun関連づけに使わず、Run Context Handleをアプリケーション側のContextとして実装する。[MCP Transport仕様](https://modelcontextprotocol.io/specification/2026-07-28/basic/transports)
 - Run単位の各MCP operationはRun Context Handleをtyped inputとして受け取り、CoreはHandleからRun IDを解決する。
 - AIは`run.start`応答のHandleを同じ実行Contextからの後続MCP operationへ渡す。Claude CodeとCodexのそれぞれで、同一Runtime内の複数チャットから並行操作しても各Handleが別のRunへ解決されることを結合試験で確認する。
 
