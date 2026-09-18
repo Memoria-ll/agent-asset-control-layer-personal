@@ -109,7 +109,9 @@ Canonical Assetは次の4種とする。
 
 各Assetは、ID、name、description、revision、管理先、metadata、history、provenanceを持ち、種類ごとの本文・定義を保持する。Skillに必須の内容項目はname、description、bodyとする。
 
-Assetの管理を終了する場合はAssetを削除・アーカイブせず、本文に「処置なし」等の空内容を示す記述を残す。Asset ID、revision履歴、既存の紐づけは保持する。
+Asset削除は対象Assetへの影響を確認してから確定する。確定前に、対象Assetを参照する紐づけ、対象Assetから参照する紐づけ、Project CommonからのRule参照をユーザーへ返す。参照の有無にかかわらず、Asset削除と一覧に含まれる参照解除にはユーザーの明示承認を必須とする。確認後、参照解除とAssetの削除状態への変更を一つの変更として保存する。プレビュー後にAssetまたは参照関係が変更された場合は削除を適用せず、最新の一覧から確認し直す。
+
+削除したAssetは通常の検索・利用・紐づけ選択の対象から外す。Asset ID、削除revision、過去revision、History、Provenance、Change Setは保持し、過去のRun Snapshotは変更しない。削除によって参照解除された紐づけとProject Commonの変更も、それぞれの履歴へ保存する。
 
 管理先はグローバルまたは特定のプロジェクトとする。グローバルのAssetとプロジェクトのAssetで名前が重複していても、別のAssetとして識別する。利用するAssetは紐づけやProject Commonの明示参照によって決まり、参照先をAsset IDで特定する。
 
@@ -300,9 +302,11 @@ AIは次の流れで操作する。
 5. Coreへ明示操作を送り、検証と保存を行う。
 6. 依頼、変更理由、判断、変更履歴を関連づける。
 
+Asset自体の削除依頼では、AIはaacl_asset_delete_previewの結果から参照する紐づけ・参照される紐づけ・Project CommonのRule参照をユーザーへ示す。ユーザーが対象Assetの削除と一覧に含まれる参照解除を明示承認した後にだけ削除を確定する。最初の削除依頼だけでは確定操作を行わない。
+
 ユーザーは「このRuleの確認項目Aを削除して」のように、内容への変更として依頼する。変更箇所や過去の変更IDの調査はAIが担う。
 
-管理操作には、Assetの検索・取得・作成・更新、紐づけの検索・取得・作成・変更・解除、Project Commonの取得・編集、Skillの直接起動設定、History・Provenanceの確認を含める。Model metadataの登録・更新は行わない。
+管理操作には、Assetの検索・取得・作成・更新・削除前確認・削除確定、紐づけの検索・取得・作成・変更・解除、Project Commonの取得・編集、Skillの直接起動設定、History・Provenanceの確認を含める。Model metadataの登録・更新は行わない。
 
 ---
 

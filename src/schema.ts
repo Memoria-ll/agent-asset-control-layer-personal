@@ -56,6 +56,7 @@ export const provenanceSchema = z.object({
   if (p.origin === 'ai' && (!p.reason.trim() || !p.userRequest.trim())) ctx.addIssue({ code: 'custom', message: 'AIによる変更には依頼と変更理由が必要です。' });
 });
 export const changeSchema = z.discriminatedUnion('type', [
+  z.object({ type: z.literal('asset.delete'), id, expectedRevision: z.int().positive(), expectedBindingRevisions: z.array(z.object({ id, revision: z.int().positive() }).strict()), expectedProjectCommonRevisions: z.array(z.object({ id, revision: z.int().positive() }).strict()), confirmed: z.literal(true) }).strict(),
   z.object({ type: z.literal('asset.save'), id: id.optional(), asset: assetSchema }).strict(),
   z.object({ type: z.literal('asset.create'), id, asset: assetSchema }).strict(),
   z.object({ type: z.literal('binding.save'), id: id.optional(), binding: bindingSchema }).strict(),
@@ -87,7 +88,12 @@ export function parseJournal(raw: string) {
 }
 
 export interface Stamp { id: string; revision: number; createdAt: string; updatedAt: string }
-export type Asset = z.infer<typeof assetSchema> & Stamp;
+export type Asset = z.infer<typeof assetSchema> & Stamp & { deletedAt?: string };
+export interface AssetDeletionPreview {
+  asset: Pick<Asset, 'id' | 'name' | 'kind' | 'scope' | 'revision'>;
+  bindings: { id: string; revision: number; scope: string; sourceId: string; sourceName: string; targetId: string; targetName: string; stageId?: string; stageName?: string; purpose: Binding['purpose']; direction: 'outgoing' | 'incoming' }[];
+  projectCommons: { id: string; revision: number; projectId: string; projectName: string }[];
+}
 export type Binding = z.infer<typeof bindingSchema> & Stamp & { active: boolean; copiedFrom?: { id: string; revision: number } };
 export type Change = z.infer<typeof changeSchema>;
 export type Provenance = z.infer<typeof provenanceSchema>;

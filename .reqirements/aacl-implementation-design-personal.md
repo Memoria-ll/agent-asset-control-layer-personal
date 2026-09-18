@@ -77,6 +77,9 @@ Claude Code / Codex (Windows または同一WSL内のLinux)
 - Writeの適用とoperation IDの冪等記録を同一transactionに含める。revision比較による通常Writeの拒否は設けない。
 - 過去revisionの復元は、その内容を新revisionとして保存する。
 - ScopeはGlobal / Projectを共通record上で識別し、同名Assetの一意性を名前に依存させない。
+- Asset削除は物理削除を行わず、`deletedAt`を持つ新revisionとして保存する。削除済みAssetは通常のAsset検索・利用・紐づけ候補から除外し、過去revisionとRun Snapshotは保持する。
+- `asset.delete.preview`は参照する紐づけ、参照される紐づけ、Project CommonのRule参照を名前・方向・revision付きで返す。`asset.delete`はpreviewのAsset・参照revisionと明示確認を必須とし、表示後に参照状態が変わっていたら拒否する。
+- 明示確認後の削除は、previewに含まれる紐づけとProject Common参照の解除、Assetの削除状態、History、Provenance、Change Setを同じtransactionで保存する。過去Change Setの復元ではAssetと参照関係を復元する。
 
 ### 5.2 Schema境界
 
@@ -194,7 +197,7 @@ Claude Code / Codex (Windows または同一WSL内のLinux)
 | C01 | §1 目的と利用形態 | Asset管理、Run、Context、Journal、Review、UI・CLI・Export各domain operation | Assetを管理し、Workflow実行からReviewによる改善までの機能境界が一貫して利用できる。 |
 | C02 | §2 基本原則と責務分担 | Core validation、MCP / UI application API | 構造不正はCoreが拒否し、本文の意味判断はCoreが行わない。UIとMCPの変更が同じCore経路を通る。 |
 | C03 | §3 管理対象の実行と通常利用 | Workflow選択・Run API、Skill取得API | 明示したWorkflowだけがRunを作り、通常利用と直接Skill利用ではRun等の管理記録を自動作成しない。 |
-| C04 | §4 Canonical Asset | Asset CRUD、revision、History API | 4種のAsset IDが名前変更後も維持され、Writeでrevisionが増え、古いrevision入力を理由に拒否せず再送は冪等となる。 |
+| C04 | §4 Canonical Asset | Asset CRUD、revision、History API | 4種のAsset IDが名前変更後も維持され、Writeでrevisionが増え、古いrevision入力を理由に拒否せず再送は冪等となる。参照一覧をユーザーへ示して明示確認を得た後にだけ削除し、参照解除と削除状態を同じChange Setへ保存する。 |
 | C05 | §5 Project Identity | Project registry、path adapter、Project Common API | Windows / Linux pathが定義どおり照合され、未登録rootや親・alias・symlinkから別Projectを推定しない。Project Commonの変更revisionとRule参照を確認できる。 |
 | C06 | §6 グローバルとプロジェクト別の紐づけ | Binding CRUD、Asset reference API | Global / Projectの紐づけが独立し、明示したAsset IDを参照する。Skillの再帰参照を解決し、同名Assetへ勝手に切り替わらない。 |
 | C07 | §7 プロジェクト初期導入 | `aacl init`、binding copy、Runtime entry生成 | Global紐づけのみがコピーされ、Asset本文は複製されず、Project Commonは空で始まる。失敗時に登録とコピーが部分状態にならない。 |
@@ -204,7 +207,7 @@ Claude Code / Codex (Windows または同一WSL内のLinux)
 | C11 | §11 RoleとModel名の受け渡し | Role API、Context builder、Runtime report | Role responsibilitiesと明示参照をContextへ含め、Model文字列をそのまま渡し、Model Assetや照合記録を作らない。 |
 | C12 | §12 Ruleと作業分類 | Rule CRUD、Task Type metadata、Context builder | Ruleは明示参照でのみContextに入り、Task Typeは管理対象の分類・Run metadataとして保持される。 |
 | C13 | §13 Capability | Core schema / validation境界 | Capability情報がCoreの保存・検証やRun開始・遷移条件に使われない。 |
-| C14 | §14 自然言語によるAsset管理 | MCP Asset / Binding / Project Common API、UI編集API、Provenance | 検索・取得・作成・更新・解除の変更が明示操作で保存され、依頼と変更理由へ関連づく。 |
+| C14 | §14 自然言語によるAsset管理 | MCP Asset / Binding / Project Common API、UI編集API、Provenance | 検索・取得・作成・更新・解除・削除の変更が明示操作で保存され、依頼と変更理由へ関連づく。削除は影響一覧と明示確認を経て確定する。 |
 | C15 | §15 既存情報と通常利用からの資産化 | Asset write、Provenance API | 明示依頼で資産化した元資料をProvenanceから確認でき、通常利用をRunやJournalへ遡及変換しない。 |
 | C16 | §16 Bootstrapと実行の入口 | Bootstrap API、Runtime adapter、entry writer | Bootstrap再取得で同じ案内を返し、入口はAsset IDを参照する。追加・解除・名称変更時に対応を更新し、管理解除した既存ファイルを残す。 |
 | C17 | §17 Runの開始と記録 | `run.start`、Context Handle返却・Run単位operation入力 | 不正なWorkflow・参照では開始せず、成功時はRun ID、Handle、revision境界、初期状態を作成する。並行Contextが別Handleで分離される。 |
