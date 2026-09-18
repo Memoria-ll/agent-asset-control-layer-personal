@@ -9,6 +9,12 @@
   "bin": {
     "aacl": "dist/src/cli.js"
   },
+  "files": [
+    "dist/src",
+    "dist/web",
+    "web",
+    "package.json"
+  ],
   "scripts": {
     "build": "tsc",
     "test": "node --test test/*.test.ts",

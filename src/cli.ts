@@ -50,7 +50,8 @@ function installApplication(target: string) {
   const root = fileURLToPath(new URL('../../', import.meta.url)), app = join(target, 'app');
   if (existsSync(app)) throw new Error('この管理フォルダーにはアプリが導入済みです。');
   mkdirSync(app, { recursive: true, mode: 0o700 });
-  for (const path of ['dist', 'web', 'package.json', 'package-lock.json', 'node_modules']) cpSync(join(root, path), join(app, path), { recursive: true, dereference: false });
+  for (const path of ['dist', 'web', 'package.json', 'node_modules']) cpSync(join(root, path), join(app, path), { recursive: true, dereference: false });
+  if (existsSync(join(root, 'package-lock.json'))) cpSync(join(root, 'package-lock.json'), join(app, 'package-lock.json'));
   writeFileSync(join(target, '.aacl-managed'), '1\n', { mode: 0o600 });
   mkdirSync(join(target, 'bin'), { recursive: true });
   const quote = (s: string) => `'${s.replaceAll("'", "'\\''")}'`;
