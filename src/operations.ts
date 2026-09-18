@@ -13,7 +13,7 @@ aacl_usecase_searchでWorkflowと直接起動Skillを探します。Skillの直�
 aacl_run_startから返るcontextHandleを、同じAI実行Contextの後続Run操作に必ず渡してください。別の会話のHandleを使わず、ユーザーへHandleの入力を求めません。
 ContextのSkill catalogから必要な本文・補助ファイルをaacl_run_skill_getで取得します。意味判断と開発操作はAI・Runtimeが行います。
 Stageのcompletion_conditionを評価し、完了報告とaacl_run_getのversionを付けて許可された遷移を要求します。retry・returnとRun全体のfailedは別です。
-資産管理は検索・取得で対象を確かめ、Asset ID・scope・内容・理由・userRequestを明示して型付き操作を実行します。方針が曖昧なら具体案を示してユーザーへ確認します。認証情報は保存しません。
+資産管理は検索・取得で対象を確かめ、Asset ID・scope・内容・理由・userRequestを明示して型付き操作を実行します。Assetを削除する前にaacl_asset_delete_previewの参照一覧をユーザーへ示し、削除と参照解除の明示承認を得てからaacl_asset_deleteを実行します。方針が曖昧なら具体案を示してユーザーへ確認します。認証情報は保存しません。
 書き込みのoperationIdにはUUIDを使用し、同じ操作の再送だけで再利用します。
 気づきがあればaacl_journal_templateのMarkdownでaacl_journal_writeへ送ります。Core IDは本文に書かず、contextHandleまたは終了後のpostRunIdを操作入力に指定します。Run外のJournalにはTaskを指定します。
 Journal Reviewはユーザーが明示的に開始します。Review自体のRunを作らず、aacl_review_pendingと関連するSnapshot・History・Provenanceを参照します。
@@ -36,12 +36,14 @@ export class Operations {
     const evidence = z.array(z.object({ type: text, reference: text }).strict()).default([]);
 
     read('bootstrap.get', 'AACLの利用案内とRuntimeに応じた入口を取得', { runtime: z.enum(['claude', 'codex']).optional() }, p => ({ instructions: bootstrap, runtime: p.runtime, entry: p.runtime === 'claude' ? 'Command' : 'Skill' }));
-    read('asset.list', 'Assetを種類・管理先・検索語で検索', { scope: scope.optional(), kind: z.enum(['workflow', 'skill', 'role', 'rule']).optional(), query: z.string().default('') }, p => ({ assets: store.list<Asset>('asset', p.scope).filter(a => (!p.kind || a.kind === p.kind) && `${a.name} ${a.description}`.toLowerCase().includes(p.query.toLowerCase())) }));
+    read('asset.list', 'Assetを種類・管理先・検索語で検索', { scope: scope.optional(), kind: z.enum(['workflow', 'skill', 'role', 'rule']).optional(), query: z.string().default(''), includeDeleted: z.boolean().default(false) }, p => ({ assets: store.list<Asset>('asset', p.scope).filter(a => (p.includeDeleted || !a.deletedAt) && (!p.kind || a.kind === p.kind) && `${a.name} ${a.description}`.toLowerCase().includes(p.query.toLowerCase())) }));
     write('setup.skills', 'Journal・Journal Reviewの標準Skillを導入。導入済みの編集内容を保持', {}, () => installJournalSkills(core), true);
-    read('asset.get', 'Assetの現在または過去revisionを取得', { assetId: id, revision: z.int().positive().optional() }, p => { const asset = core.asset(p.assetId); return { asset: p.revision ? store.revision<Asset>(p.assetId, p.revision) : asset }; });
+    read('asset.get', 'Assetの現在または過去revisionを取得', { assetId: id, revision: z.int().positive().optional() }, p => { const current = core.asset(p.assetId, true); return { asset: p.revision ? store.revision<Asset>(p.assetId, p.revision) : current }; });
     write('asset.save', 'Assetを作成・更新し履歴と由来を保存', { id: id.optional(), asset: assetSchema, provenance, revision: z.int().optional() }, p => core.applyChanges([{ type: 'asset.save', id: p.id, asset: p.asset }], p.provenance), true);
+    read('asset.delete.preview', '削除対象Assetを参照する紐づけとProject Commonを確認', { assetId: id }, p => core.assetDeletionPreview(p.assetId));
+    write('asset.delete', '影響一覧を確認したユーザーの明示承認後にAssetと参照を削除状態へ変更', { assetId: id, expectedRevision: z.int().positive(), expectedBindingRevisions: z.array(z.object({ id, revision: z.int().positive() }).strict()), expectedProjectCommonRevisions: z.array(z.object({ id, revision: z.int().positive() }).strict()), confirmed: z.literal(true), provenance }, p => core.deleteAsset(p, p.provenance), true);
     write('asset.restore', '過去revisionを新revisionとして復元', { assetId: id, revision: z.int().positive() }, p => core.restoreAsset(p.assetId, p.revision), true);
-    read('usecase.search', 'WorkflowとuseCaseが有効なSkillを検索', { scope: scope.default('global'), query: z.string().default('') }, p => ({ assets: store.list<Asset>('asset').filter(a => (a.scope === 'global' || a.scope === p.scope) && (a.kind === 'workflow' || a.kind === 'skill' && a.useCase) && `${a.name} ${a.description}`.toLowerCase().includes(p.query.toLowerCase())) }));
+    read('usecase.search', 'WorkflowとuseCaseが有効なSkillを検索', { scope: scope.default('global'), query: z.string().default('') }, p => ({ assets: store.list<Asset>('asset').filter(a => !a.deletedAt && (a.scope === 'global' || a.scope === p.scope) && (a.kind === 'workflow' || a.kind === 'skill' && a.useCase) && `${a.name} ${a.description}`.toLowerCase().includes(p.query.toLowerCase())) }));
     read('skill.get', '指定Skillの本文のみを取得。Runを作成しない', { assetId: id }, p => core.skillGet(p.assetId));
     write('skill.usecase', 'Skillの直接起動を切り替えRuntime入口を同期', { assetId: id, enabled: z.boolean(), provenance }, p => {
       const a = core.asset(p.assetId); if (a.kind !== 'skill') throw new Error('Skillを指定してください。');

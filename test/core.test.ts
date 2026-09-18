@@ -43,6 +43,50 @@ test('C02 C04 C13 C14 C15 C28 C29: schema / stable identity / idempotent writes 
   assert.throws(() => f.store.db.exec("UPDATE revisions SET data='{}'"), /immutable/);
 });
 
+test('Asset deletion shows both reference directions, requires fresh confirmation and restores recorded links', async t => {
+  const f = fixture(t), workflow = await f.workflow(), parent = await f.asset('skill'), child = await f.asset('skill'), rule = await f.asset('rule'), role = await f.asset('role');
+  const root = mkdtempSync(join(tmpdir(), 'aacl-delete-project-'));
+  const { project } = await f.call<{ project: Project }>('project.init', { root, name: '削除確認Project' });
+  await f.bind(workflow, parent);
+  await f.bind(role, parent);
+  await f.bind(parent, child);
+  await f.bind(workflow, rule, { scope: project.id });
+  await f.call('common.save', { projectId: project.id, ruleIds: [rule.id], provenance });
+  const run = await f.start(workflow);
+
+  const preview = await f.call<{ asset: Asset; bindings: { id: string; revision: number; direction: string }[]; projectCommons: { id: string; revision: number; projectId: string }[] }>('asset.delete.preview', { assetId: parent.id });
+  assert.deepEqual(new Set(preview.bindings.map(b => b.direction)), new Set(['incoming', 'outgoing']));
+  assert.equal(preview.projectCommons.length, 0);
+  const unconfirmed = { assetId: parent.id, expectedRevision: preview.asset.revision, expectedBindingRevisions: preview.bindings.map(({ id, revision }) => ({ id, revision })), expectedProjectCommonRevisions: [], provenance };
+  await assert.rejects(f.call('asset.delete', unconfirmed));
+  await assert.rejects(f.call('changeset.apply', { changes: [{ type: 'asset.delete', id: parent.id, expectedRevision: preview.asset.revision, expectedBindingRevisions: unconfirmed.expectedBindingRevisions, expectedProjectCommonRevisions: [], confirmed: true }], provenance }), /専用の削除操作/);
+  const anotherRole = await f.asset('role', { name: '追加Role' });
+  await f.bind(anotherRole, parent);
+  await assert.rejects(f.call('asset.delete', { ...unconfirmed, confirmed: true }), /参照関係が変わりました/);
+  assert.equal(f.core.asset(parent.id).deletedAt, undefined);
+
+  const current = await f.call<typeof preview>('asset.delete.preview', { assetId: parent.id });
+  const deleted = await f.call<{ changeSet: ChangeSet }>('asset.delete', { assetId: parent.id, expectedRevision: current.asset.revision, expectedBindingRevisions: current.bindings.map(({ id, revision }) => ({ id, revision })), expectedProjectCommonRevisions: [], confirmed: true, provenance });
+  assert.ok(f.core.asset(parent.id, true).deletedAt);
+  assert.equal((await f.call<{ assets: Asset[] }>('asset.list')).assets.some(a => a.id === parent.id), false);
+  assert.equal((await f.call<{ assets: Asset[] }>('asset.list', { includeDeleted: true })).assets.some(a => a.id === parent.id), true);
+  assert.equal((await f.call<{ bindings: Binding[] }>('binding.list', { assetId: parent.id })).bindings.length, 0);
+  assert.equal((await f.call<{ body: string }>('run.skill.get', { contextHandle: run.contextHandle, assetId: parent.id })).body, '本文');
+  await assert.rejects(f.call('skill.get', { assetId: parent.id }), /削除済みAsset/);
+
+  const rulePreview = await f.call<typeof preview>('asset.delete.preview', { assetId: rule.id });
+  assert.equal(rulePreview.projectCommons.length, 1);
+  assert.equal(rulePreview.projectCommons[0].projectId, project.id);
+  const deletedRule = await f.call<{ changeSet: ChangeSet }>('asset.delete', { assetId: rule.id, expectedRevision: rulePreview.asset.revision, expectedBindingRevisions: rulePreview.bindings.map(({ id, revision }) => ({ id, revision })), expectedProjectCommonRevisions: rulePreview.projectCommons.map(({ id, revision }) => ({ id, revision })), confirmed: true, provenance });
+  assert.deepEqual(f.core.common(project.id).ruleIds, []);
+  assert.equal(f.core.bindings(project.id).some(b => b.targetId === rule.id), false);
+  await f.call('changeset.restore', { changeSetId: deletedRule.changeSet.id });
+  assert.equal(f.core.asset(rule.id).deletedAt, undefined);
+  assert.deepEqual(f.core.common(project.id).ruleIds, [rule.id]);
+  assert.equal(f.core.bindings(project.id).some(b => b.targetId === rule.id), true);
+  assert.ok(deleted.changeSet.historyIds.length > 0);
+});
+
 test('C05 C06 C07: exact Project identity and independent copied bindings / common', async t => {
   const f = fixture(t), originalWorkflow = await f.workflow(), s = await f.asset('skill'), rule = await f.asset('rule');
   const w = (await f.call<{ entities: Asset[] }>('asset.save', { id: originalWorkflow.id, asset: { ...f.core.assetPayload(originalWorkflow), name: 'issue-development' }, provenance })).entities[0];
@@ -210,6 +254,18 @@ test('C16 C33: Runtime entries are thin, owned, updated and retained on unregist
   writeFileSync(blocked, f.ops.runtime.body(w, 'claude'));
   await f.call('runtime.sync');
   assert.ok(!f.core.diagnostics().diagnostics.some(d => d.target === f.store.list<RuntimeTarget>('runtime-target').find(t => t.path === collision)!.id));
+});
+
+test('Confirmed Asset deletion removes its owned Runtime entry', async t => {
+  const f = fixture(t), skill = await f.asset('skill', { name: 'delete-runtime-entry', useCase: true });
+  const root = mkdtempSync(join(tmpdir(), 'aacl-delete-runtime-'));
+  await f.call('runtime.register', { runtime: 'codex', platform: 'wsl', scope: 'global', path: root });
+  const path = join(root, 'skills', 'delete-runtime-entry', 'SKILL.md');
+  assert.equal(existsSync(path), true);
+  const preview = await f.call<{ asset: Asset; bindings: { id: string; revision: number }[]; projectCommons: { id: string; revision: number }[] }>('asset.delete.preview', { assetId: skill.id });
+  await f.call('asset.delete', { assetId: skill.id, expectedRevision: preview.asset.revision, expectedBindingRevisions: preview.bindings, expectedProjectCommonRevisions: preview.projectCommons, confirmed: true, provenance });
+  assert.equal(existsSync(path), false);
+  assert.equal(f.store.list<{ assetId: string; active: boolean }>('runtime-entry').find(e => e.assetId === skill.id)?.active, false);
 });
 
 test('Runtime entry names come from Workflow and direct Skill names, with IDs only for collisions', async t => {

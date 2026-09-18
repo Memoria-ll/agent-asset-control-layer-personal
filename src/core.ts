@@ -2,7 +2,12 @@ import { randomUUID } from 'node:crypto';
 import { posix } from 'node:path';
 import { Store } from './store.ts';
 import { assetSchema, bindingSchema, parseJournal } from './schema.ts';
-import type { Asset, Binding, Change, ChangeSet, Common, Context, Decision, Delivery, Diagnostic, History, Insight, Journal, Project, Proposal, Provenance, Run, RunEvent, Snapshot, Stamp } from './schema.ts';
+import type { Asset, AssetDeletionPreview, Binding, Change, ChangeSet, Common, Context, Decision, Delivery, Diagnostic, History, Insight, Journal, Project, Proposal, Provenance, Run, RunEvent, Snapshot, Stamp } from './schema.ts';
+
+function sameRevisions(a: { id: string; revision: number }[], b: { id: string; revision: number }[]) {
+  const sorted = (values: { id: string; revision: number }[]) => [...values].sort((x, y) => x.id.localeCompare(y.id));
+  return JSON.stringify(sorted(a)) === JSON.stringify(sorted(b));
+}
 
 export function normalizeRoot(input: string): string {
   let path = input.trim().replaceAll('\\', '/');
@@ -16,11 +21,46 @@ export class Core {
   store: Store;
   constructor(store: Store) { this.store = store; }
   assertScope(scope: string) { if (scope !== 'global') this.store.get<Project>(scope, 'project'); }
-  asset(id: string) { return this.store.get<Asset>(id, 'asset'); }
+  asset(id: string, includeDeleted = false) {
+    const asset = this.store.get<Asset>(id, 'asset');
+    if (!includeDeleted && asset.deletedAt) throw new Error('削除済みAssetは利用できません。');
+    return asset;
+  }
   bindings(scope?: string) { return this.store.list<Binding>('binding', scope).filter(b => b.active); }
   common(projectId: string): Common {
     this.store.get<Project>(projectId, 'project');
     return this.store.list<Common>('common', projectId)[0];
+  }
+  assetDeletionPreview(assetId: string): AssetDeletionPreview {
+    const asset = this.asset(assetId), assets = new Map(this.store.list<Asset>('asset').map(a => [a.id, a]));
+    const bindings = this.bindings().filter(b => b.sourceId === assetId || b.targetId === assetId).map(b => {
+      const source = assets.get(b.sourceId), target = assets.get(b.targetId);
+      if (!source || !target) throw new Error(`紐づけ先Assetを取得できません: ${b.id}`);
+      const stageName = b.stageId && source.kind === 'workflow' ? source.stages.find(s => s.id === b.stageId)?.name : undefined;
+      return { id: b.id, revision: b.revision, scope: b.scope, sourceId: source.id, sourceName: source.name, targetId: target.id, targetName: target.name, stageId: b.stageId, stageName, purpose: b.purpose, direction: b.sourceId === assetId ? 'outgoing' as const : 'incoming' as const };
+    });
+    const projects = new Map(this.store.list<Project>('project').map(p => [p.id, p]));
+    const projectCommons = this.store.list<Common>('common').filter(c => c.ruleIds.includes(assetId)).map(c => {
+      const project = projects.get(c.projectId);
+      if (!project) throw new Error(`Project CommonのProjectを取得できません: ${c.projectId}`);
+      return { id: c.id, revision: c.revision, projectId: c.projectId, projectName: project.name };
+    });
+    return { asset: { id: asset.id, name: asset.name, kind: asset.kind, scope: asset.scope, revision: asset.revision }, bindings, projectCommons };
+  }
+  deleteAsset(input: { assetId: string; expectedRevision: number; expectedBindingRevisions: { id: string; revision: number }[]; expectedProjectCommonRevisions: { id: string; revision: number }[]; confirmed: true }, provenance: Provenance) {
+    const preview = this.assetDeletionPreview(input.assetId);
+    const bindingRevisions = preview.bindings.map(({ id, revision }) => ({ id, revision }));
+    const projectCommonRevisions = preview.projectCommons.map(({ id, revision }) => ({ id, revision }));
+    if (preview.asset.revision !== input.expectedRevision || !sameRevisions(bindingRevisions, input.expectedBindingRevisions) || !sameRevisions(projectCommonRevisions, input.expectedProjectCommonRevisions)) {
+      throw new Error('Assetまたは参照関係が変わりました。参照一覧を再取得し、削除を確認してください。');
+    }
+    const changes: Change[] = preview.bindings.map(b => ({ type: 'binding.remove', id: b.id }));
+    for (const reference of preview.projectCommons) {
+      const common = this.store.get<Common>(reference.id, 'common');
+      changes.push({ type: 'common.save', projectId: common.projectId, ruleIds: common.ruleIds.filter(id => id !== input.assetId) });
+    }
+    changes.push({ type: 'asset.delete', id: input.assetId, expectedRevision: input.expectedRevision, expectedBindingRevisions: input.expectedBindingRevisions, expectedProjectCommonRevisions: input.expectedProjectCommonRevisions, confirmed: input.confirmed });
+    return this.applyChanges(changes, provenance, undefined, undefined, undefined, undefined, true);
   }
   validateBinding(b: Omit<Binding, keyof Stamp | 'active'>) {
     this.assertScope(b.scope);
@@ -34,7 +74,21 @@ export class Core {
     if (b.purpose === 'stage-role' && !b.stageId) throw new Error('担当Stageを指定してください。');
     if (source.id === target.id) throw new Error('Skillの循環参照は登録できません。');
   }
-  applyChanges(changes: Change[], provenance: Provenance, proposalId?: string, approvalId?: string, restore?: { entityId: string; revision: number }[], restoresChangeSetId?: string) {
+  applyChanges(changes: Change[], provenance: Provenance, proposalId?: string, approvalId?: string, restore?: { entityId: string; revision: number }[], restoresChangeSetId?: string, allowAssetDelete = false) {
+    if (!allowAssetDelete && changes.some(c => c.type === 'asset.delete')) throw new Error('Asset削除は影響一覧を確認した後、専用の削除操作から確定してください。');
+    for (const change of changes.filter((c): c is Extract<Change, { type: 'asset.delete' }> => c.type === 'asset.delete')) {
+      const preview = this.assetDeletionPreview(change.id);
+      const bindingRevisions = preview.bindings.map(({ id, revision }) => ({ id, revision }));
+      const projectCommonRevisions = preview.projectCommons.map(({ id, revision }) => ({ id, revision }));
+      if (!change.confirmed || preview.asset.revision !== change.expectedRevision || !sameRevisions(bindingRevisions, change.expectedBindingRevisions) || !sameRevisions(projectCommonRevisions, change.expectedProjectCommonRevisions)) {
+        throw new Error('Assetまたは参照関係が変わりました。参照一覧を再取得し、削除を確認してください。');
+      }
+      for (const reference of preview.bindings) if (!changes.some(c => c.type === 'binding.remove' && c.id === reference.id)) throw new Error('削除前に参照する紐づけを解除してください。');
+      for (const reference of preview.projectCommons) {
+        const commonChange = changes.find(c => c.type === 'common.save' && c.projectId === reference.projectId);
+        if (!commonChange || commonChange.type !== 'common.save' || commonChange.ruleIds.includes(change.id)) throw new Error('削除前にProject CommonのRule参照を解除してください。');
+      }
+    }
     const changeSetId = randomUUID();
     const p = this.store.put('provenance', { ...provenance, changeSetId });
     const histories: History[] = [], entities: (Asset | Binding | Common)[] = [];
@@ -54,13 +108,19 @@ export class Core {
         const a = assetSchema.parse(change.asset);
         this.assertScope(a.scope);
         if (change.id) {
-          const old = this.asset(change.id);
+          const restoring = restore?.some(r => r.entityId === change.id) ?? false;
+          const old = this.asset(change.id, restoring);
           if (old.kind !== a.kind || old.scope !== a.scope) throw new Error('Assetの種類と管理先は変更できません。');
           if (a.kind === 'workflow') for (const b of this.bindings().filter(b => b.sourceId === change.id && b.stageId)) {
             if (!a.stages.some(s => s.id === b.stageId)) throw new Error('削除するStageの紐づけを先に解除してください。');
           }
         }
         entities.push(save('asset', { ...a, id: change.id }, a.scope));
+      } else if (change.type === 'asset.delete') {
+        const asset = this.asset(change.id);
+        if (this.bindings().some(b => b.sourceId === change.id || b.targetId === change.id)) throw new Error('Assetへの紐づけを解除してから削除してください。');
+        if (this.store.list<Common>('common').some(c => c.ruleIds.includes(change.id))) throw new Error('Project CommonのRule参照を解除してから削除してください。');
+        entities.push(save('asset', { ...asset, deletedAt: new Date().toISOString() }, asset.scope));
       } else if (change.type === 'binding.save') {
         const b = bindingSchema.parse(change.binding);
         if (change.id && this.store.get<Binding>(change.id, 'binding').scope !== b.scope) throw new Error('紐づけの管理先は変更できません。');
@@ -179,7 +239,7 @@ export class Core {
     return { run, contextHandle, context: initialContext, snapshotId: snapshot.id };
   }
   assetPayload(a: Asset) {
-    const { id: _id, revision: _rev, createdAt: _created, updatedAt: _updated, ...payload } = a;
+    const { id: _id, revision: _rev, createdAt: _created, updatedAt: _updated, deletedAt: _deletedAt, ...payload } = a;
     return payload;
   }
   run(handle: string, touch = true): Run {
