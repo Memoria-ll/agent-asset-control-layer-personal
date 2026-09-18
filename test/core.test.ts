@@ -161,6 +161,24 @@ test('C05 C06 C07: exact Project identity and independent copied bindings / comm
   assert.equal(projectSkill.scope, project.id);
 });
 
+test('Project binding scope can be cleared without changing Global bindings', async t => {
+  const f = fixture(t), workflow = await f.workflow(), skill = await f.asset('skill');
+  await f.bind(workflow, skill);
+  const project = f.core.initProject(`/tmp/project-${randomUUID()}`, 'Project').project;
+  const projectBindings = f.core.bindings(project.id);
+  assert.equal(projectBindings.length, 3);
+
+  const removed = await f.call<{ changeSet: ChangeSet }>('changeset.apply', {
+    changes: projectBindings.map(binding => ({ type: 'binding.remove', id: binding.id })),
+    provenance,
+  });
+  assert.equal(f.core.bindings(project.id).length, 0);
+  assert.equal(f.core.bindings('global').length, 3);
+  assert.equal(removed.changeSet.historyIds.length, 3);
+  await f.start(workflow);
+  await assert.rejects(f.start(workflow, { projectId: project.id }), /担当Role/);
+});
+
 test('C03 C08 C10 C16 C34: direct Skill retrieval never creates a managed execution', async t => {
   const f = fixture(t), s = await f.asset('skill', { useCase: true }), w = await f.workflow();
   const before = f.store.boundary();

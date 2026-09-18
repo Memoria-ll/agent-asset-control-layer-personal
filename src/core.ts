@@ -170,7 +170,10 @@ export class Core {
     for (const [workflowId, scopes] of stageRoleScopes) {
       const workflow = this.asset(workflowId, true);
       if (workflow.deletedAt || workflow.kind !== 'workflow') continue;
-      for (const scope of scopes) this.assertStageRoles(workflow, scope);
+      for (const scope of scopes) {
+        if (scope !== 'global' && this.bindings(scope).length === 0) continue;
+        this.assertStageRoles(workflow, scope);
+      }
     }
     const changeSet = this.store.put('changeset', { id: changeSetId, operations: changes, provenanceId: p.id, historyIds: histories.map(h => h.id), proposalId, approvalId, restoresChangeSetId });
     return { changeSet, entities };
