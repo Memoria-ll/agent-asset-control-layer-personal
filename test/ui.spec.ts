@@ -9,7 +9,7 @@ let app: Awaited<ReturnType<typeof serve>>;
 test.beforeAll(async () => { app = await serve(mkdtempSync(join(tmpdir(), 'aacl-ui-')), 0); });
 test.afterAll(async () => { await app.close(); });
 
-test('C33: Chromium UI creates assets, binds from Stage and Asset, toggles useCase, runs a Workflow, records and reviews Journal', async ({ page }) => {
+test('C33: Chromium UI assigns existing and new Roles from Workflow editor, runs a Workflow, records and reviews Journal', async ({ page }) => {
   const errors: string[] = [];
   page.on('pageerror', e => errors.push(e.message));
   page.on('console', e => { if (e.type() === 'error') errors.push(e.text()); });
@@ -47,6 +47,12 @@ test('C33: Chromium UI creates assets, binds from Stage and Asset, toggles useCa
   await dialog.getByRole('button', { name: '＋ 工程を追加' }).click();
   await dialog.getByLabel('工程名', { exact: true }).nth(1).fill('確認');
   await dialog.getByLabel('完了条件', { exact: true }).nth(1).fill('検証結果を報告した');
+  await dialog.getByLabel('担当Role').nth(0).selectOption({ label: '検証担当（Global）' });
+  const secondStage = dialog.locator('.stage-editor').nth(1);
+  await secondStage.getByRole('button', { name: '＋ 新しいRole' }).click();
+  await secondStage.getByLabel('新しいRole名').fill('レビュー担当');
+  await secondStage.getByLabel('Roleの説明').fill('変更内容を独立して確認する');
+  await secondStage.getByLabel('Roleの責務').fill('実際の動作と完了条件を照合する。');
   for (const [from, to, type, label] of [['実装', '確認', 'next', '確認へ'], ['確認', '実装', 'return', '戻す'], ['実装', '実装', 'retry', 'やり直す'], ['確認', '完了', 'complete', '完了する']]) {
     await dialog.getByRole('button', { name: '＋ 遷移を追加' }).click();
     const row = dialog.locator('.transition-row').last();
@@ -60,12 +66,8 @@ test('C33: Chromium UI creates assets, binds from Stage and Asset, toggles useCa
   await expect(page.getByRole('img', { name: '改善の確認の許可遷移' })).toBeVisible();
   await expect(page.locator('path.edge')).toHaveCount(4);
   await expect(page.locator('path.edge.retry')).toHaveCount(1);
-  await page.getByRole('button', { name: '紐づける', exact: true }).first().click();
-  await dialog.getByLabel('参照する資産').selectOption({ label: 'Role / 検証担当' });
-  await dialog.getByLabel('使い方').selectOption('stage-role');
-  await dialog.getByRole('button', { name: '紐づけを保存' }).click();
-  await expect(dialog).not.toBeVisible();
   await expect(page.getByText('検証担当 経由')).toBeVisible();
+  await expect(page.locator('.detail').getByText('レビュー担当', { exact: true })).toBeVisible();
   await page.screenshot({ path: '/tmp/aacl-workflow.png', fullPage: true });
   await page.getByRole('button', { name: 'Runを開始', exact: true }).click();
   await dialog.getByLabel('実行する依頼').fill('動作経路を確認する');

@@ -680,6 +680,7 @@ UIの視覚表現はリキッドグラス風とする。画面構成や個別の
 
 - Workflow / StageごとにRole、Skill、Ruleの紐づきを一覧でき、各Assetからも関連するWorkflow / Stageを確認できる。Stageへの直接参照と担当Role経由の参照を区別して示す。
 - UIから紐づけを追加・解除・付け替えでき、SkillのuseCase設定を有効・無効に簡単に切り替えられる。現在の設定状態を見分けられる。
+- Workflow編集画面でStageごとに既存Roleを選ぶか、新しいRoleをGlobal Assetとして作成して割り当てられる。作成したRoleは他のWorkflow / Stageでも再利用できる。
 - WorkflowのStage間の許可された遷移を図で表示する。次工程への遷移、差し戻し、retry等の自己ループを含む遷移元・遷移先・種別が分かる。
 
 Runtime差は、Runtime identifierとRuntime固有Bootstrapとして扱う。ModelとCapabilityの存在・利用可否・metadataはCoreが管理する情報ではない。

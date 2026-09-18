@@ -686,6 +686,25 @@ pre {
 .editor-row textarea {
   min-height:80px
 }
+.stage-role-row {
+  display:grid;
+  grid-template-columns:minmax(0,1fr) auto;
+  gap:9px;
+  align-items:end;
+  margin-top:12px
+}
+.new-role-fields {
+  display:grid;
+  gap:12px;
+  padding:14px;
+  margin-top:10px;
+  border:1px solid var(--line);
+  border-radius:10px;
+  background:#ffffff70
+}
+.new-role-fields[hidden] {
+  display:none
+}
 .transition-row {
   display:grid;
   grid-template-columns:1fr 20px 1fr 90px 1fr 28px;

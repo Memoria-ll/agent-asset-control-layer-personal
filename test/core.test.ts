@@ -9,7 +9,7 @@ import { Core, normalizeRoot } from '../src/core.ts';
 import { Operations } from '../src/operations.ts';
 import { assetSchema, parseJournal } from '../src/schema.ts';
 import { backupData, exportData, restoreBackup } from '../src/maintenance.ts';
-import { relatedWorkflows, workflowDiagram } from '../web/view-model.ts';
+import { relatedWorkflows, stageRoleBindingChanges, workflowDiagram } from '../web/view-model.ts';
 import type { Asset, Binding, ChangeSet, Context, Delivery, Insight, Journal, Project, Run, RuntimeTarget, Snapshot } from '../src/schema.ts';
 
 const provenance = { origin: 'ai', userRequest: 'テスト用の明示依頼', reason: '挙動の確認' };
@@ -290,4 +290,31 @@ test('C33: UI relationship projections distinguish direct / Role paths and graph
   const graph = workflowDiagram(w);
   assert.equal(graph.edges.length, 4); assert.ok(graph.edges.some(e => e.type === 'retry' && e.from === e.to));
   assert.ok(graph.edges.some(e => e.type === 'return' && e.to === 'build'));
+});
+
+test('C11 C33: one Global Role is reused across Workflow stages and workflows, and removed Stage links save atomically', async t => {
+  const f = fixture(t), first = await f.workflow(), second = await f.workflow(), roleId = randomUUID();
+  const roleAsset = { kind: 'role', name: '共通Role', description: '複数Workflowで共有する', responsibilities: '共通の責務を担う', scope: 'global' };
+  const firstBindings = stageRoleBindingChanges(first.id, 'global', [{ stageId: 'build', roleId }, { stageId: 'review', roleId }], f.core.bindings());
+  await f.call('changeset.apply', { changes: [{ type: 'asset.create', id: roleId, asset: roleAsset }, ...firstBindings], provenance });
+  const role = f.core.asset(roleId);
+  await assert.rejects(f.call('changeset.apply', { changes: [{ type: 'asset.create', id: roleId, asset: roleAsset }], provenance }), /登録済み/);
+  for (const workflow of [second]) {
+    const changes = stageRoleBindingChanges(workflow.id, 'global', [{ stageId: 'build', roleId: role.id }, { stageId: 'review', roleId: role.id }], f.core.bindings());
+    await f.call('changeset.apply', { changes, provenance });
+  }
+  assert.equal(f.core.bindings('global').filter(b => b.targetId === role.id && b.purpose === 'stage-role').length, 4);
+  const firstRun = await f.start(first);
+  assert.deepEqual(firstRun.context.roles.map(a => a.id), [role.id]);
+  const snapshot = f.store.get<Snapshot>(firstRun.snapshotId, 'snapshot');
+  assert.deepEqual(f.core.resolve(snapshot, 'review').roles.map(a => a.id), [role.id]);
+  const secondRun = await f.start(second);
+  assert.deepEqual(secondRun.context.roles.map(a => a.id), [role.id]);
+
+  const removals = stageRoleBindingChanges(first.id, 'global', [], f.core.bindings());
+  const payload = { ...f.core.assetPayload(first), stages: [first.stages[0]], transitions: [] };
+  await f.call('changeset.apply', { changes: [...removals, { type: 'asset.save', id: first.id, asset: payload }], provenance });
+  assert.equal(f.core.asset(first.id).stages.length, 1);
+  assert.equal(f.core.bindings('global').filter(b => b.sourceId === first.id && b.purpose === 'stage-role').length, 0);
+  assert.equal(f.core.bindings('global').filter(b => b.sourceId === second.id && b.purpose === 'stage-role').length, 2);
 });

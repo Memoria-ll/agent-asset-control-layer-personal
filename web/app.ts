@@ -1,5 +1,5 @@
-import type { Asset, Binding, ChangeSet, Common, Decision, Delivery, Diagnostic, History, Insight, Journal, Project, Proposal, Provenance, Run, RunEvent, RuntimeTarget, Snapshot } from '../src/schema.ts';
-import { relatedWorkflows, workflowDiagram } from './view-model.ts';
+import type { Asset, Binding, Change, ChangeSet, Common, Decision, Delivery, Diagnostic, History, Insight, Journal, Project, Proposal, Provenance, Run, RunEvent, RuntimeTarget, Snapshot } from '../src/schema.ts';
+import { relatedWorkflows, stageRoleBindingChanges, workflowDiagram } from './view-model.ts';
 
 const app = document.querySelector<HTMLDivElement>('#app')!;
 const dialog = document.querySelector<HTMLDialogElement>('#dialog')!;
@@ -112,15 +112,21 @@ async function render() {
   } else { location.hash = 'assets'; }
 }
 
-function stageRow(s: { id: string; name: string; completion_condition: string; description?: string; taskType?: string }, index: number) {
-  return `<div class="editor-row stage-editor" data-id="${esc(s.id)}"><div class="row-head"><strong>Stage ${index + 1}</strong>${button('row-remove', '削除', 'small ghost')}</div><div class="grid-two">${field('工程名', 'stageName', s.name)}${field('分類', 'stageType', s.taskType ?? '', false)}</div><div class="spacer"></div>${area('完了条件', 'completion', s.completion_condition)}<input type="hidden" name="stageDescription" value="${esc(s.description ?? '')}"></div>`;
+function roleOptions(selected = '') {
+  return opt('', '担当Roleなし', selected) + assets.filter(a => a.kind === 'role' && (a.scope === 'global' || a.scope === selectedScope)).map(a => opt(a.id, `${a.name}（${labelScope(a.scope)}）`, selected)).join('');
+}
+function stageRoleId(workflowId: string, stageId: string) {
+  return bindings.find(b => b.sourceId === workflowId && b.stageId === stageId && b.purpose === 'stage-role')?.targetId ?? '';
+}
+function stageRow(s: { id: string; name: string; completion_condition: string; description?: string; taskType?: string }, index: number, roleId = '') {
+  return `<div class="editor-row stage-editor" data-id="${esc(s.id)}"><div class="row-head"><strong>Stage ${index + 1}</strong>${button('row-remove', '削除', 'small ghost')}</div><div class="grid-two">${field('工程名', 'stageName', s.name)}${field('分類', 'stageType', s.taskType ?? '', false)}</div><div class="stage-role-row">${select('担当Role', 'stageRole', roleOptions(roleId))}${button(`role-create:${s.id}`, '＋ 新しいRole', 'small ghost')}</div><div class="new-role-fields" hidden><p class="hint">新しいRoleをGlobalで共有し、このStageの担当に設定します。</p>${field('新しいRole名', 'newRoleName', '', false)}${area('Roleの説明', 'newRoleDescription', '', false)}${area('Roleの責務', 'newRoleResponsibilities', '', false)}</div><div class="spacer"></div>${area('完了条件', 'completion', s.completion_condition)}<input type="hidden" name="stageDescription" value="${esc(s.description ?? '')}"></div>`;
 }
 function transitionRow(t: { id: string; from: string; to: string; type: string; label: string }, stages: { id: string; name: string }[]) {
   return `<div class="transition-row" data-id="${esc(t.id)}">${select('遷移元', 'from', stages.map(s => opt(s.id, s.name || '未命名の工程', t.from)).join(''))}<span>→</span>${select('遷移先', 'to', stages.map(s => opt(s.id, s.name || '未命名の工程', t.to)).join('') + opt('completed', '完了', t.to))}${select('種別', 'transitionType', Object.entries(typeLabels).map(([key, title]) => opt(key, title, t.type)).join(''))}${field('表示名', 'transitionLabel', t.label)}${button('row-remove', '×', 'ghost')}</div>`;
 }
 function assetEditor(a?: Asset, newKind: Asset['kind'] = 'skill') {
   const kind = a?.kind ?? newKind;
-  modal(a ? '資産を編集' : '資産を作成', `<form data-form="asset" data-id="${a?.id ?? ''}" data-kind="${kind}" class="form-stack">${!a ? `<div class="filters">${Object.entries(kinds).map(([k, title]) => button(`new-kind:${k}`, title, `filter ${kind === k ? 'active' : ''}`)).join('')}</div>` : ''}<div class="grid-two">${field('名前', 'name', a?.name)}${select('管理先', 'scope', a ? opt(a.scope, labelScope(a.scope)) : opt('global', 'Global', selectedScope) + projects.map(p => opt(p.id, p.name, selectedScope)).join(''))}</div>${area('説明', 'description', a?.description)}${field('作業の分類', 'taskType', a?.taskType, false)}${kind === 'workflow' ? `<section><div class="section-header"><h3>工程</h3>${button('stage-add', '＋ 工程を追加', 'small')}</div><div id="stage-rows">${(a?.stages ?? []).map(stageRow).join('')}</div><p class="hint">先頭の工程から開始します。各工程に完了条件を指定してください。</p></section><section><div class="section-header"><h3>許可する遷移</h3>${button('transition-add', '＋ 遷移を追加', 'small')}</div><div id="transition-rows">${(a?.transitions ?? []).map(t => transitionRow(t, a!.stages)).join('')}</div></section>` : area(kind === 'role' ? '責務・判断観点・成果責任' : '本文（Markdown）', 'body', kind === 'role' ? a?.responsibilities : a?.body, kind === 'skill', true)}${kind === 'skill' ? `<label class="checkbox-label"><input type="checkbox" name="useCase"${a?.useCase ? ' checked' : ''}>Runtimeから直接起動できるSkillにする</label><section><div class="section-header"><h3>補助ファイル</h3>${button('file-add', '＋ 追加', 'small')}</div><div id="file-rows">${Object.entries(a?.supportingFiles ?? {}).map(([path, body]) => fileRow(path, body)).join('')}</div></section>` : ''}<p class="hint">認証情報は保存しないでください。</p>${formEnd()}</form>`);
+  modal(a ? '資産を編集' : '資産を作成', `<form data-form="asset" data-id="${a?.id ?? ''}" data-kind="${kind}" class="form-stack">${!a ? `<div class="filters">${Object.entries(kinds).map(([k, title]) => button(`new-kind:${k}`, title, `filter ${kind === k ? 'active' : ''}`)).join('')}</div>` : ''}<div class="grid-two">${field('名前', 'name', a?.name)}${select('管理先', 'scope', a ? opt(a.scope, labelScope(a.scope)) : opt('global', 'Global', selectedScope) + projects.map(p => opt(p.id, p.name, selectedScope)).join(''))}</div>${area('説明', 'description', a?.description)}${field('作業の分類', 'taskType', a?.taskType, false)}${kind === 'workflow' ? `<section><div class="section-header"><h3>工程</h3>${button('stage-add', '＋ 工程を追加', 'small')}</div><div id="stage-rows">${(a?.stages ?? []).map((s, i) => stageRow(s, i, a ? stageRoleId(a.id, s.id) : '')).join('')}</div><p class="hint">先頭の工程から開始します。各工程に完了条件を指定してください。</p></section><section><div class="section-header"><h3>許可する遷移</h3>${button('transition-add', '＋ 遷移を追加', 'small')}</div><div id="transition-rows">${(a?.transitions ?? []).map(t => transitionRow(t, a!.stages)).join('')}</div></section>` : area(kind === 'role' ? '責務・判断観点・成果責任' : '本文（Markdown）', 'body', kind === 'role' ? a?.responsibilities : a?.body, kind === 'skill', true)}${kind === 'skill' ? `<label class="checkbox-label"><input type="checkbox" name="useCase"${a?.useCase ? ' checked' : ''}>Runtimeから直接起動できるSkillにする</label><section><div class="section-header"><h3>補助ファイル</h3>${button('file-add', '＋ 追加', 'small')}</div><div id="file-rows">${Object.entries(a?.supportingFiles ?? {}).map(([path, body]) => fileRow(path, body)).join('')}</div></section>` : ''}<p class="hint">認証情報は保存しないでください。</p>${formEnd()}</form>`);
 }
 function fileRow(path = '', body = '') { return `<div class="editor-row file-editor"><div class="row-head"><strong>補助ファイル</strong>${button('row-remove', '削除', 'small ghost')}</div>${field('相対ファイル名', 'filePath', path)}<div class="spacer"></div>${area('内容', 'fileBody', body, false, true)}</div>`; }
 function readStages(form: Element) { return [...form.querySelectorAll<HTMLElement>('.stage-editor')].map(row => ({ id: row.dataset.id!, name: (row.querySelector('[name=stageName]') as HTMLInputElement).value, completion_condition: (row.querySelector('[name=completion]') as HTMLTextAreaElement).value, description: (row.querySelector('[name=stageDescription]') as HTMLInputElement).value, taskType: (row.querySelector('[name=stageType]') as HTMLInputElement).value })); }
@@ -143,6 +149,15 @@ async function action(value: string, target: HTMLElement) {
   if (key === 'asset-new' || key === 'new-kind') { assetEditor(undefined, (id as Asset['kind']) || 'skill'); return; }
   if (key === 'asset-edit') { assetEditor(a); return; }
   if (key === 'stage-add') { const root = dialog.querySelector('#stage-rows')!; root.insertAdjacentHTML('beforeend', stageRow({ id: crypto.randomUUID(), name: '', completion_condition: '' }, root.children.length)); return; }
+  if (key === 'role-create') {
+    const row = target.closest<HTMLElement>('.stage-editor')!, panel = row.querySelector<HTMLElement>('.new-role-fields')!, role = row.querySelector<HTMLSelectElement>('[name=stageRole]')!;
+    panel.hidden = !panel.hidden;
+    role.disabled = !panel.hidden;
+    target.textContent = panel.hidden ? '＋ 新しいRole' : '作成をやめる';
+    if (!panel.hidden) { panel.dataset.previousRole = role.value; role.value = ''; row.querySelector<HTMLInputElement>('[name=newRoleName]')?.focus(); }
+    else role.value = panel.dataset.previousRole ?? '';
+    return;
+  }
   if (key === 'file-add') { dialog.querySelector('#file-rows')!.insertAdjacentHTML('beforeend', fileRow()); return; }
   if (key === 'transition-add') { const stages = readStages(dialog); if (!stages.length) throw new Error('先に工程を追加してください。'); dialog.querySelector('#transition-rows')!.insertAdjacentHTML('beforeend', transitionRow({ id: crypto.randomUUID(), from: stages[0].id, to: 'completed', type: 'complete', label: '' }, stages)); return; }
   if (key === 'row-remove') { target.closest('.editor-row,.transition-row')!.remove(); return; }
@@ -190,11 +205,38 @@ async function submit(form: HTMLFormElement) {
   if (key === 'asset') {
     const old = assets.find(a => a.id === form.dataset.id), kind = form.dataset.kind as Asset['kind'];
     const stages = readStages(form);
-    const transitions = [...form.querySelectorAll<HTMLElement>('.transition-row')].map(row => { const v = (key: string) => (row.querySelector(`[name=${key}]`) as HTMLInputElement).value; return { id: row.dataset.id, from: v('from'), to: v('to'), type: v('transitionType'), label: v('transitionLabel') }; });
+    const transitions = [...form.querySelectorAll<HTMLElement>('.transition-row')].map(row => { const v = (key: string) => (row.querySelector(`[name=${key}]`) as HTMLInputElement).value; return { id: row.dataset.id!, from: v('from'), to: v('to'), type: v('transitionType') as Asset['transitions'][number]['type'], label: v('transitionLabel') }; });
     const files = [...form.querySelectorAll('.file-editor')].map(row => [(row.querySelector('[name=filePath]') as HTMLInputElement).value, (row.querySelector('[name=fileBody]') as HTMLTextAreaElement).value]);
     if (new Set(files.map(([name]) => name)).size !== files.length) throw new Error('補助ファイル名が重複しています。');
-    const result = await api<{ entities: Asset[] }>('asset.save', { id: old?.id, asset: { kind, name: get('name'), description: get('description'), scope: get('scope'), taskType: get('taskType'), body: kind === 'role' || kind === 'workflow' ? old?.body ?? '' : get('body'), responsibilities: kind === 'role' ? get('body') : old?.responsibilities ?? '', useCase: kind === 'skill' && data.has('useCase'), supportingFiles: Object.fromEntries(files), stages, transitions, entryStage: old?.entryStage && stages.some(s => s.id === old.entryStage) ? old.entryStage : stages[0]?.id ?? '', metadata: old?.metadata ?? {} }, provenance: provenance(old ? '資産を編集' : '資産を作成') }, true);
-    location.hash = `assets/${result.entities[0].id}`;
+    const asset = { kind, name: get('name'), description: get('description'), scope: get('scope'), taskType: get('taskType'), body: kind === 'role' || kind === 'workflow' ? old?.body ?? '' : get('body'), responsibilities: kind === 'role' ? get('body') : old?.responsibilities ?? '', useCase: kind === 'skill' && data.has('useCase'), supportingFiles: Object.fromEntries(files), stages, transitions, entryStage: old?.entryStage && stages.some(s => s.id === old.entryStage) ? old.entryStage : stages[0]?.id ?? '', metadata: old?.metadata ?? {} };
+    if (kind === 'workflow') {
+      const workflowId = old?.id ?? crypto.randomUUID(), newRoleChanges: Change[] = [];
+      const assignments = [...form.querySelectorAll<HTMLElement>('.stage-editor')].map(row => {
+        const stageId = row.dataset.id!, panel = row.querySelector<HTMLElement>('.new-role-fields')!;
+        if (!panel.hidden) {
+          const roleName = (row.querySelector('[name=newRoleName]') as HTMLInputElement).value.trim();
+          const description = (row.querySelector('[name=newRoleDescription]') as HTMLTextAreaElement).value.trim();
+          if (!roleName || !description) throw new Error('新しいRoleの名前と説明を入力してください。');
+          const roleId = crypto.randomUUID();
+          newRoleChanges.push({ type: 'asset.create', id: roleId, asset: { kind: 'role', name: roleName, description, body: '', responsibilities: (row.querySelector('[name=newRoleResponsibilities]') as HTMLTextAreaElement).value, scope: 'global', useCase: false, taskType: '', metadata: {}, supportingFiles: {}, stages: [], transitions: [], entryStage: '' } });
+          return { stageId, roleId };
+        }
+        return { stageId, roleId: (row.querySelector('[name=stageRole]') as HTMLSelectElement).value };
+      });
+      const roleChanges = stageRoleBindingChanges(workflowId, selectedScope, assignments, bindings);
+      const workflowChange: Change = old ? { type: 'asset.save', id: workflowId, asset } : { type: 'asset.create', id: workflowId, asset };
+      const changes: Change[] = [
+        ...roleChanges.filter(change => change.type === 'binding.remove'),
+        workflowChange,
+        ...newRoleChanges,
+        ...roleChanges.filter(change => change.type !== 'binding.remove'),
+      ];
+      await api('changeset.apply', { changes, provenance: provenance(old ? 'Workflowを編集' : 'Workflowを作成') }, true);
+      location.hash = `assets/${workflowId}`;
+    } else {
+      const result = await api<{ entities: Asset[] }>('asset.save', { id: old?.id, asset, provenance: provenance(old ? '資産を編集' : '資産を作成') }, true);
+      location.hash = `assets/${result.entities[0].id}`;
+    }
   } else if (key === 'binding') await api('binding.save', { id: form.dataset.id || undefined, binding: { scope: selectedScope, sourceId: form.dataset.source, stageId: form.dataset.stage || undefined, targetId: get('targetId'), purpose: get('purpose') }, provenance: provenance('資産の紐づけを編集') }, true);
   else if (key === 'run') {
     const result = await api<{ run: Run }>('run.start', { workflowId: get('workflowId'), runtime: get('runtime'), instruction: get('instruction'), target: get('target'), ...(selectedScope !== 'global' ? { projectId: selectedScope } : {}) }, true);

@@ -57,6 +57,7 @@ export const provenanceSchema = z.object({
 });
 export const changeSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('asset.save'), id: id.optional(), asset: assetSchema }).strict(),
+  z.object({ type: z.literal('asset.create'), id, asset: assetSchema }).strict(),
   z.object({ type: z.literal('binding.save'), id: id.optional(), binding: bindingSchema }).strict(),
   z.object({ type: z.literal('binding.remove'), id }).strict(),
   z.object({ type: z.literal('common.save'), projectId: id, ruleIds: z.array(id) }).strict(),

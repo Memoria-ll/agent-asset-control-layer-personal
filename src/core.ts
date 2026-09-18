@@ -38,14 +38,19 @@ export class Core {
     const changeSetId = randomUUID();
     const p = this.store.put('provenance', { ...provenance, changeSetId });
     const histories: History[] = [], entities: (Asset | Binding | Common)[] = [];
-    const save = <T extends object>(kind: string, data: T & { id?: string }, scope: string) => {
-      const before = data.id ? this.store.get<Stamp>(data.id, kind).revision : null;
+    const save = <T extends object>(kind: string, data: T & { id?: string }, scope: string, create = false) => {
+      const before = data.id && !create ? this.store.get<Stamp>(data.id, kind).revision : null;
       const result = this.store.put(kind, data, scope);
       histories.push(this.store.put('history', { entityId: result.id, kind, before, after: result.revision, changeSetId, restoredFrom: restore?.find(r => r.entityId === result.id)?.revision }));
       return result;
     };
     for (const change of changes) {
-      if (change.type === 'asset.save') {
+      if (change.type === 'asset.create') {
+        const a = assetSchema.parse(change.asset);
+        this.assertScope(a.scope);
+        if (this.store.maybe(change.id)) throw new Error('指定されたAsset IDは登録済みです。');
+        entities.push(save('asset', { ...a, id: change.id }, a.scope, true));
+      } else if (change.type === 'asset.save') {
         const a = assetSchema.parse(change.asset);
         this.assertScope(a.scope);
         if (change.id) {

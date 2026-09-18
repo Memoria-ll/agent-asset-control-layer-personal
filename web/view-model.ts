@@ -1,4 +1,4 @@
-import type { Asset, Binding } from '../src/schema.ts';
+import type { Asset, Binding, Change } from '../src/schema.ts';
 
 export function relatedWorkflows(assetId: string, assets: Asset[], bindings: Binding[]) {
   const result: { workflow: Asset; stageId?: string; via: string[]; binding: Binding }[] = [];
@@ -14,6 +14,21 @@ export function relatedWorkflows(assetId: string, assets: Asset[], bindings: Bin
   };
   walk(assetId, [], new Set());
   return result;
+}
+
+export function stageRoleBindingChanges(workflowId: string, scope: string, assignments: { stageId: string; roleId: string }[], bindings: Binding[]): Change[] {
+  const desired = new Map(assignments.filter(a => a.roleId).map(a => [a.stageId, a.roleId]));
+  const current = bindings.filter(b => b.active && b.scope === scope && b.sourceId === workflowId && b.purpose === 'stage-role');
+  const changes: Change[] = [];
+  for (const binding of current) {
+    const stageId = binding.stageId ?? '';
+    const roleId = desired.get(stageId);
+    if (!roleId) changes.push({ type: 'binding.remove', id: binding.id });
+    else if (roleId !== binding.targetId) changes.push({ type: 'binding.save', id: binding.id, binding: { scope, sourceId: workflowId, stageId, targetId: roleId, purpose: 'stage-role' } });
+    desired.delete(stageId);
+  }
+  for (const [stageId, roleId] of desired) changes.push({ type: 'binding.save', binding: { scope, sourceId: workflowId, stageId, targetId: roleId, purpose: 'stage-role' } });
+  return changes;
 }
 
 export function workflowDiagram(asset: Asset) {

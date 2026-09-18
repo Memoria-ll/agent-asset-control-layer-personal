@@ -89,7 +89,8 @@ Claude Code / Codex (Windows または同一WSL内のLinux)
 
 - Skill recordの必須本文fieldはname、description、bodyとし、useCase設定をRuntime target生成処理へ渡す。
 - Workflow recordはStage listとtransition定義を保持し、StageはWorkflow内の子recordとして保存する。
-- Stage recordのcompletion_conditionを必須fieldとして検証する。Skill、Role、Rule参照はnullable relationとして表現する。
+- Stage recordのcompletion_conditionを必須fieldとして検証する。Skill、Role、Ruleは独立Canonical Assetへのbindingとして参照し、Stage担当Roleは`stage-role` purposeとstageIdで指定する。
+- Workflow編集UIではStageごとに既存Roleを割り当てられる。新規RoleとWorkflowは`asset.create`でIDを確定してからbindingと同じChange Setで作成し、Roleを複数Workflow / Stageから再利用する。重複IDは拒否する。
 - Task相当のfieldはStageに格納し、Task用の独立tableを設けない。
 
 ## 6. Workflow Run
