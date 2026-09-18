@@ -9,6 +9,17 @@ let app: Awaited<ReturnType<typeof serve>>;
 test.beforeAll(async () => { app = await serve(mkdtempSync(join(tmpdir(), 'aacl-ui-')), 0); });
 test.afterAll(async () => { await app.close(); });
 
+function contrastRatio(foreground: string, background: string) {
+  const luminance = (cssColor: string) => {
+    const channels = cssColor.match(/[\d.]+/g);
+    if (!channels || channels.length < 3) throw new Error('Invalid computed color: ' + cssColor);
+    const linear = channels.slice(0, 3).map(Number).map(value => value / 255).map(value => value <= 0.04045 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4);
+    return 0.2126 * linear[0]! + 0.7152 * linear[1]! + 0.0722 * linear[2]!;
+  };
+  const [light, dark] = [luminance(foreground), luminance(background)].sort((a, b) => b - a);
+  return (light! + 0.05) / (dark! + 0.05);
+}
+
 test('C33: Chromium UI assigns existing and new Roles from Workflow editor, runs a Workflow, records and reviews Journal', async ({ page }) => {
   const errors: string[] = [];
   page.on('pageerror', e => errors.push(e.message));
@@ -69,7 +80,67 @@ test('C33: Chromium UI assigns existing and new Roles from Workflow editor, runs
   const editedStages = dialog.locator('.stage-editor');
   await expect(editedStages.nth(0).locator('.transition-row')).toHaveCount(2);
   await expect(editedStages.nth(1).locator('.transition-row')).toHaveCount(2);
+  const firstStageEditor = editedStages.nth(0);
+  await expect(dialog.getByRole('region', { name: '工程 1' })).toBeVisible();
+  await expect(firstStageEditor.getByRole('region', { name: 'この工程からの遷移' })).toBeVisible();
+  await expect(firstStageEditor.getByRole('group', { name: '遷移設定 1' })).toBeVisible();
+  await expect(firstStageEditor.getByRole('group', { name: '遷移設定 2' })).toBeVisible();
+  await firstStageEditor.locator('.transition-row').nth(0).getByRole('button', { name: '遷移設定 1を削除' }).click();
+  await expect(firstStageEditor.getByRole('group', { name: '遷移設定 1' })).toBeVisible();
+  await expect(firstStageEditor.locator('.transition-row').first().getByRole('button', { name: '遷移設定 1を削除' })).toBeVisible();
+  await expect(firstStageEditor.getByRole('group', { name: '遷移設定 2' })).toHaveCount(0);
+  await firstStageEditor.getByRole('button', { name: '＋ 行き先を追加' }).click();
+  const restoredTransition = firstStageEditor.locator('.transition-row').last();
+  await expect(firstStageEditor.getByRole('group', { name: '遷移設定 2' })).toBeVisible();
+  await expect(restoredTransition.getByRole('button', { name: '遷移設定 2を削除' })).toBeVisible();
+  await restoredTransition.getByLabel('表示名').fill('確認へ');
+  const colors = await firstStageEditor.evaluate(stage => {
+    const panel = stage.querySelector<HTMLElement>('.stage-transitions')!;
+    const heading = panel.querySelector<HTMLElement>('h4')!;
+    const helper = panel.querySelector<HTMLElement>('p')!;
+    const row = stage.querySelector<HTMLElement>('.transition-row')!;
+    const legend = row.querySelector<HTMLElement>('legend')!;
+    return {
+      stageText: getComputedStyle(stage.querySelector<HTMLElement>('.stage-title')!).color,
+      stageHelperText: getComputedStyle(stage.querySelector<HTMLElement>(':scope > .hint')!).color,
+      stageBackground: getComputedStyle(stage).backgroundColor,
+      stageBorder: getComputedStyle(stage).borderTopColor,
+      panelText: getComputedStyle(heading).color,
+      helperText: getComputedStyle(helper).color,
+      panelBackground: getComputedStyle(panel).backgroundColor,
+      panelBorder: getComputedStyle(panel).borderTopColor,
+      rowText: getComputedStyle(legend).color,
+      rowBackground: getComputedStyle(row).backgroundColor,
+      rowBorder: getComputedStyle(row).borderTopColor
+    };
+  });
+  expect(contrastRatio(colors.stageText, colors.stageBackground)).toBeGreaterThanOrEqual(4.5);
+  expect(contrastRatio(colors.panelText, colors.panelBackground)).toBeGreaterThanOrEqual(4.5);
+  expect(contrastRatio(colors.helperText, colors.panelBackground)).toBeGreaterThanOrEqual(4.5);
+  expect(contrastRatio(colors.stageHelperText, colors.stageBackground)).toBeGreaterThanOrEqual(4.5);
+  expect(contrastRatio(colors.rowText, colors.rowBackground)).toBeGreaterThanOrEqual(4.5);
+  expect(contrastRatio(colors.stageBorder, colors.stageBackground)).toBeGreaterThanOrEqual(3);
+  expect(contrastRatio(colors.panelBorder, colors.panelBackground)).toBeGreaterThanOrEqual(3);
+  expect(contrastRatio(colors.panelBorder, colors.stageBackground)).toBeGreaterThanOrEqual(3);
+  expect(contrastRatio(colors.rowBorder, colors.rowBackground)).toBeGreaterThanOrEqual(3);
   await expect(dialog.locator('[name=from]')).toHaveCount(0);
+  const expectEditorToFit = async () => {
+    const overflowing = await dialog.evaluate(root => {
+      const modal = root as HTMLElement;
+      const nodes = [modal, ...Array.from(modal.querySelectorAll<HTMLElement>('.stage-editor, .stage-transitions, .transition-row, .transition-fields'))];
+      return nodes.filter(node => node.scrollWidth > node.clientWidth).map(node => node.className || node.tagName);
+    });
+    expect(overflowing).toEqual([]);
+  };
+  const standardViewport = page.viewportSize();
+  expect(standardViewport?.width).toBe(1440);
+  await expectEditorToFit();
+  await page.setViewportSize({ width: 880, height: standardViewport!.height });
+  await expect(firstStageEditor).toBeVisible();
+  await expectEditorToFit();
+  const horizontalOverflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
+  expect(horizontalOverflow).toBe(0);
+  await page.setViewportSize(standardViewport!);
   await page.screenshot({ path: '/tmp/aacl-workflow-editor.png', fullPage: true });
   await dialog.getByRole('button', { name: '保存する', exact: true }).click();
   await expect(dialog).not.toBeVisible();

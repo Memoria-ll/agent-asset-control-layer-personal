@@ -122,10 +122,10 @@ function stageRoleId(workflowId: string, stageId: string) {
   return bindings.find(b => b.sourceId === workflowId && b.stageId === stageId && b.purpose === 'stage-role')?.targetId ?? '';
 }
 function stageRow(s: { id: string; name: string; completion_condition: string; additionalInstructions?: string; description?: string; taskType?: string }, index: number, roleId = '', transitions: Asset['transitions'] = [], stages: { id: string; name: string }[] = []) {
-  return `<div class="editor-row stage-editor" data-id="${esc(s.id)}"><div class="row-head"><strong>Stage ${index + 1}</strong>${button('row-remove', '削除', 'small ghost')}</div><div class="grid-two">${field('工程名', 'stageName', s.name)}${field('分類', 'stageType', s.taskType ?? '', false)}</div><div class="stage-role-row">${select('担当Role', 'stageRole', roleOptions(roleId), true)}${button(`role-create:${s.id}`, '＋ 新しいRole', 'small ghost')}</div><p class="hint">担当Roleの責務を工程の基本とし、必要なら追加指示で補います。</p><div class="new-role-fields" hidden><p class="hint">新しいRoleをGlobalで共有し、このStageの担当に設定します。</p>${field('新しいRole名', 'newRoleName', '', false)}${area('Roleの説明', 'newRoleDescription', '', false)}${area('Roleの責務', 'newRoleResponsibilities', '', false)}</div><div class="spacer"></div>${area('追加指示（任意）', 'additionalInstructions', s.additionalInstructions ?? '', false)}${area('完了条件', 'completion', s.completion_condition)}<input type="hidden" name="stageDescription" value="${esc(s.description ?? '')}"><section class="stage-transitions"><div class="stage-transitions-head"><div><h4>次の行き先</h4><p>この工程の完了後に進める場所</p></div>${button('transition-add', '＋ 行き先を追加', 'small ghost')}</div><div class="stage-transition-list">${transitions.map(t => transitionRow(t, stages)).join('') || '<p class="hint stage-transition-empty">行き先はまだありません。</p>'}</div></section></div>`;
+  return `<section class="editor-row stage-editor" data-id="${esc(s.id)}" aria-labelledby="stage-heading-${esc(s.id)}"><div class="row-head"><h3 class="stage-title" id="stage-heading-${esc(s.id)}">工程 ${index + 1}</h3>${button('row-remove', '削除', 'small ghost')}</div><div class="grid-two">${field('工程名', 'stageName', s.name)}${field('分類', 'stageType', s.taskType ?? '', false)}</div><div class="stage-role-row">${select('担当Role', 'stageRole', roleOptions(roleId), true)}${button(`role-create:${s.id}`, '＋ 新しいRole', 'small ghost')}</div><p class="hint">担当Roleの責務を工程の基本とし、必要なら追加指示で補います。</p><div class="new-role-fields" hidden><p class="hint">新しいRoleをGlobalで共有し、このStageの担当に設定します。</p>${field('新しいRole名', 'newRoleName', '', false)}${area('Roleの説明', 'newRoleDescription', '', false)}${area('Roleの責務', 'newRoleResponsibilities', '', false)}</div><div class="spacer"></div>${area('追加指示（任意）', 'additionalInstructions', s.additionalInstructions ?? '', false)}${area('完了条件', 'completion', s.completion_condition)}<input type="hidden" name="stageDescription" value="${esc(s.description ?? '')}"><section class="stage-transitions" aria-labelledby="transition-heading-${esc(s.id)}"><div class="stage-transitions-head"><div><h4 id="transition-heading-${esc(s.id)}">この工程からの遷移</h4><p>各行で行き先・種別・表示名を設定します。</p></div>${button('transition-add', '＋ 行き先を追加', 'small ghost')}</div><div class="stage-transition-list">${transitions.map((t, transitionIndex) => transitionRow(t, stages, transitionIndex)).join('') || '<p class="hint stage-transition-empty">行き先はまだありません。</p>'}</div></section></section>`;
 }
-function transitionRow(t: { id: string; from: string; to: string; type: string; label: string }, stages: { id: string; name: string }[]) {
-  return `<div class="transition-row" data-id="${esc(t.id)}">${select('行き先', 'to', stages.map(s => opt(s.id, s.name || '未命名の工程', t.to)).join('') + opt('completed', '完了', t.to))}${select('種別', 'transitionType', Object.entries(typeLabels).map(([key, title]) => opt(key, title, t.type)).join(''))}${field('表示名', 'transitionLabel', t.label)}<button type="button" class="ghost transition-remove" data-action="row-remove" aria-label="遷移を削除">×</button></div>`;
+function transitionRow(t: { id: string; from: string; to: string; type: string; label: string }, stages: { id: string; name: string }[], index: number) {
+  return `<fieldset class="transition-row" data-id="${esc(t.id)}"><legend>遷移設定 ${index + 1}</legend><div class="transition-fields">${select('行き先', 'to', stages.map(s => opt(s.id, s.name || '未命名の工程', t.to)).join('') + opt('completed', '完了', t.to))}${select('種別', 'transitionType', Object.entries(typeLabels).map(([key, title]) => opt(key, title, t.type)).join(''))}${field('表示名', 'transitionLabel', t.label)}<button type="button" class="ghost transition-remove" data-action="row-remove" aria-label="遷移設定 ${index + 1}を削除">×</button></div></fieldset>`;
 }
 function assetEditor(a?: Asset, newKind: Asset['kind'] = 'skill') {
   const kind = a?.kind ?? newKind;
@@ -141,7 +141,8 @@ function updateTransitionTargets(form: Element) {
     target.innerHTML = stages.map(s => opt(s.id, s.name || '未命名の工程', selected)).join('') + opt('completed', '完了', selected);
   }
 }
-function updateStageNumbers(form: Element) { form.querySelectorAll<HTMLElement>('.stage-editor .row-head strong').forEach((label, index) => { label.textContent = `Stage ${index + 1}`; }); }
+function updateStageNumbers(form: Element) { form.querySelectorAll<HTMLElement>('.stage-editor .stage-title').forEach((label, index) => { label.textContent = `工程 ${index + 1}`; }); }
+function updateTransitionNumbers(stage: HTMLElement) { stage.querySelectorAll<HTMLElement>('.transition-row').forEach((row, index) => { const label = `遷移設定 ${index + 1}`; row.querySelector<HTMLElement>('legend')!.textContent = label; row.querySelector<HTMLButtonElement>('.transition-remove')!.setAttribute('aria-label', `${label}を削除`); }); }
 function updateTransitionEmptyState(stage: HTMLElement) {
   const list = stage.querySelector<HTMLElement>('.stage-transition-list')!;
   if (!list.querySelector('.transition-row')) list.innerHTML = '<p class="hint stage-transition-empty">行き先はまだありません。</p>';
@@ -191,12 +192,12 @@ async function action(value: string, target: HTMLElement) {
     const index = stages.findIndex(s => s.id === stage.dataset.id), next = stages[index + 1];
     const transition = { id: crypto.randomUUID(), from: stage.dataset.id!, to: next?.id ?? 'completed', type: next ? 'next' : 'complete', label: '' };
     stage.querySelector('.stage-transition-empty')?.remove();
-    stage.querySelector('.stage-transition-list')!.insertAdjacentHTML('beforeend', transitionRow(transition, stages));
+    stage.querySelector('.stage-transition-list')!.insertAdjacentHTML('beforeend', transitionRow(transition, stages, stage.querySelectorAll('.transition-row').length)); updateTransitionNumbers(stage);
     return;
   }
   if (key === 'row-remove') {
     const transition = target.closest<HTMLElement>('.transition-row');
-    if (transition) { const stage = transition.closest<HTMLElement>('.stage-editor')!; transition.remove(); updateTransitionEmptyState(stage); return; }
+    if (transition) { const stage = transition.closest<HTMLElement>('.stage-editor')!; transition.remove(); updateTransitionNumbers(stage); updateTransitionEmptyState(stage); return; }
     const stage = target.closest<HTMLElement>('.stage-editor');
     if (stage) {
       const stageId = stage.dataset.id!;
@@ -204,7 +205,7 @@ async function action(value: string, target: HTMLElement) {
       stage.remove();
       updateStageNumbers(dialog);
       updateTransitionTargets(dialog);
-      dialog.querySelectorAll<HTMLElement>('.stage-editor').forEach(updateTransitionEmptyState);
+      dialog.querySelectorAll<HTMLElement>('.stage-editor').forEach(stage => { updateTransitionNumbers(stage); updateTransitionEmptyState(stage); });
       return;
     }
     target.closest('.file-editor')?.remove();
