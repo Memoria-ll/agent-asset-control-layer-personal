@@ -17,17 +17,16 @@ npm run dev
 
 ## アプリとして導入する
 
-GitHubからCLIを直接導入します。WSL上のNode.js 24、npm、Gitが必要です。GitHub指定はnpm packageのscope形式ではなく、`github:owner/repository`形式を使います。
+GitHubからCLIを一度実行してアプリを導入します。WSL上のNode.js 24、npm、Gitが必要です。GitHub指定はnpm packageのscope形式ではなく、`github:owner/repository`形式を使います。
 
 ```bash
-npm install --global github:Memoria-ll/agent-asset-control-layer-personal
-aacl setup
+npm exec --yes --package=github:Memoria-ll/agent-asset-control-layer-personal -- aacl setup
 ```
 
-導入用のBuild済みCLIをリポジトリに含めているため、GitHubから導入するときにinstall scriptは実行しません。npm 12以降はGit依存を既定で拒否するため、その場合はこのコマンドでGit導入を許可してください。
+導入用のBuild済みCLIをリポジトリに含めているため、GitHubから実行するときにBuildは不要です。npm 12以降はGit依存を既定で拒否するため、その場合はこのコマンドでGit導入を許可してください。
 
 ```bash
-npm install --global --allow-git=all github:Memoria-ll/agent-asset-control-layer-personal
+npm exec --yes --allow-git=all --package=github:Memoria-ll/agent-asset-control-layer-personal -- aacl setup
 ```
 
 `setup`はBuildしたアプリと依存パッケージを管理フォルダーへコピーします。

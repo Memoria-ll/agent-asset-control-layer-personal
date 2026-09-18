@@ -27,17 +27,16 @@ The app is for local, single-user operation. It listens on `127.0.0.1`; the defa
 
 ## Install and start
 
-Install the CLI directly from the public GitHub repository, then set up the local app:
+Run the CLI from the public GitHub repository once, then set up the local app:
 
 ```bash
-npm install --global github:Memoria-ll/agent-asset-control-layer-personal
-aacl setup
+npm exec --yes --package=github:Memoria-ll/agent-asset-control-layer-personal -- aacl setup
 ```
 
-The repository includes the compiled CLI, so the GitHub install does not need to run a build script. npm 12 blocks Git dependencies by default; on npm 12 or newer, allow this command's Git source explicitly:
+The repository includes the compiled CLI, so no build script needs to run during installation. npm 12 blocks Git dependencies by default; on npm 12 or newer, allow this command's Git source explicitly:
 
 ```bash
-npm install --global --allow-git=all github:Memoria-ll/agent-asset-control-layer-personal
+npm exec --yes --allow-git=all --package=github:Memoria-ll/agent-asset-control-layer-personal -- aacl setup
 ```
 
 `setup` copies the built app into the managed directory (`$XDG_DATA_HOME/aacl`, or `~/.local/share/aacl` by default).

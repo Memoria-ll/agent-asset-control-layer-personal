@@ -27,17 +27,16 @@ flowchart LR
 
 ## 導入して起動する
 
-GitHubの公開リポジトリからCLIを直接導入し、ローカルアプリをSetupします。
+GitHubの公開リポジトリからCLIを一度実行し、ローカルアプリをSetupします。
 
 ```bash
-npm install --global github:Memoria-ll/agent-asset-control-layer-personal
-aacl setup
+npm exec --yes --package=github:Memoria-ll/agent-asset-control-layer-personal -- aacl setup
 ```
 
-導入用のBuild済みCLIをリポジトリに含めているため、GitHubから導入するときにBuild scriptは実行しません。npm 12以降はGit依存を既定で拒否するため、その場合は次のようにこのコマンドでGit導入を許可してください。
+導入用のBuild済みCLIをリポジトリに含めているため、GitHubから実行するときにBuild scriptは不要です。npm 12以降はGit依存を既定で拒否するため、その場合は次のようにこのコマンドでGit導入を許可してください。
 
 ```bash
-npm install --global --allow-git=all github:Memoria-ll/agent-asset-control-layer-personal
+npm exec --yes --allow-git=all --package=github:Memoria-ll/agent-asset-control-layer-personal -- aacl setup
 ```
 
 `setup`はBuildしたアプリを管理フォルダー（既定は`$XDG_DATA_HOME/aacl`、未設定なら`~/.local/share/aacl`）へコピーします。

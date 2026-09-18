@@ -3,7 +3,7 @@ import { parseArgs } from 'node:util';
 import { spawn } from 'node:child_process';
 import { cpSync, existsSync, mkdirSync, openSync, closeSync, readFileSync, rmSync, writeFileSync, lstatSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { basename, join, resolve } from 'node:path';
+import { dirname, basename, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { randomUUID } from 'node:crypto';
 import { setTimeout as delay } from 'node:timers/promises';
@@ -64,8 +64,13 @@ function installApplication(target) {
     if (existsSync(app))
         throw new Error('この管理フォルダーにはアプリが導入済みです。');
     mkdirSync(app, { recursive: true, mode: 0o700 });
-    for (const path of ['dist', 'web', 'package.json', 'node_modules'])
+    for (const path of ['dist', 'web', 'package.json'])
         cpSync(join(root, path), join(app, path), { recursive: true, dereference: false });
+    const dependencies = [join(root, 'node_modules'), dirname(root)].find(path => basename(path) === 'node_modules' && existsSync(path));
+    if (!dependencies)
+        throw new Error('依存パッケージを確認できません。');
+    const ownPackage = join(dependencies, JSON.parse(readFileSync(join(root, 'package.json'), 'utf8')).name);
+    cpSync(dependencies, join(app, 'node_modules'), { recursive: true, dereference: false, filter: source => resolve(source) !== resolve(ownPackage) });
     if (existsSync(join(root, 'package-lock.json')))
         cpSync(join(root, 'package-lock.json'), join(app, 'package-lock.json'));
     writeFileSync(join(target, '.aacl-managed'), '1\n', { mode: 0o600 });
