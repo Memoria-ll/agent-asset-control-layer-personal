@@ -74,6 +74,12 @@ export class Core {
     if (b.purpose === 'stage-role' && !b.stageId) throw new Error('担当Stageを指定してください。');
     if (source.id === target.id) throw new Error('Skillの循環参照は登録できません。');
   }
+  assertStageRoles(workflow: Asset, scope: string) {
+    for (const stage of workflow.stages) {
+      const assignments = this.bindings(scope).filter(b => b.sourceId === workflow.id && b.stageId === stage.id && b.purpose === 'stage-role');
+      if (assignments.length !== 1 || this.asset(assignments[0].targetId).kind !== 'role') throw new Error(`各Stageには担当Roleを1件割り当ててください: ${stage.id}`);
+    }
+  }
   applyChanges(changes: Change[], provenance: Provenance, proposalId?: string, approvalId?: string, restore?: { entityId: string; revision: number }[], restoresChangeSetId?: string, allowAssetDelete = false) {
     if (!allowAssetDelete && changes.some(c => c.type === 'asset.delete')) throw new Error('Asset削除は影響一覧を確認した後、専用の削除操作から確定してください。');
     for (const change of changes.filter((c): c is Extract<Change, { type: 'asset.delete' }> => c.type === 'asset.delete')) {
@@ -92,6 +98,12 @@ export class Core {
     const changeSetId = randomUUID();
     const p = this.store.put('provenance', { ...provenance, changeSetId });
     const histories: History[] = [], entities: (Asset | Binding | Common)[] = [];
+    const stageRoleScopes = new Map<string, Set<string>>();
+    const validateStageRoles = (workflowId: string, scope: string) => {
+      const scopes = stageRoleScopes.get(workflowId) ?? new Set<string>();
+      scopes.add(scope);
+      stageRoleScopes.set(workflowId, scopes);
+    };
     const save = <T extends object>(kind: string, data: T & { id?: string }, scope: string, create = false) => {
       const before = data.id && !create ? this.store.get<Stamp>(data.id, kind).revision : null;
       const result = this.store.put(kind, data, scope);
@@ -104,6 +116,7 @@ export class Core {
         this.assertScope(a.scope);
         if (this.store.maybe(change.id)) throw new Error('指定されたAsset IDは登録済みです。');
         entities.push(save('asset', { ...a, id: change.id }, a.scope, true));
+        if (a.kind === 'workflow') validateStageRoles(change.id, a.scope);
       } else if (change.type === 'asset.save') {
         const a = assetSchema.parse(change.asset);
         this.assertScope(a.scope);
@@ -115,7 +128,9 @@ export class Core {
             if (!a.stages.some(s => s.id === b.stageId)) throw new Error('削除するStageの紐づけを先に解除してください。');
           }
         }
-        entities.push(save('asset', { ...a, id: change.id }, a.scope));
+        const saved = save('asset', { ...a, id: change.id }, a.scope) as Asset;
+        entities.push(saved);
+        if (a.kind === 'workflow') validateStageRoles(saved.id, a.scope);
       } else if (change.type === 'asset.delete') {
         const asset = this.asset(change.id);
         if (this.bindings().some(b => b.sourceId === change.id || b.targetId === change.id)) throw new Error('Assetへの紐づけを解除してから削除してください。');
@@ -123,6 +138,7 @@ export class Core {
         entities.push(save('asset', { ...asset, deletedAt: new Date().toISOString() }, asset.scope));
       } else if (change.type === 'binding.save') {
         const b = bindingSchema.parse(change.binding);
+        const previous = change.id ? this.store.get<Binding>(change.id, 'binding') : undefined;
         if (change.id && this.store.get<Binding>(change.id, 'binding').scope !== b.scope) throw new Error('紐づけの管理先は変更できません。');
         this.validateBinding(b);
         const peers = this.bindings(b.scope).filter(v => v.id !== change.id && v.sourceId === b.sourceId && v.stageId === b.stageId);
@@ -136,9 +152,12 @@ export class Core {
         };
         visit(b.sourceId, new Set());
         entities.push(save('binding', { ...b, id: change.id, active: true }, b.scope));
+        if (previous?.purpose === 'stage-role') validateStageRoles(previous.sourceId, previous.scope);
+        if (b.purpose === 'stage-role') validateStageRoles(b.sourceId, b.scope);
       } else if (change.type === 'binding.remove') {
         const b = this.store.get<Binding>(change.id, 'binding');
         entities.push(save('binding', { ...b, active: false }, b.scope));
+        if (b.purpose === 'stage-role') validateStageRoles(b.sourceId, b.scope);
       } else {
         const c = this.common(change.projectId);
         for (const id of change.ruleIds) {
@@ -147,6 +166,11 @@ export class Core {
         }
         entities.push(save('common', { ...c, ruleIds: [...new Set(change.ruleIds)] }, change.projectId));
       }
+    }
+    for (const [workflowId, scopes] of stageRoleScopes) {
+      const workflow = this.asset(workflowId, true);
+      if (workflow.deletedAt || workflow.kind !== 'workflow') continue;
+      for (const scope of scopes) this.assertStageRoles(workflow, scope);
     }
     const changeSet = this.store.put('changeset', { id: changeSetId, operations: changes, provenanceId: p.id, historyIds: histories.map(h => h.id), proposalId, approvalId, restoresChangeSetId });
     return { changeSet, entities };
@@ -167,6 +191,9 @@ export class Core {
     const { workflow, bindings, common } = snapshot;
     const stage = workflow.stages.find(s => s.id === stageId);
     if (!stage) throw new Error('SnapshotにStageが存在しません。');
+    const stageRoleBindings = bindings.filter(b => b.sourceId === workflow.id && b.stageId === stageId && b.purpose === 'stage-role');
+    if (stageRoleBindings.length !== 1) throw new Error(`このStageには担当Roleを1件指定してください: ${stageId}`);
+    const stageRoleId = stageRoleBindings[0].targetId;
     const assets = new Map(snapshot.assets.map(a => [a.id, a]));
     const chosen = new Map<string, Asset>(), resolution: Context['resolution'] = [];
     const seen = new Set<string>();
@@ -185,9 +212,10 @@ export class Core {
       walk(b.targetId, [workflow.id, ...(b.stageId ? [b.stageId] : []), `${b.id}@${b.revision}`], new Set([workflow.id]), b.stageId ? 'Stageの直接参照' : 'Workflowの直接参照');
     }
     for (const id of common?.ruleIds ?? []) walk(id, [`Project Common@${common!.revision}`], new Set(), 'Project Common');
+    if (chosen.get(stageRoleId)?.kind !== 'role') throw new Error(`このStageの担当Roleを取得できません: ${stageId}`);
     if (roleId && (!chosen.has(roleId) || chosen.get(roleId)?.kind !== 'role')) throw new Error('このStageで利用対象になっているRoleを指定してください。');
     return {
-      runId: snapshot.runId, workflow, stage,
+      runId: snapshot.runId, workflow, stage, stageRoleId,
       roles: [...chosen.values()].filter(a => a.kind === 'role'),
       rules: [...chosen.values()].filter(a => a.kind === 'rule'),
       skillCatalog: [...chosen.values()].filter(a => a.kind === 'skill').map(({ id, name, description, revision }) => ({ id, name, description, revision })),

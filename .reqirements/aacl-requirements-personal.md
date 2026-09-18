@@ -149,7 +149,7 @@ AACLはグローバルの紐づけと、各Projectの紐づけを別々に保存
 - Role → Skill / Rule
 - Skill → Skill
 
-Workflowのentry roleとStageごとの担当Roleも紐づけで指定する。Model名はAsset間の紐づけに含めない。
+Workflowのentry roleとStageごとの担当Roleは紐づけで指定する。各Stageには担当Roleを1件割り当てる。Model名はAsset間の紐づけに含めない。
 
 ProjectのRunでは、そのProjectに保存された紐づけを使う。グローバルとプロジェクトで同名のAssetが存在する場合も、紐づけに記録されたAssetを参照する。
 
@@ -227,7 +227,7 @@ Workflowは次を保持する。
 
 Workflow / Stageで使うRole・Skill・Ruleは紐づけで指定し、対象Projectの構成から取得する。
 
-StageをWorkflowの実行単位とする。Stageが参照するSkill、Role、Ruleは任意とする。completion_conditionはAIが完了を判断するための必須自由記述であり、Coreはその意味を判定しない。CoreはWorkflowのStage一覧と許可されたtransitionを管理し、完了判断後にAIまたはユーザーが選んだtransitionの構造と現在状態を検証する。
+StageをWorkflowの実行単位とする。各Stageには担当Roleを必ず1件割り当て、Roleのresponsibilitiesを工程の基本としてContextへ含める。Stage固有の追加指示は任意の自由記述としてRoleのresponsibilitiesを補足し、completion_conditionとは別に保存してStage Contextへ含める。Stageが参照するSkillとRuleは任意とする。completion_conditionはAIが完了を判断するための必須自由記述であり、Coreはその意味を判定しない。CoreはWorkflowのStage一覧、担当Role、許可されたtransitionを管理し、完了判断後にAIまたはユーザーが選んだtransitionの構造と現在状態を検証する。
 
 ---
 
@@ -261,6 +261,7 @@ Roleで使うSkill / Ruleは、使用するGlobalまたはProject scopeの紐づ
 Coreは次をRole Contextとして構成する。
 
 - Roleのresponsibilities
+- 現在Stageに割り当てられた担当Roleの識別情報
 - Roleから参照するSkill / Rule
 - Workflow / Stageで使うと明示されたSkill / Rule
 - Project Commonに登録されたRule
@@ -446,9 +447,9 @@ Resolutionの入力は、Project、使用する紐づけ、Project Common、Work
 - Workflow Definition
 - 紐づけとProject Commonで明示参照されたRule
 - 利用対象Skillのcatalog
-- 現在Stageとcompletion_condition
+- 現在Stage、担当Roleとresponsibilities、任意の追加指示、completion_condition
 
-Roleが指定された実行には、そのRoleとresponsibilitiesを含める。Model名はRoleやAssetの紐づけとしてContextへ合成しない。
+Stageの担当Roleとresponsibilitiesを工程の基本Contextとして含める。Stage固有の追加指示があればRoleへの補足として含める。Model名はRoleやAssetの紐づけとしてContextへ合成しない。
 
 Workflow RunではSkill本文とsupporting filesをAIが必要時に取得し、利用対象のSkill集合とrevisionをContextの一部として扱う。直接起動Skillは指定Assetの本文を取得して渡す。
 
@@ -462,7 +463,7 @@ AACLは、資産がどの参照経路から利用対象になったか、何を�
 
 Workflowで別のRoleへ作業を委譲する場合、Coreは引き渡すContextを構成する。
 
-Contextには、Run ID、Workflowとrevision、Stageとcompletion_condition、Roleとresponsibilities、明示参照されたRuleとSkillを含める。
+Contextには、Run ID、Workflowとrevision、Stage、stageRoleId、Roleとresponsibilities、任意の追加指示、completion_condition、明示参照されたRuleとSkillを含める。
 
 実際の割り当てと実行主体の起動は、接続中AIとRuntimeが担う。
 
@@ -684,7 +685,7 @@ UIの視覚表現はリキッドグラス風とする。画面構成や個別の
 
 - Workflow / StageごとにRole、Skill、Ruleの紐づきを一覧でき、各Assetからも関連するWorkflow / Stageを確認できる。Stageへの直接参照と担当Role経由の参照を区別して示す。
 - UIから紐づけを追加・解除・付け替えでき、SkillのuseCase設定を有効・無効に簡単に切り替えられる。現在の設定状態を見分けられる。
-- Workflow編集画面でStageごとに既存Roleを選ぶか、新しいRoleをGlobal Assetとして作成して割り当てられる。作成したRoleは他のWorkflow / Stageでも再利用できる。
+- Workflow編集画面でStageごとに既存Roleを必ず1件選ぶか、新しいRoleをGlobal Assetとして作成して割り当てられる。担当Roleの責務がStageの基本となり、追加指示は任意で記入できる。作成したRoleは他のWorkflow / Stageでも再利用できる。
 - WorkflowのStage間の許可された遷移を図で表示する。次工程への遷移、差し戻し、retry等の自己ループを含む遷移元・遷移先・種別が分かる。
 
 Runtime差は、Runtime identifierとRuntime固有Bootstrapとして扱う。ModelとCapabilityの存在・利用可否・metadataはCoreが管理する情報ではない。

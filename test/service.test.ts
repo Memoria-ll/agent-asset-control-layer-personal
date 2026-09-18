@@ -52,8 +52,15 @@ test('C02 C17 C32 C33: real HTTP / typed MCP / loopback / two concurrent chat Ha
   assert.ok(tools.find(t => t.name === 'aacl_context_get')?.inputSchema.required?.includes('contextHandle'));
   assert.ok(!tools.some(t => /sql|dispatch|execute_action/.test(t.name)));
   const badHeader = await rpc('tools/list', {}, undefined, { 'Mcp-Method': 'tools/call' }); assert.equal(badHeader.status, 400);
-  const created = await api<{ entities: Asset[] }>('asset.save', { operationId: randomUUID(), provenance: { origin: 'ui' }, asset: { kind: 'workflow', name: 'HTTP Workflow', description: '結合試験', entryStage: 'start', stages: [{ id: 'start', name: '作業', completion_condition: '作業を報告' }], transitions: [{ id: 'end', from: 'start', to: 'completed', type: 'complete', label: '完了' }] } });
-  const [a, b] = await Promise.all(['claude', 'codex'].map(runtime => tool<{ run: Run; contextHandle: string }>('aacl_run_start', { operationId: randomUUID(), workflowId: created.entities[0].id, instruction: runtime, runtime })));
+  const workflowId = randomUUID(), roleId = randomUUID();
+  const created = await api<{ entities: Asset[] }>('changeset.apply', { operationId: randomUUID(), provenance: { origin: 'ui' }, changes: [
+    { type: 'asset.create', id: workflowId, asset: { kind: 'workflow', name: 'HTTP Workflow', description: '結合試験', entryStage: 'start', stages: [{ id: 'start', name: '作業', completion_condition: '作業を報告' }], transitions: [{ id: 'end', from: 'start', to: 'completed', type: 'complete', label: '完了' }] } },
+    { type: 'asset.create', id: roleId, asset: { kind: 'role', name: 'HTTP担当Role', description: '工程の責務を担う', responsibilities: '作業結果を報告する。' } },
+    { type: 'binding.save', binding: { sourceId: workflowId, targetId: roleId, stageId: 'start', purpose: 'stage-role' } },
+  ] });
+  assert.equal(created.entities[0].id, workflowId);
+  const [a, b] = await Promise.all(['claude', 'codex'].map(runtime => tool<{ run: Run; contextHandle: string; context: { stageRoleId: string } }>('aacl_run_start', { operationId: randomUUID(), workflowId, instruction: runtime, runtime })));
+  assert.equal(a.context.stageRoleId, roleId);
   assert.notEqual(a.contextHandle, b.contextHandle);
   const [contextA, contextB] = await Promise.all([a, b].map(r => tool<{ runId: string }>('aacl_context_get', { contextHandle: r.contextHandle })));
   assert.equal(contextA.runId, a.run.id); assert.equal(contextB.runId, b.run.id);

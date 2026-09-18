@@ -5,7 +5,7 @@ export const id = z.uuid();
 export const scope = z.union([z.literal('global'), id]);
 export const stageSchema = z.object({
   id: text, name: text, completion_condition: text,
-  description: z.string().default(''), taskType: z.string().default(''),
+  additionalInstructions: z.string().default(''), description: z.string().default(''), taskType: z.string().default(''),
 }).strict();
 export const transitionSchema = z.object({
   id: text, from: text, to: text,
@@ -106,7 +106,7 @@ export interface Run extends Stamp {
 }
 export interface Resolution { assetId: string; revision: number; path: string[]; reason: string }
 export interface Context {
-  runId: string; workflow: Asset; stage: z.infer<typeof stageSchema>;
+  runId: string; workflow: Asset; stage: z.infer<typeof stageSchema>; stageRoleId: string;
   roles: Asset[]; rules: Asset[]; skillCatalog: { id: string; name: string; description: string; revision: number }[];
   resolution: Resolution[]; unavailable: { target: string; reason: string }[];
 }

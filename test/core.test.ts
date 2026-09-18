@@ -18,11 +18,44 @@ function fixture(t: { after: (fn: () => void) => void }) {
   t.after(() => store.close());
   const call = <T>(name: string, input: object = {}, operationId = randomUUID()) => ops.execute(name, { ...input, ...(ops.entries.get(name)!.write ? { operationId } : {}) }) as Promise<T>;
   const asset = async (kind: Asset['kind'], overrides: object = {}) => (await call<{ entities: Asset[] }>('asset.save', { asset: { kind, name: kind, description: '説明', body: '本文', ...overrides }, provenance })).entities[0];
-  const workflow = () => asset('workflow', { name: 'テストWorkflow', entryStage: 'build', stages: [{ id: 'build', name: '実装', completion_condition: '実装を確認' }, { id: 'review', name: '確認', completion_condition: '確認結果を報告' }], transitions: [{ id: 'next', from: 'build', to: 'review', type: 'next', label: '確認へ' }, { id: 'retry', from: 'build', to: 'build', type: 'retry', label: '再試行' }, { id: 'return', from: 'review', to: 'build', type: 'return', label: '差し戻し' }, { id: 'done', from: 'review', to: 'completed', type: 'complete', label: '完了' }] });
+  const workflow = async (assignedRole?: Asset) => {
+    const workflowId = randomUUID(), roleId = assignedRole?.id ?? randomUUID();
+    const stages = [{ id: 'build', name: '実装', completion_condition: '実装を確認' }, { id: 'review', name: '確認', completion_condition: '確認結果を報告' }];
+    const changes = [
+      { type: 'asset.create', id: workflowId, asset: { kind: 'workflow', name: 'テストWorkflow', description: '説明', entryStage: 'build', stages, transitions: [{ id: 'next', from: 'build', to: 'review', type: 'next', label: '確認へ' }, { id: 'retry', from: 'build', to: 'build', type: 'retry', label: '再試行' }, { id: 'return', from: 'review', to: 'build', type: 'return', label: '差し戻し' }, { id: 'done', from: 'review', to: 'completed', type: 'complete', label: '完了' }] } },
+      ...(assignedRole ? [] : [{ type: 'asset.create', id: roleId, asset: { kind: 'role', name: '担当Role', description: '各工程の責務を担う' } }]),
+      ...stages.map(stage => ({ type: 'binding.save', binding: { sourceId: workflowId, targetId: roleId, stageId: stage.id, purpose: 'stage-role' } })),
+    ];
+    await call('changeset.apply', { changes, provenance });
+    return core.asset(workflowId);
+  };
   const bind = async (source: Asset, target: Asset, overrides: object = {}) => (await call<{ entities: Binding[] }>('binding.save', { binding: { sourceId: source.id, targetId: target.id, ...overrides }, provenance })).entities[0];
   const start = (w: Asset, overrides: object = {}) => call<{ run: Run; contextHandle: string; context: Context; snapshotId: string }>('run.start', { workflowId: w.id, runtime: 'codex', instruction: '明示した作業', ...overrides });
   return { store, core, ops, call, asset, workflow, bind, start };
 }
+
+test('C09: a Workflow cannot be saved while a Stage lacks its responsible Role', async t => {
+  const f = fixture(t);
+  const workflow = { kind: 'workflow', name: 'Role前提Workflow', description: '担当Roleを必須にする', entryStage: 'work', stages: [{ id: 'work', name: '作業', completion_condition: '作業結果を確認' }], transitions: [{ id: 'done', from: 'work', to: 'completed', type: 'complete', label: '完了' }] };
+  await assert.rejects(f.call('asset.save', { asset: workflow, provenance }), /担当Role/);
+  assert.equal(f.store.list('asset').length, 0);
+});
+
+test('C09 C11 C17: optional Stage instructions accompany its responsible Role in Context', async t => {
+  const f = fixture(t), workflowId = randomUUID(), roleId = randomUUID();
+  const workflow = { kind: 'workflow', name: 'Role前提Workflow', description: 'Roleと追加指示をContextへ渡す', entryStage: 'work', stages: [{ id: 'work', name: '作業', completion_condition: '作業結果を確認', additionalInstructions: '既存のRole責務を踏まえて、対象範囲を先に確認する。' }], transitions: [{ id: 'done', from: 'work', to: 'completed', type: 'complete', label: '完了' }] };
+  await f.call('changeset.apply', { changes: [
+    { type: 'asset.create', id: workflowId, asset: workflow },
+    { type: 'asset.create', id: roleId, asset: { kind: 'role', name: '実装担当', description: '実装を担う', responsibilities: '変更の意図を守り、結果を検証する。' } },
+    { type: 'binding.save', binding: { sourceId: workflowId, targetId: roleId, stageId: 'work', purpose: 'stage-role' } },
+  ], provenance });
+  const run = await f.start(f.core.asset(workflowId));
+  const context = run.context as Context & { stageRoleId: string; stage: Context['stage'] & { additionalInstructions: string } };
+  assert.equal(context.stageRoleId, roleId);
+  assert.equal(context.stage.additionalInstructions, '既存のRole責務を踏まえて、対象範囲を先に確認する。');
+  assert.equal(context.roles.find(role => role.id === roleId)?.responsibilities, '変更の意図を守り、結果を検証する。');
+  await assert.rejects(f.call('binding.remove', { id: f.core.bindings().find(b => b.sourceId === workflowId && b.purpose === 'stage-role')!.id, provenance }), /担当Role/);
+});
 
 test('C02 C04 C13 C14 C15 C28 C29: schema / stable identity / idempotent writes / provenance / restoration', async t => {
   const f = fixture(t), a = await f.asset('skill');
@@ -100,9 +133,9 @@ test('C05 C06 C07: exact Project identity and independent copied bindings / comm
   const root = mkdtempSync(join(tmpdir(), 'aacl-project-'));
   const { project } = await f.call<{ project: Project }>('project.init', { root, name: 'Project' });
   assert.equal(f.core.common(project.id).ruleIds.length, 0);
-  const copy = f.core.bindings(project.id)[0];
+  const copy = f.core.bindings(project.id).find(b => b.targetId === s.id)!;
   assert.equal(copy.targetId, s.id); assert.notEqual(copy.id, globalBinding.id);
-  assert.equal(f.store.list('asset').length, 3);
+  assert.equal(f.store.list('asset').length, 4);
   const projectTargets = f.store.list<RuntimeTarget>('runtime-target').filter(target => target.scope === project.id);
   assert.equal(projectTargets.length, 2);
   assert.ok(existsSync(join(globalRoot, '.claude/commands/issue-development.md')));
@@ -115,7 +148,8 @@ test('C05 C06 C07: exact Project identity and independent copied bindings / comm
   assert.ok(!existsSync(join(globalRoot, '.claude/commands/project-only.md')));
   assert.ok(!existsSync(join(globalRoot, '.codex/skills/project-only/SKILL.md')));
   await f.call('binding.remove', { id: globalBinding.id, provenance });
-  assert.equal(f.core.bindings(project.id).length, 1);
+  assert.equal(f.core.bindings(project.id).filter(b => b.targetId === s.id).length, 1);
+  assert.equal(f.core.bindings(project.id).filter(b => b.purpose === 'stage-role').length, 2);
   assert.equal((await f.call<{ project: Project | null }>('project.resolve', { root: `${root}/child` })).project, null);
   assert.equal((await f.call<{ project: Project | null }>('project.resolve', { root: `${root}/../${root.split('/').at(-1)}` })).project?.id, project.id);
   await f.call('common.save', { projectId: project.id, ruleIds: [rule.id], provenance });
@@ -140,7 +174,7 @@ test('C03 C08 C10 C16 C34: direct Skill retrieval never creates a managed execut
 });
 
 test('C09 C11 C12 C17 C20 C21 C22 C23 C24 C31: immutable resolution, progressive delivery, concurrent Handles', async t => {
-  const f = fixture(t), w = await f.workflow(), role = await f.asset('role', { responsibilities: '責務' }), a = await f.asset('skill', { body: '未取得本文'.repeat(100), supportingFiles: { 'guide.md': '元ファイル' } }), b = await f.asset('skill', { name: 'B' }), rule = await f.asset('rule');
+  const f = fixture(t), role = await f.asset('role', { responsibilities: '責務' }), w = await f.workflow(role), a = await f.asset('skill', { body: '未取得本文'.repeat(100), supportingFiles: { 'guide.md': '元ファイル' } }), b = await f.asset('skill', { name: 'B' }), rule = await f.asset('rule');
   await f.bind(w, role, { purpose: 'entry-role' }); await f.bind(role, a); await f.bind(a, b); await f.bind(role, rule);
   const one = await f.start(w), two = await f.start(w, { runtime: 'claude' });
   assert.notEqual(one.contextHandle, two.contextHandle);
@@ -351,8 +385,8 @@ test('C29 C33: Change Set restoration / persistent SQLite / export / consistent 
 });
 
 test('C33: UI relationship projections distinguish direct / Role paths and graph includes return and retry', async t => {
-  const f = fixture(t), w = await f.workflow(), role = await f.asset('role'), s = await f.asset('skill');
-  await f.bind(w, role, { stageId: 'build', purpose: 'stage-role' }); await f.bind(role, s); await f.bind(w, s, { stageId: 'review' });
+  const f = fixture(t), role = await f.asset('role'), w = await f.workflow(role), s = await f.asset('skill');
+  await f.bind(role, s); await f.bind(w, s, { stageId: 'review' });
   const views = relatedWorkflows(s.id, f.store.list('asset'), f.core.bindings());
   assert.ok(views.some(v => v.stageId === 'build' && v.via[0] === role.name && v.binding.sourceId === role.id));
   assert.ok(views.some(v => v.stageId === 'review' && !v.via.length));
@@ -380,10 +414,10 @@ test('C11 C33: one Global Role is reused across Workflow stages and workflows, a
   const secondRun = await f.start(second);
   assert.deepEqual(secondRun.context.roles.map(a => a.id), [role.id]);
 
-  const removals = stageRoleBindingChanges(first.id, 'global', [], f.core.bindings());
+  const remaining = stageRoleBindingChanges(first.id, 'global', [{ stageId: 'build', roleId: role.id }], f.core.bindings());
   const payload = { ...f.core.assetPayload(first), stages: [first.stages[0]], transitions: [] };
-  await f.call('changeset.apply', { changes: [...removals, { type: 'asset.save', id: first.id, asset: payload }], provenance });
+  await f.call('changeset.apply', { changes: [...remaining, { type: 'asset.save', id: first.id, asset: payload }], provenance });
   assert.equal(f.core.asset(first.id).stages.length, 1);
-  assert.equal(f.core.bindings('global').filter(b => b.sourceId === first.id && b.purpose === 'stage-role').length, 0);
+  assert.deepEqual(f.core.bindings('global').filter(b => b.sourceId === first.id && b.purpose === 'stage-role').map(b => b.stageId), ['build']);
   assert.equal(f.core.bindings('global').filter(b => b.sourceId === second.id && b.purpose === 'stage-role').length, 2);
 });

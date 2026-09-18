@@ -44,6 +44,8 @@ test('C33: Chromium UI assigns existing and new Roles from Workflow editor, runs
   await dialog.getByRole('button', { name: '＋ 工程を追加' }).click();
   await dialog.getByLabel('工程名', { exact: true }).fill('実装');
   await dialog.getByLabel('完了条件', { exact: true }).fill('実装内容を確認できる');
+  await expect(dialog.getByLabel('担当Role').nth(0)).toHaveAttribute('required', '');
+  await dialog.getByLabel('追加指示（任意）').nth(0).fill('Roleの責務を土台にして、変更範囲を先に確認する。');
   await dialog.getByRole('button', { name: '＋ 工程を追加' }).click();
   await dialog.getByLabel('工程名', { exact: true }).nth(1).fill('確認');
   await dialog.getByLabel('完了条件', { exact: true }).nth(1).fill('検証結果を報告した');
@@ -75,12 +77,15 @@ test('C33: Chromium UI assigns existing and new Roles from Workflow editor, runs
   await expect(page.locator('path.edge')).toHaveCount(4);
   await expect(page.locator('path.edge.retry')).toHaveCount(1);
   await expect(page.getByText('検証担当 経由')).toBeVisible();
-  await expect(page.locator('.detail').getByText('レビュー担当', { exact: true })).toBeVisible();
+  await expect(page.locator('.detail .editor-row').nth(1).locator('p.hint')).toContainText('担当Role: レビュー担当');
+  await expect(page.locator('.detail .editor-row').nth(0)).toContainText('Roleの責務を土台にして、変更範囲を先に確認する。');
   await page.screenshot({ path: '/tmp/aacl-workflow.png', fullPage: true });
   await page.getByRole('button', { name: 'Runを開始', exact: true }).click();
   await dialog.getByLabel('実行する依頼').fill('動作経路を確認する');
   await dialog.getByRole('button', { name: 'Runを開始', exact: true }).click();
   await expect(dialog).not.toBeVisible();
+  await expect(page.getByText('担当Role: 検証担当')).toBeVisible();
+  await expect(page.getByText('Roleの責務を土台にして、変更範囲を先に確認する。', { exact: true })).toBeVisible();
   await expect(page.getByRole('button', { name: '確認へ', exact: true })).toBeVisible();
   await page.getByRole('button', { name: '確認へ', exact: true }).click();
   await dialog.getByLabel('完了報告').fill('実装内容を確認した');

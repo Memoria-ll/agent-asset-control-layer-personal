@@ -41,7 +41,7 @@ filesystem、shell、GitHub、browser、external API等、Runtimeが提供する
 
 ### Context
 
-Workflow RunでAIへ渡す実行情報。Workflow Definition、現在Stageとcompletion_condition、Role、明示参照されたRuleとSkill等を含む。Model名や成果物要件をAssetから自動的に合成しない。直接起動Skillの取得は指定Assetの本文を返す。
+Workflow RunでAIへ渡す実行情報。Workflow Definition、現在Stageとcompletion_condition、担当Role IDと責務、Stageの追加指示、明示参照されたRuleとSkill等を含む。Model名や成果物要件をAssetから自動的に合成しない。直接起動Skillの取得は指定Assetの本文を返す。
 
 ### Context Handle
 
@@ -165,7 +165,7 @@ Coreが受け付けるデータの構造と、保存時に確認する項目の�
 
 ### Stage
 
-Workflow内の工程であり、Workflowの実行単位。Stage固有の必須`completion_condition`を持ち、Runの現在位置として管理される。Skill、Role、Rule参照は任意であり、WorkflowがStage一覧と許可するtransitionを定義する。
+Workflow内の工程であり、Workflowの実行単位。Stage固有の必須`completion_condition`を持ち、Runの現在位置として管理される。各Stageには担当Roleを1件割り当て、そのRoleの責務を基本とする。`additionalInstructions`は必要に応じて加える自由記述であり、Roleの責務と完了条件を補う。WorkflowがStage一覧と許可するtransitionを定義する。
 
 ## T
 
@@ -195,7 +195,7 @@ Skillが直接起動可能なUse Caseであることを示す設定値。trueへ
 
 ### Workflow
 
-複数のStageとtransitionからなる再利用可能な開発方法を定義するCanonical Asset。各Stageは必須の`completion_condition`を持つ。
+複数のStageとtransitionからなる再利用可能な開発方法を定義するCanonical Asset。各Stageは担当Roleを1件、必須の`completion_condition`を持ち、任意の`additionalInstructions`でそのStageの作業を補足できる。
 
 ### Workspace
 
@@ -214,6 +214,10 @@ AACLの状態管理・検証・解決・保存を担う中心Service。アプリ
 ### completion_condition
 
 Workflow Stageが完了したとAIが判断するための条件記述。Stageごとの必須自由記述として保存し、CoreがAIへContextとして渡す。Coreは内容の意味を判定しない。
+
+### additionalInstructions
+
+Workflow Stageの担当Roleと責務を基本としたうえで、必要に応じて加える任意の自由記述。completion_conditionとは別fieldとして保存し、StageのContextに含める。
 
 ### revision
 
