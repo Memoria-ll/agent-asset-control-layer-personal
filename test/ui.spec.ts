@@ -81,6 +81,8 @@ test('C33: Chromium UI assigns existing and new Roles from Workflow editor, runs
   await expect(editedStages.nth(0).locator('.transition-row')).toHaveCount(2);
   await expect(editedStages.nth(1).locator('.transition-row')).toHaveCount(2);
   const firstStageEditor = editedStages.nth(0);
+  const stageContent = firstStageEditor.locator('.stage-content');
+  const stageTransitions = firstStageEditor.locator('.stage-transitions');
   await expect(dialog.getByRole('region', { name: '工程 1' })).toBeVisible();
   await expect(firstStageEditor.getByRole('region', { name: 'この工程からの遷移' })).toBeVisible();
   await expect(firstStageEditor.getByRole('group', { name: '遷移設定 1' })).toBeVisible();
@@ -102,7 +104,7 @@ test('C33: Chromium UI assigns existing and new Roles from Workflow editor, runs
     const legend = row.querySelector<HTMLElement>('legend')!;
     return {
       stageText: getComputedStyle(stage.querySelector<HTMLElement>('.stage-title')!).color,
-      stageHelperText: getComputedStyle(stage.querySelector<HTMLElement>(':scope > .hint')!).color,
+      stageHelperText: getComputedStyle(stage.querySelector<HTMLElement>('.stage-content > .hint')!).color,
       stageBackground: getComputedStyle(stage).backgroundColor,
       stageBorder: getComputedStyle(stage).borderTopColor,
       panelText: getComputedStyle(heading).color,
@@ -127,7 +129,7 @@ test('C33: Chromium UI assigns existing and new Roles from Workflow editor, runs
   const expectEditorToFit = async () => {
     const overflowing = await dialog.evaluate(root => {
       const modal = root as HTMLElement;
-      const nodes = [modal, ...Array.from(modal.querySelectorAll<HTMLElement>('.stage-editor, .stage-transitions, .transition-row, .transition-fields'))];
+      const nodes = [modal, ...Array.from(modal.querySelectorAll<HTMLElement>('.stage-editor, .stage-content, .stage-transitions, .transition-row, .transition-fields'))];
       return nodes.filter(node => node.scrollWidth > node.clientWidth).map(node => node.className || node.tagName);
     });
     expect(overflowing).toEqual([]);
@@ -135,9 +137,31 @@ test('C33: Chromium UI assigns existing and new Roles from Workflow editor, runs
   const standardViewport = page.viewportSize();
   expect(standardViewport?.width).toBe(1440);
   await expectEditorToFit();
+  const wideContentBounds = await stageContent.boundingBox();
+  const wideTransitionBounds = await stageTransitions.boundingBox();
+  expect(wideContentBounds).not.toBeNull();
+  expect(wideTransitionBounds).not.toBeNull();
+  expect(wideTransitionBounds!.x).toBeGreaterThanOrEqual(wideContentBounds!.x + wideContentBounds!.width);
+  expect(Math.abs(wideTransitionBounds!.y - wideContentBounds!.y)).toBeLessThanOrEqual(1);
+  await page.setViewportSize({ width: 1050, height: standardViewport!.height });
+  await expectEditorToFit();
+  const atBreakpointColumns = await firstStageEditor.evaluate(stage => getComputedStyle(stage).gridTemplateColumns.split(' ').length);
+  expect(atBreakpointColumns).toBe(1);
+  await page.setViewportSize({ width: 1051, height: standardViewport!.height });
+  await expectEditorToFit();
+  const aboveBreakpointContent = await stageContent.boundingBox();
+  const aboveBreakpointTransitions = await stageTransitions.boundingBox();
+  expect(aboveBreakpointContent).not.toBeNull();
+  expect(aboveBreakpointTransitions).not.toBeNull();
+  expect(aboveBreakpointTransitions!.x).toBeGreaterThanOrEqual(aboveBreakpointContent!.x + aboveBreakpointContent!.width);
   await page.setViewportSize({ width: 880, height: standardViewport!.height });
   await expect(firstStageEditor).toBeVisible();
   await expectEditorToFit();
+  const narrowContentBounds = await stageContent.boundingBox();
+  const narrowTransitionBounds = await stageTransitions.boundingBox();
+  expect(narrowContentBounds).not.toBeNull();
+  expect(narrowTransitionBounds).not.toBeNull();
+  expect(narrowTransitionBounds!.y).toBeGreaterThanOrEqual(narrowContentBounds!.y + narrowContentBounds!.height);
   const horizontalOverflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
   expect(horizontalOverflow).toBe(0);
   await page.setViewportSize(standardViewport!);

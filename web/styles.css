@@ -706,8 +706,33 @@ pre {
   display:none
 }
 .stage-editor {
+  display:grid;
+  grid-template-columns:minmax(0,1.1fr) minmax(0,1fr);
+  column-gap:18px;
+  align-items:start;
   background:#eaf3fa;
   border:2px solid #638295
+}
+.stage-editor > .row-head {
+  grid-column:1 / -1
+}
+.stage-content {
+  display:grid;
+  align-content:start;
+  gap:10px;
+  min-width:0
+}
+.stage-content .stage-role-row {
+  margin-top:0
+}
+.stage-content .spacer {
+  display:none
+}
+.stage-editor > .stage-transitions {
+  grid-column:2;
+  grid-row:2;
+  min-width:0;
+  margin-top:0
 }
 .stage-editor .hint {
   color:#40596b;
@@ -1007,6 +1032,9 @@ dialog {
   box-shadow:0 30px 100px #16394c30;
   padding:29px
 }
+dialog[data-layout="workflow-editor"] {
+  width:min(1180px,calc(100vw - 40px))
+}
 dialog::backdrop {
   background:#1b3e552b;
   backdrop-filter:blur(5px)
@@ -1109,6 +1137,23 @@ dialog::backdrop {
   margin-bottom:28px
 }
 
+}
+
+@media(max-width:1050px) {
+  dialog[data-layout="workflow-editor"] {
+    width:calc(100vw - 40px)
+  }
+  .stage-editor {
+    grid-template-columns:minmax(0,1fr);
+    row-gap:12px
+  }
+  .stage-editor > .row-head {
+    grid-column:1
+  }
+  .stage-editor > .stage-transitions {
+    grid-column:1;
+    grid-row:auto
+  }
 }
 
 @media(prefers-reduced-motion:reduce) {
