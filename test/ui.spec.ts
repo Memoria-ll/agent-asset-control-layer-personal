@@ -53,14 +53,22 @@ test('C33: Chromium UI assigns existing and new Roles from Workflow editor, runs
   await secondStage.getByLabel('新しいRole名').fill('レビュー担当');
   await secondStage.getByLabel('Roleの説明').fill('変更内容を独立して確認する');
   await secondStage.getByLabel('Roleの責務').fill('実際の動作と完了条件を照合する。');
-  for (const [from, to, type, label] of [['実装', '確認', 'next', '確認へ'], ['確認', '実装', 'return', '戻す'], ['実装', '実装', 'retry', 'やり直す'], ['確認', '完了', 'complete', '完了する']]) {
-    await dialog.getByRole('button', { name: '＋ 遷移を追加' }).click();
-    const row = dialog.locator('.transition-row').last();
-    await row.getByLabel('遷移元').selectOption({ label: from });
-    await row.getByLabel('遷移先').selectOption({ label: to });
+  for (const [fromIndex, to, type, label] of [[0, '確認', 'next', '確認へ'], [1, '実装', 'return', '戻す'], [0, '実装', 'retry', 'やり直す'], [1, '完了', 'complete', '完了する']] as [number, string, string, string][]) {
+    const stage = dialog.locator('.stage-editor').nth(fromIndex);
+    await stage.getByRole('button', { name: '＋ 行き先を追加' }).click();
+    const row = stage.locator('.transition-row').last();
+    await row.getByLabel('行き先').selectOption({ label: to });
     await row.getByLabel('種別').selectOption(type);
     await row.getByLabel('表示名').fill(label);
   }
+  await dialog.getByRole('button', { name: '保存する', exact: true }).click();
+  await expect(dialog).not.toBeVisible();
+  await page.getByRole('button', { name: '編集する', exact: true }).click();
+  const editedStages = dialog.locator('.stage-editor');
+  await expect(editedStages.nth(0).locator('.transition-row')).toHaveCount(2);
+  await expect(editedStages.nth(1).locator('.transition-row')).toHaveCount(2);
+  await expect(dialog.locator('[name=from]')).toHaveCount(0);
+  await page.screenshot({ path: '/tmp/aacl-workflow-editor.png', fullPage: true });
   await dialog.getByRole('button', { name: '保存する', exact: true }).click();
   await expect(dialog).not.toBeVisible();
   await expect(page.getByRole('img', { name: '改善の確認の許可遷移' })).toBeVisible();

@@ -705,26 +705,59 @@ pre {
 .new-role-fields[hidden] {
   display:none
 }
+.stage-transitions {
+  margin-top:18px;
+  padding-top:15px;
+  border-top:1px solid var(--line)
+}
+.stage-transitions-head {
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:12px;
+  margin-bottom:11px
+}
+.stage-transitions-head h4 {
+  margin:0;
+  color:#315367;
+  font-size:12px;
+  font-weight:650
+}
+.stage-transitions-head p {
+  margin:4px 0 0;
+  color:#80929f;
+  font-size:10px
+}
+.stage-transition-list {
+  display:grid;
+  gap:10px
+}
+.stage-transition-empty {
+  margin:0;
+  padding:9px 11px;
+  border-radius:9px;
+  background:#ffffff73
+}
 .transition-row {
   display:grid;
-  grid-template-columns:1fr 20px 1fr 90px 1fr 28px;
+  grid-template-columns:minmax(0,1fr) minmax(110px,.8fr) minmax(0,1fr) 32px;
   gap:8px;
-  align-items:end;
-  margin-bottom:12px
+  align-items:end
 }
 .transition-row button {
-  padding:8px 4px
+  padding:8px 4px;
+  min-height:37px
 }
 .transition-row label {
   font-size:10px
 }
 .transition-row select,.transition-row input {
   font-size:11px;
-  padding:9px 7px
+  padding:9px 7px;
+  min-width:0
 }
-.transition-row>span {
-  padding-bottom:11px;
-  color:#8ba0ae
+.transition-remove {
+  color:#7c929e
 }
 .diagram {
   overflow:auto;
