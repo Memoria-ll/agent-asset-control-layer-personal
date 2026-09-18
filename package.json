@@ -1,0 +1,30 @@
+{
+  "name": "aacl-personal",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=24.0.0 <25"
+  },
+  "bin": {
+    "aacl": "dist/src/cli.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "test": "node --test test/*.test.ts",
+    "check": "npm run build && npm test && npm run test:ui",
+    "start": "node dist/src/cli.js serve",
+    "dev": "npm run build && node dist/src/cli.js serve --dir .local",
+    "test:ui": "playwright test"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/node": "2.0.0",
+    "@modelcontextprotocol/server": "2.0.0",
+    "zod": "4.6.5"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.63.0",
+    "@types/node": "^24.0.0",
+    "typescript": "7.0.2"
+  }
+}

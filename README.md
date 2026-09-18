@@ -1,0 +1,105 @@
+# AACL — Agent Asset Control Layer
+
+Claude Code / Codexで使うWorkflow・Skill・Role・Ruleを管理し、Workflow実行とJournalから開発方法を改善する個人用アプリです。正本はWSL上のSQLiteに保存します。
+
+要件の正本は[開発要求](.reqirements/aacl-requirements-personal.md)、技術条件は[実装設計](.reqirements/aacl-implementation-design-personal.md)です。
+
+## 開発用に起動する
+
+WSL上のNode.js 24とnpmが必要です。UIはJavaScriptが有効なChromium系ブラウザーで利用します。
+
+```bash
+npm ci
+npm run dev
+```
+
+[http://127.0.0.1:4318](http://127.0.0.1:4318)を開きます。開発用データは、このリポジトリの`.local/`に保存します。Workflowのサンプルや利用者の資産は自動登録しません。
+
+## アプリとして導入する
+
+```bash
+npm ci
+npm run build
+node dist/src/cli.js setup
+```
+
+既定の管理フォルダーは`$XDG_DATA_HOME/aacl`、未設定なら`~/.local/share/aacl`です。アプリ・依存パッケージ・データ・起動用CLIをこの中に配置します。初期設定時は`--dir /absolute/path/to/aacl`で別の保存先を選べます。既存の一般フォルダーを誤って管理対象にしないよう、空のフォルダーかAACL管理フォルダーを受け付けます。
+
+導入後に表示される`bin`のパスをPATHへ追加してください。既定場所なら次のとおりです。
+
+```bash
+export PATH="$HOME/.local/share/aacl/bin:$PATH"
+aacl health
+```
+
+`setup`はJournal記録用の`journal`、横断レビュー用の`journal-review`をCanonical Skillとして導入します。この2件も利用者が編集できます。UIの「設定・接続 → Journal用Skillを導入」から追加することもでき、導入済みの内容は上書きしません。
+
+| コマンド | 動作 |
+| --- | --- |
+| `aacl serve` | loopbackにServiceを起動 |
+| `aacl ensure` | 未起動ならバックグラウンドで起動 |
+| `aacl connect` | 起動を確認しMCPの登録コマンドを表示 |
+| `aacl init` | 現在のディレクトリをProject rootとして登録 |
+| `aacl health` | Service・管理フォルダー・プロセスを確認 |
+| `aacl diagnostics` | 参照・実行状態・提供Context量を診断 |
+| `aacl export /absolute/new-directory` | Markdown / JSONを出力 |
+| `aacl backup /absolute/new-backup.sqlite` | 整合性を保ったSQLite Backupを出力 |
+| `aacl restore /absolute/backup.sqlite --dir /absolute/new-aacl` | 新規管理フォルダーへデータとアプリを復元 |
+| `aacl stop` | Serviceを停止 |
+| `aacl uninstall --yes` | 確認した管理フォルダーを削除 |
+
+全コマンドに`--dir`と`--port`を指定できます。インストールされたCLIには導入時の場所とportが設定されます。Backupの復元対象はschema version 1です。出力済みのExportやBackupを上書きする場合は、利用者が別の出力先を選びます。
+
+## Claude Code / Codexから利用する
+
+WSLでServiceを起動した後、接続先Runtimeで登録します。
+
+```bash
+aacl connect
+codex mcp add aacl --url http://127.0.0.1:4318/mcp
+claude mcp add --transport http aacl http://127.0.0.1:4318/mcp
+```
+
+MCP endpointはStreamable HTTP、protocol revisionは`2026-07-28`です。Runの対応づけには`run.start`が返す`contextHandle`を使用します。後続のRun操作へAIがこの値を渡します。
+
+ServiceへのHTTP接続だけでは停止中のプロセスを起動できないため、Runtime入口はMCP操作の前に`aacl ensure`を実行します。Windows側の入口は`wsl.exe`経由で実行します。Windowsからの利用では、同じWSLのServiceへlocalhostで到達でき、WSL内のPATHから`aacl`を呼べる必要があります。
+
+Projectで`aacl init`を実行すると、Globalの紐づけをProject用にコピーし、`.claude/commands/`と`.codex/skills/`へ入口を生成します。Global設定先はUIで標準候補を確認して登録できます。生成入口にはAsset IDと取得手順を記載し、Canonical本文はSQLiteから取得します。生成後に利用者が編集した入口は自動上書きせず、診断へ記録します。
+
+Asset、紐づけ、Project Commonの書き込みでは、新しい`operationId`を使用してください。同じ操作の再送時だけ、同じIDと同じ入力を再利用します。AI経由の資産変更には`provenance.origin: "ai"`と`userRequest`・`reason`が必要です。用途別のtool一覧と入力schemaはMCPの`tools/list`から取得できます。
+
+設定ファイルへのMCP登録は、上のコマンドを利用者のRuntime環境で実行します。アプリのセットアップは既存の認証情報やRuntime設定ファイルを編集しません。登録済み入口は、設定先の管理解除やAACLのアンインストール後も残ります。
+
+## 画面での操作
+
+- **資産ライブラリ**: 作成・編集、Skillの直接起動切り替え、Workflowの工程・遷移図、直接参照とRole経由の参照、Stage側／Asset側の紐づけ編集。
+- **Workflow Run**: 明示的な開始、許可遷移の選択、完了報告、中止、Snapshot・提供内容・実行記録。
+- **Journal / Journal Review**: Markdown記録、気づきごとの保留・処理済み・却下、提案、ユーザー判断、承認済み変更の適用。
+- **変更履歴**: Assetの過去版と現在版の比較、revision復元、Change Set適用前への復元、変更理由。
+- **診断**: 明示参照の不整合、固定revisionの取得可否、反復遷移、提供ContextのUTF-8バイト量。
+- **設定・接続**: Project、Project Common、Runtime設定先、非活動timeout、Export・Backup。
+
+UIの提案作成フォームは、1つのAssetの本文・責務の変更を扱います。工程・遷移・複数資産・紐づけ・Project Commonをまとめた提案は、接続中AIから`aacl_proposal_save`で登録できます。UIで変更内容を確認し、判断・適用できます。
+
+## 保存と実行の契約
+
+`src/schema.ts`が入力の構造、`src/core.ts`が変更・解決・遷移、`src/store.ts`がSQLite境界です。UIとMCPは`src/operations.ts`の同じ検証・適用処理を通ります。CLIもServiceのAPIを使います。Backup復元は停止中の新規管理先へ行います。
+
+Run開始時にWorkflow・関連Asset・紐づけ・Project Commonを不変Snapshotへ固定します。初期ContextにはWorkflow、現在Stage、Role、Rule、Skill catalogを渡し、Skill本文と補助ファイルは必要時に取得します。提供の記録と、実際に使ったという報告は別に保存します。
+
+Journalの既知見出しは`Task`、`実際に使ったもの`、`良かった点`、`困った点`、`改善の種`、`根拠・確かさ`、`日付`、`Project`、`Branch`、`Type`です。重複見出しは順序を保って連結し、未知の見出し・断片・原文を保持します。良かった点・困った点・改善の種の空行区切りの段落を、独立した気づきとして扱います。
+
+## 検証
+
+```bash
+npx playwright install chromium
+npm run check
+```
+
+`check`はTypeScriptビルド、Node標準test runnerによるCore・HTTP／MCP・CLI試験、Chromiumによる画面操作を順に実行します。Nodeの試験だけなら`npm test`、画面だけならビルド後に`npm run test:ui`を使用します。
+
+試験データはOSの一時ディレクトリに置き、利用者の資産・Runtime設定先を試験用に変更しません。試験とC01〜C35の対応、実環境での受入項目は[検証表](docs/verification.md)に記載しています。
+
+実際のClaude Code／Codexの複数チャットと、WindowsホストからWSLへの接続は受入確認が必要です。自動試験は同一Coreへ複数のHTTP／MCP要求を送り、Handleによる分離を確認します。
+
+参考: [MCP Streamable HTTP](https://modelcontextprotocol.io/specification/2026-07-28/basic/transports/streamable-http)、[CodexのMCP接続](https://learn.chatgpt.com/docs/extend/mcp?surface=cli)、[Claude CodeのMCP接続](https://code.claude.com/docs/en/mcp)。Runtime入口の配置先は、このリポジトリの要件書に従います。
