@@ -17,11 +17,17 @@ npm run dev
 
 ## アプリとして導入する
 
+GitHubからソースを取得して導入します。WSL上のNode.js 24、npm、Gitが必要です。
+
 ```bash
+git clone https://github.com/Memoria-ll/agent-asset-control-layer-personal.git
+cd agent-asset-control-layer-personal
 npm ci
 npm run build
 node dist/src/cli.js setup
 ```
+
+`setup`はBuildしたアプリと依存パッケージを管理フォルダーへコピーします。アプリの起動後にcloneした作業フォルダーは使いません。
 
 既定の管理フォルダーは`$XDG_DATA_HOME/aacl`、未設定なら`~/.local/share/aacl`です。アプリ・依存パッケージ・データ・起動用CLIをこの中に配置します。初期設定時は`--dir /absolute/path/to/aacl`で別の保存先を選べます。既存の一般フォルダーを誤って管理対象にしないよう、空のフォルダーかAACL管理フォルダーを受け付けます。
 

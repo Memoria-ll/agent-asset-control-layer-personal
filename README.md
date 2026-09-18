@@ -27,13 +27,17 @@ The app is for local, single-user operation. It listens on `127.0.0.1`; the defa
 
 ## Install and start
 
-From this repository, install dependencies, build the app, and run its setup command:
+Clone the public GitHub repository, install dependencies, build the app, and run its setup command:
 
 ```bash
+git clone https://github.com/Memoria-ll/agent-asset-control-layer-personal.git
+cd agent-asset-control-layer-personal
 npm ci
 npm run build
 node dist/src/cli.js setup
 ```
+
+`setup` copies the built app into the managed directory (`$XDG_DATA_HOME/aacl`, or `~/.local/share/aacl` by default), so the clone is only needed as the install source.
 
 The default managed directory is `$XDG_DATA_HOME/aacl`, or `~/.local/share/aacl` when `XDG_DATA_HOME` is unset. Add its `bin` directory to `PATH`, then check the service and open the UI:
 
