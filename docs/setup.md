@@ -38,6 +38,7 @@ aacl health
 | --- | --- |
 | `aacl serve` | loopbackにServiceを起動 |
 | `aacl ensure` | 未起動ならバックグラウンドで起動 |
+| `aacl autostart <action>` | `enable`、`disable`、`status`でWindowsログオン時のWSL Service自動起動を管理 |
 | `aacl connect` | 起動を確認しMCPの登録コマンドを表示 |
 | `aacl init` | 現在のディレクトリをProject rootとして登録 |
 | `aacl health` | Service・管理フォルダー・プロセスを確認 |
@@ -52,7 +53,9 @@ aacl health
 
 ## Claude Code / Codexから利用する
 
-WSLでServiceを起動した後、接続先Runtimeで登録します。
+`aacl setup`はWindowsログオン時のタスクスケジューラ登録も行い、対象WSL内でServiceを自動起動します。状態は`aacl autostart status`、解除は`aacl autostart disable`、再登録は`aacl autostart enable`です。起動タスクは`aacl ensure`を呼ぶため、既に同じServiceが起動している場合はそのまま使います。
+
+Serviceを確認した後、接続先RuntimeでMCPを登録します。
 
 ```bash
 aacl connect
@@ -62,7 +65,7 @@ claude mcp add --transport http aacl http://127.0.0.1:4318/mcp
 
 MCP endpointはStreamable HTTP、protocol revisionは`2026-07-28`です。Runの対応づけには`run.start`が返す`contextHandle`を使用します。後続のRun操作へAIがこの値を渡します。
 
-ServiceへのHTTP接続だけでは停止中のプロセスを起動できないため、Runtime入口はMCP操作の前に`aacl ensure`を実行します。Windows側の入口は`wsl.exe`経由で実行します。Windowsからの利用では、同じWSLのServiceへlocalhostで到達でき、WSL内のPATHから`aacl`を呼べる必要があります。
+配置するWorkflow CommandとCodex Skillには、Asset IDを渡すMCP operationだけを記載します。入口は`aacl ensure`やshell commandを実行しません。Windowsログオン後は同じWSLのServiceへlocalhostで接続できます。Serviceを手動停止した場合は、WSLで`aacl ensure`を実行して再開します。
 
 Projectで`aacl init`を実行すると、Globalの紐づけをProject用にコピーし、Project scopeのAsset用Runtime設定先を登録します。Project内にはProject専用の入口だけを配置し、Global入口はGlobal設定先に置きます。Global設定先はUIで標準候補を確認して登録できます。生成入口にはAsset IDと取得手順を記載し、Canonical本文はSQLiteから取得します。生成後に利用者が編集した入口は自動上書きせず、診断へ記録します。
 

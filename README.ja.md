@@ -46,11 +46,14 @@ aacl health
 
 `setup`は編集可能な`journal`と`journal-review`のSkill Assetも導入します。管理するProjectのルートで`aacl init`を実行すると、Project登録とProject scopeのRuntime設定先を準備します。
 
+WSL上で`setup`を実行すると、Windowsログオン時に対象WSLとAACL Serviceを起動するタスクも登録します。配置するRuntime入口にはAsset IDを渡すMCP operationだけを記載します。自動起動は`aacl autostart enable`、`aacl autostart disable`、`aacl autostart status`で管理します。
+
 主なCLIコマンド:
 
 | コマンド | 役割 |
 | --- | --- |
 | `aacl ensure` | Serviceが停止中なら起動します。 |
+| `aacl autostart <action>` | `enable`、`disable`、`status`でWindowsログオン時のWSL Service自動起動を管理します。 |
 | `aacl connect` | Serviceを起動し、MCP clientの登録コマンドを表示します。 |
 | `aacl init` | 現在のディレクトリをProjectとして登録します。 |
 | `aacl diagnostics` | 参照、Run状態、提供Contextの診断を表示します。 |

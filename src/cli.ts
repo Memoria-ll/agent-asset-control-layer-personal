@@ -10,6 +10,7 @@ import { setTimeout as delay } from 'node:timers/promises';
 import { serve, errorMessage } from './server.ts';
 import { restoreBackup } from './maintenance.ts';
 import { prepareManagedDirectory } from './managed-directory.ts';
+import { WindowsAutostart } from './autostart.ts';
 
 const { values, positionals } = parseArgs({ allowPositionals: true, options: { dir: { type: 'string' }, port: { type: 'string', default: '4318' }, yes: { type: 'boolean', default: false } } });
 const directory = resolve(values.dir ?? join(process.env.XDG_DATA_HOME ?? join(homedir(), '.local/share'), 'aacl'));
@@ -75,12 +76,27 @@ async function main() {
     if (!positionals[1] || !values.dir) throw new Error('Backup fileと、新規復元先の--dirを指定してください。');
     print(await restoreBackup(resolve(positionals[1]), directory));
     installApplication(directory);
+    const autostart = new WindowsAutostart(directory);
+    if (autostart.available) autostart.enable();
     print(`復元しました: ${join(directory, 'bin/aacl')}`);
   } else if (command === 'setup') {
     installApplication(directory);
     await ensure();
     await api('setup.skills', { operationId: randomUUID() });
-    print(`導入しました: ${join(directory, 'bin/aacl')}\nPATHに${join(directory, 'bin')}を追加してください。\nUI: ${url}\nMCP: ${url}/mcp`);
+    const autostart = new WindowsAutostart(directory);
+    if (autostart.available) autostart.enable();
+    print(`導入しました: ${join(directory, 'bin/aacl')}\nPATHに${join(directory, 'bin')}を追加してください。\nWindowsログオン時の自動起動: ${autostart.available ? '有効' : 'WSL外のため未設定'}\nUI: ${url}\nMCP: ${url}/mcp`);
+  } else if (command === 'autostart') {
+    const autostart = new WindowsAutostart(directory);
+    const action = positionals[1];
+    if (action === 'enable') {
+      if (!existsSync(join(directory, '.aacl-managed')) || !existsSync(join(directory, 'bin/aacl'))) throw new Error('先にaacl setupを実行してください。');
+      print(`Windowsログオン時に自動起動します: ${autostart.enable()}`);
+    } else if (action === 'disable') {
+      autostart.disable(); print('Windowsログオン時の自動起動を解除しました。');
+    } else if (action === 'status') {
+      print(autostart.available ? `Windowsログオン時の自動起動: ${autostart.status() ? '有効' : '無効'}` : 'Windowsログオン時の自動起動: WSL外では確認できません');
+    } else throw new Error('使い方: aacl autostart enable|disable|status');
   } else if (command === 'connect') {
     await ensure();
     print(`MCP: ${url}/mcp\nCodex: codex mcp add aacl --url ${url}/mcp\nClaude Code: claude mcp add --transport http aacl ${url}/mcp`);
@@ -90,11 +106,12 @@ async function main() {
   } else if (command === 'uninstall') {
     if (!values.yes) throw new Error(`削除範囲: ${directory}\n確認後に--yesを付けて実行してください。Runtime入口は残ります。`);
     if ([homedir(), '/', process.cwd()].includes(directory) || !existsSync(join(directory, '.aacl-managed')) || lstatSync(directory).isSymbolicLink() || readFileSync(join(directory, '.aacl-managed'), 'utf8') !== '1\n') throw new Error('AACL管理フォルダーを確認できません。');
+    if (new WindowsAutostart(directory).available) new WindowsAutostart(directory).disable();
     if (await health()) { await api('service.stop'); for (let i = 0; i < 40 && await health(); i++) await delay(100); if (await health()) throw new Error('Serviceを停止できません。'); }
     rmSync(directory, { recursive: true });
     print(`削除しました: ${directory}`);
   } else {
-    print('AACL — 開発方法を育てる\n\naacl setup [--dir PATH]  アプリとデータの保存先へ導入\naacl serve              localhost Serviceを起動\naacl ensure             未起動なら自動起動\naacl connect            起動してMCP接続方法を表示\naacl init               現在のProjectを登録\naacl health             接続確認\naacl diagnostics        診断\naacl export DIRECTORY   Markdown / JSONを出力\naacl backup FILE        SQLite Backup\naacl restore FILE --dir NEW_DIRECTORY  新規フォルダーへ復元\naacl stop               Service停止\naacl uninstall --yes    管理フォルダーを削除\n\n共通: --dir PATH --port 4318');
+    print('AACL — 開発方法を育てる\n\naacl setup [--dir PATH]  アプリとデータの保存先へ導入\naacl serve              localhost Serviceを起動\naacl ensure             未起動ならバックグラウンドで起動\naacl autostart enable   Windowsログオン時の自動起動を有効化\naacl autostart disable  自動起動を解除\naacl autostart status   自動起動の状態を確認\naacl connect            起動してMCP接続方法を表示\naacl init               現在のProjectを登録\naacl health             接続確認\naacl diagnostics        診断\naacl export DIRECTORY   Markdown / JSONを出力\naacl backup FILE        SQLite Backup\naacl restore FILE --dir NEW_DIRECTORY  新規フォルダーへ復元\naacl stop               Service停止\naacl uninstall --yes    管理フォルダーを削除\n\n共通: --dir PATH --port 4318');
     if (command !== 'help') process.exitCode = 1;
   }
 }

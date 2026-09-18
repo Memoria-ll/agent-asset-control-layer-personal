@@ -46,11 +46,14 @@ Open [http://127.0.0.1:4318](http://127.0.0.1:4318). Run `aacl connect` to print
 
 `setup` also installs the editable `journal` and `journal-review` Skill assets. To manage a project, run `aacl init` from its root. It registers that Project and prepares Project-scoped Runtime targets.
 
+On WSL, `setup` also registers a Windows logon task that starts the matching WSL distribution and AACL service. Runtime entries contain only the MCP operation and Asset ID. Use `aacl autostart enable`, `aacl autostart disable`, and `aacl autostart status` to manage the task.
+
 Common CLI commands:
 
 | Command | Purpose |
 | --- | --- |
 | `aacl ensure` | Start the service if it is not running. |
+| `aacl autostart <action>` | Use `enable`, `disable`, or `status` to manage Windows logon startup for the WSL service. |
 | `aacl connect` | Ensure the service is running and print MCP client setup commands. |
 | `aacl init` | Register the current directory as a Project. |
 | `aacl diagnostics` | Show reference, Run state, and delivered Context diagnostics. |

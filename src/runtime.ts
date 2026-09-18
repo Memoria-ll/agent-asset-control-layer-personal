@@ -61,12 +61,11 @@ export class RuntimeEntries {
   registerProject(projectId: string, root: string) {
     return (['claude', 'codex'] as const).map(runtime => this.register({ scope: projectId, path: join(root, `.${runtime}`), runtime, platform: root.startsWith('/mnt/') ? 'windows' : 'wsl' }));
   }
-  body(asset: Asset, runtime: string, platform = 'wsl', entryName = runtimeSlug(asset.name)) {
+  body(asset: Asset, runtime: string, entryName = runtimeSlug(asset.name)) {
     const operation = asset.kind === 'workflow' ? 'run_start' : 'skill_get';
     const input = asset.kind === 'workflow' ? `workflowId: ${asset.id}` : `assetId: ${asset.id}`;
-    const launch = platform === 'windows' ? `wsl.exe --exec sh -lc 'aacl ensure'` : 'aacl ensure';
     const description = `${asset.name}をAACLから起動する`;
-    return `---\nname: ${entryName}\ndescription: ${JSON.stringify(description)}\n${runtime === 'codex' ? 'disable-model-invocation: true\n' : ''}---\n\n<!-- aacl-entry:${asset.id} -->\n\nshellで ${launch} を実行してCoreの起動を確認する。\nMCPの aacl_${operation} に ${input} を渡す。\n${asset.kind === 'workflow' ? '現在開いているProject rootをrootへ渡し、operationIdに新しいUUIDを使う。返されたcontextHandleを、この会話の後続Run操作へ渡す。\n' : '取得したCanonical本文に従う。\n'}`;
+    return `---\nname: ${entryName}\ndescription: ${JSON.stringify(description)}\n${runtime === 'codex' ? 'disable-model-invocation: true\n' : ''}---\n\n<!-- aacl-entry:${asset.id} -->\n\nMCPの aacl_${operation} に ${input} を渡す。\n${asset.kind === 'workflow' ? '現在開いているProject rootをrootへ渡し、operationIdに新しいUUIDを使う。返されたcontextHandleを、この会話の後続Run操作へ渡す。\n' : '取得したCanonical本文に従う。\n'}`;
   }
   sync() {
     const results: { targetId: string; assetId: string; ok: boolean; message?: string }[] = [];
@@ -89,7 +88,7 @@ export class RuntimeEntries {
             if (lstatSync(path).isSymbolicLink()) throw new Error('入口がsymlinkのため更新できません。');
             existing = readFileSync(path, 'utf8');
           }
-          const desired = asset ? this.body(asset, target.runtime, target.platform, entryName) : undefined;
+          const desired = asset ? this.body(asset, target.runtime, entryName) : undefined;
           let oldPathExists = false;
           if (asset && old && old.path !== path && existsSync(old.path)) {
             safeDirectory(dirname(old.path));

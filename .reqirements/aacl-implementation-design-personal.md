@@ -31,7 +31,7 @@ Claude Code / Codex (Windows または同一WSL内のLinux)
 - 実装言語はTypeScript、実行環境はWSL上のNode.js 24とする。Node.js 24はWSL側に必要で、AACLには同梱しない。
 - Coreアプリケーションとデータは同じAACL管理フォルダーに配置する。既定場所は`$XDG_DATA_HOME/aacl`（通常`~/.local/share/aacl`）とし、初期設定時に別の場所を選択できる。
 - アンインストールで削除するのはAACL管理フォルダーだけとする。Claude Code / Codex設定先に生成したRuntime入口は残す。
-- Coreは永続localhost Serviceとする。`aacl serve`で明示起動でき、RuntimeまたはCLIから利用するとき未起動なら起動する。
+- Coreは永続localhost Serviceとする。`aacl serve`で明示起動できる。WSL上の本番導入ではWindowsログオン時のタスクからWSLを起動し、`aacl ensure`でServiceを起動する。Runtime entryはMCP operationだけを呼び出す。
 - Serviceはloopbackだけにbindし、初回実装ではユーザー認証を設けない。外部LANからは接続させない。
 - UIはJavaScriptが有効なChromium系ブラウザーを対象とし、Windowsホストまたは同じWSL内からlocalhost経由で利用する。
 
@@ -66,6 +66,13 @@ Claude Code / Codex (Windows または同一WSL内のLinux)
 | Skill入口 | 型付きMCP operationでAsset IDを送り、Canonical Skill本文を取得する |
 
 各operationの製品動作は開発要求書で定義し、本書ではRuntime adapterとCore operationの対応だけを定める。
+
+### 4.5 Service autostart
+
+- `aacl setup`とBackup復元後は、WSL distribution名を使ってWindows Task Schedulerへ現在ユーザーのlogon taskを登録する。taskは`wsl.exe --distribution <name> --exec <managed aacl> ensure`を実行する。
+- `aacl autostart enable|disable|status`でtaskを管理する。task identityは解決済み管理directoryから安定して生成し、複数のAACL installationを区別する。
+- task登録・解除はCLI境界に閉じる。task登録失敗はCLIへ返し、Runtime entryの生成やCanonical Stateを巻き戻さない。
+- `aacl uninstall`はService停止と管理directory削除の前にtask登録を解除する。Runtime entryは既存要件どおり残す。
 
 ## 5. Canonical Assetと保存モデル
 
@@ -227,6 +234,6 @@ Claude Code / Codex (Windows または同一WSL内のLinux)
 | C30 | §30 Diagnostics | Diagnostics API、evidence link | 欠落参照、取得不能revision、不整合、反復遷移、Context量を対象と根拠付きで提示し、意味的修正を自動適用しない。 |
 | C31 | §31 Context Costと改善の比較軸 | Delivery record aggregation、comparison API | 実際に渡した情報だけをWorkflow / Stage / Role等で比較し、未取得本文と直接Skill実行を統計へ含めない。Modelを比較軸にしない。 |
 | C32 | §32 MCP Interface | Typed domain operations、idempotent Write、Run-scoped Read | 要求書のdomain operation群を提供し、ReadはCanonical stateを変えず、Run向け提供記録と活動時刻のみを更新する。Write再送は冪等となる。 |
-| C33 | §33 保存、CLI、閲覧UI | Core service、SQLite、CLI、UI、Export / Backup | WSL上のCoreへWindows / Linux clientから接続できる。loopback境界、削除範囲、credential除外、明示的なExport / Backupを確認する。UIではStage / Assetの双方から紐づきを確認・変更でき、各Stageの必須Roleと任意の追加指示を編集できる。useCase切替とStage別の許可遷移図示を備え、リキッドグラス風の視覚表現を満たす。 |
+| C33 | §33 保存、CLI、閲覧UI | Core service、SQLite、CLI、UI、Export / Backup | WSL上のCoreへWindows / Linux clientから接続できる。Windowsログオン時のtaskでWSLとServiceを起動し、taskを解除・削除できる。loopback境界、削除範囲、credential除外、明示的なExport / Backupを確認する。UIではStage / Assetの双方から紐づきを確認・変更でき、各Stageの必須Roleと任意の追加指示を編集できる。useCase切替とStage別の許可遷移図示を備え、リキッドグラス風の視覚表現を満たす。 |
 | C34 | §34 ユーザーが育てるUse Case | Workflow / Skill CRUD、Runtime entry | ユーザー定義のWorkflowと直接Skillを作成・変更して起動できる。例示された工程やAssetを組み込み必須データにしない。 |
 | C35 | §35 改善ループ | Run、Snapshot、Journal、Review、Proposal、Change Set、次Run | Runの実際の提供記録とJournalをReviewへ渡し、ユーザー判断に沿う変更を記録した後、次RunのContextへ反映する。 |

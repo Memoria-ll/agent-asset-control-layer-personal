@@ -335,6 +335,10 @@ test('Runtime entry names come from Workflow and direct Skill names, with IDs on
     assert.ok(existsSync(join(codexRoot, 'skills', name, 'SKILL.md')));
     assert.match(readFileSync(join(codexRoot, 'skills', name, 'SKILL.md'), 'utf8'), new RegExp(`^name: ${name}$`, 'm'));
   }
+  const workflowEntry = readFileSync(join(claudeRoot, 'commands', `${names[0]}.md`), 'utf8');
+  assert.match(workflowEntry, /MCPの aacl_run_start/); assert.ok(!workflowEntry.includes('ensure')); assert.ok(!workflowEntry.includes('shellで'));
+  const skillEntry = readFileSync(join(codexRoot, 'skills', 'architecture-review', 'SKILL.md'), 'utf8');
+  assert.match(skillEntry, /MCPの aacl_skill_get/); assert.ok(!skillEntry.includes('ensure')); assert.ok(!skillEntry.includes('shellで'));
   for (const name of [longSkill.id, anotherLongSkill.id].map(id => `${'a'.repeat(26)}-${id}`)) {
     assert.ok(name.length <= 64); assert.ok(!name.includes('--'));
     assert.ok(existsSync(join(claudeRoot, 'commands', `${name}.md`)));
@@ -355,7 +359,7 @@ test('Runtime sync moves an owned ID-named entry to its asset name', async t => 
   const { target } = await f.call<{ target: RuntimeTarget }>('runtime.register', { runtime: 'codex', platform: 'wsl', scope: 'global', path: root });
   const currentPath = join(root, 'skills', 'security-review', 'SKILL.md');
   const oldPath = join(root, 'skills', `aacl-${skill.id}`, 'SKILL.md');
-  const oldBody = f.ops.runtime.body(skill, 'codex', 'wsl', `aacl-${skill.id}`);
+  const oldBody = f.ops.runtime.body(skill, 'codex', `aacl-${skill.id}`);
   unlinkSync(currentPath); rmdirSync(dirname(currentPath)); mkdirSync(dirname(oldPath)); writeFileSync(oldPath, oldBody);
   const entry = f.store.list<{ id: string; targetId: string; assetId: string; path: string; hash: string; active: boolean }>('runtime-entry').find(item => item.targetId === target.id && item.assetId === skill.id)!;
   f.store.put('runtime-entry', { ...entry, path: oldPath, hash: createHash('sha256').update(oldBody).digest('hex') });
