@@ -118,18 +118,31 @@ function roleOptions(selected = '') {
 function stageRoleId(workflowId: string, stageId: string) {
   return bindings.find(b => b.sourceId === workflowId && b.stageId === stageId && b.purpose === 'stage-role')?.targetId ?? '';
 }
-function stageRow(s: { id: string; name: string; completion_condition: string; description?: string; taskType?: string }, index: number, roleId = '') {
-  return `<div class="editor-row stage-editor" data-id="${esc(s.id)}"><div class="row-head"><strong>Stage ${index + 1}</strong>${button('row-remove', '削除', 'small ghost')}</div><div class="grid-two">${field('工程名', 'stageName', s.name)}${field('分類', 'stageType', s.taskType ?? '', false)}</div><div class="stage-role-row">${select('担当Role', 'stageRole', roleOptions(roleId))}${button(`role-create:${s.id}`, '＋ 新しいRole', 'small ghost')}</div><div class="new-role-fields" hidden><p class="hint">新しいRoleをGlobalで共有し、このStageの担当に設定します。</p>${field('新しいRole名', 'newRoleName', '', false)}${area('Roleの説明', 'newRoleDescription', '', false)}${area('Roleの責務', 'newRoleResponsibilities', '', false)}</div><div class="spacer"></div>${area('完了条件', 'completion', s.completion_condition)}<input type="hidden" name="stageDescription" value="${esc(s.description ?? '')}"></div>`;
+function stageRow(s: { id: string; name: string; completion_condition: string; description?: string; taskType?: string }, index: number, roleId = '', transitions: Asset['transitions'] = [], stages: { id: string; name: string }[] = []) {
+  return `<div class="editor-row stage-editor" data-id="${esc(s.id)}"><div class="row-head"><strong>Stage ${index + 1}</strong>${button('row-remove', '削除', 'small ghost')}</div><div class="grid-two">${field('工程名', 'stageName', s.name)}${field('分類', 'stageType', s.taskType ?? '', false)}</div><div class="stage-role-row">${select('担当Role', 'stageRole', roleOptions(roleId))}${button(`role-create:${s.id}`, '＋ 新しいRole', 'small ghost')}</div><div class="new-role-fields" hidden><p class="hint">新しいRoleをGlobalで共有し、このStageの担当に設定します。</p>${field('新しいRole名', 'newRoleName', '', false)}${area('Roleの説明', 'newRoleDescription', '', false)}${area('Roleの責務', 'newRoleResponsibilities', '', false)}</div><div class="spacer"></div>${area('完了条件', 'completion', s.completion_condition)}<input type="hidden" name="stageDescription" value="${esc(s.description ?? '')}"><section class="stage-transitions"><div class="stage-transitions-head"><div><h4>次の行き先</h4><p>この工程の完了後に進める場所</p></div>${button('transition-add', '＋ 行き先を追加', 'small ghost')}</div><div class="stage-transition-list">${transitions.map(t => transitionRow(t, stages)).join('') || '<p class="hint stage-transition-empty">行き先はまだありません。</p>'}</div></section></div>`;
 }
 function transitionRow(t: { id: string; from: string; to: string; type: string; label: string }, stages: { id: string; name: string }[]) {
-  return `<div class="transition-row" data-id="${esc(t.id)}">${select('遷移元', 'from', stages.map(s => opt(s.id, s.name || '未命名の工程', t.from)).join(''))}<span>→</span>${select('遷移先', 'to', stages.map(s => opt(s.id, s.name || '未命名の工程', t.to)).join('') + opt('completed', '完了', t.to))}${select('種別', 'transitionType', Object.entries(typeLabels).map(([key, title]) => opt(key, title, t.type)).join(''))}${field('表示名', 'transitionLabel', t.label)}${button('row-remove', '×', 'ghost')}</div>`;
+  return `<div class="transition-row" data-id="${esc(t.id)}">${select('行き先', 'to', stages.map(s => opt(s.id, s.name || '未命名の工程', t.to)).join('') + opt('completed', '完了', t.to))}${select('種別', 'transitionType', Object.entries(typeLabels).map(([key, title]) => opt(key, title, t.type)).join(''))}${field('表示名', 'transitionLabel', t.label)}<button type="button" class="ghost transition-remove" data-action="row-remove" aria-label="遷移を削除">×</button></div>`;
 }
 function assetEditor(a?: Asset, newKind: Asset['kind'] = 'skill') {
   const kind = a?.kind ?? newKind;
-  modal(a ? '資産を編集' : '資産を作成', `<form data-form="asset" data-id="${a?.id ?? ''}" data-kind="${kind}" class="form-stack">${!a ? `<div class="filters">${Object.entries(kinds).map(([k, title]) => button(`new-kind:${k}`, title, `filter ${kind === k ? 'active' : ''}`)).join('')}</div>` : ''}<div class="grid-two">${field('名前', 'name', a?.name)}${select('管理先', 'scope', a ? opt(a.scope, labelScope(a.scope)) : opt('global', 'Global', selectedScope) + projects.map(p => opt(p.id, p.name, selectedScope)).join(''))}</div>${area('説明', 'description', a?.description)}${field('作業の分類', 'taskType', a?.taskType, false)}${kind === 'workflow' ? `<section><div class="section-header"><h3>工程</h3>${button('stage-add', '＋ 工程を追加', 'small')}</div><div id="stage-rows">${(a?.stages ?? []).map((s, i) => stageRow(s, i, a ? stageRoleId(a.id, s.id) : '')).join('')}</div><p class="hint">先頭の工程から開始します。各工程に完了条件を指定してください。</p></section><section><div class="section-header"><h3>許可する遷移</h3>${button('transition-add', '＋ 遷移を追加', 'small')}</div><div id="transition-rows">${(a?.transitions ?? []).map(t => transitionRow(t, a!.stages)).join('')}</div></section>` : area(kind === 'role' ? '責務・判断観点・成果責任' : '本文（Markdown）', 'body', kind === 'role' ? a?.responsibilities : a?.body, kind === 'skill', true)}${kind === 'skill' ? `<label class="checkbox-label"><input type="checkbox" name="useCase"${a?.useCase ? ' checked' : ''}>Runtimeから直接起動できるSkillにする</label><section><div class="section-header"><h3>補助ファイル</h3>${button('file-add', '＋ 追加', 'small')}</div><div id="file-rows">${Object.entries(a?.supportingFiles ?? {}).map(([path, body]) => fileRow(path, body)).join('')}</div></section>` : ''}<p class="hint">認証情報は保存しないでください。</p>${formEnd()}</form>`);
+  modal(a ? '資産を編集' : '資産を作成', `<form data-form="asset" data-id="${a?.id ?? ''}" data-kind="${kind}" class="form-stack">${!a ? `<div class="filters">${Object.entries(kinds).map(([k, title]) => button(`new-kind:${k}`, title, `filter ${kind === k ? 'active' : ''}`)).join('')}</div>` : ''}<div class="grid-two">${field('名前', 'name', a?.name)}${select('管理先', 'scope', a ? opt(a.scope, labelScope(a.scope)) : opt('global', 'Global', selectedScope) + projects.map(p => opt(p.id, p.name, selectedScope)).join(''))}</div>${area('説明', 'description', a?.description)}${field('作業の分類', 'taskType', a?.taskType, false)}${kind === 'workflow' ? `<section><div class="section-header"><h3>工程</h3>${button('stage-add', '＋ 工程を追加', 'small')}</div><div id="stage-rows">${(a?.stages ?? []).map((s, i) => stageRow(s, i, a ? stageRoleId(a.id, s.id) : '', (a?.transitions ?? []).filter(t => t.from === s.id), a?.stages ?? [])).join('')}</div><p class="hint">先頭の工程から開始します。各工程に完了条件を指定してください。</p></section>` : area(kind === 'role' ? '責務・判断観点・成果責任' : '本文（Markdown）', 'body', kind === 'role' ? a?.responsibilities : a?.body, kind === 'skill', true)}${kind === 'skill' ? `<label class="checkbox-label"><input type="checkbox" name="useCase"${a?.useCase ? ' checked' : ''}>Runtimeから直接起動できるSkillにする</label><section><div class="section-header"><h3>補助ファイル</h3>${button('file-add', '＋ 追加', 'small')}</div><div id="file-rows">${Object.entries(a?.supportingFiles ?? {}).map(([path, body]) => fileRow(path, body)).join('')}</div></section>` : ''}<p class="hint">認証情報は保存しないでください。</p>${formEnd()}</form>`);
 }
 function fileRow(path = '', body = '') { return `<div class="editor-row file-editor"><div class="row-head"><strong>補助ファイル</strong>${button('row-remove', '削除', 'small ghost')}</div>${field('相対ファイル名', 'filePath', path)}<div class="spacer"></div>${area('内容', 'fileBody', body, false, true)}</div>`; }
 function readStages(form: Element) { return [...form.querySelectorAll<HTMLElement>('.stage-editor')].map(row => ({ id: row.dataset.id!, name: (row.querySelector('[name=stageName]') as HTMLInputElement).value, completion_condition: (row.querySelector('[name=completion]') as HTMLTextAreaElement).value, description: (row.querySelector('[name=stageDescription]') as HTMLInputElement).value, taskType: (row.querySelector('[name=stageType]') as HTMLInputElement).value })); }
+function readTransitions(form: Element) { return [...form.querySelectorAll<HTMLElement>('.transition-row')].map(row => { const from = row.closest<HTMLElement>('.stage-editor')?.dataset.id; if (!from) throw new Error('遷移元の工程を確認できません。'); return { id: row.dataset.id!, from, to: (row.querySelector('[name=to]') as HTMLSelectElement).value, type: (row.querySelector('[name=transitionType]') as HTMLSelectElement).value as Asset['transitions'][number]['type'], label: (row.querySelector('[name=transitionLabel]') as HTMLInputElement).value }; }); }
+function updateTransitionTargets(form: Element) {
+  const stages = readStages(form);
+  for (const target of form.querySelectorAll<HTMLSelectElement>('.transition-row [name=to]')) {
+    const selected = target.value;
+    target.innerHTML = stages.map(s => opt(s.id, s.name || '未命名の工程', selected)).join('') + opt('completed', '完了', selected);
+  }
+}
+function updateStageNumbers(form: Element) { form.querySelectorAll<HTMLElement>('.stage-editor .row-head strong').forEach((label, index) => { label.textContent = `Stage ${index + 1}`; }); }
+function updateTransitionEmptyState(stage: HTMLElement) {
+  const list = stage.querySelector<HTMLElement>('.stage-transition-list')!;
+  if (!list.querySelector('.transition-row')) list.innerHTML = '<p class="hint stage-transition-empty">行き先はまだありません。</p>';
+}
 function bindingEditor(sourceId: string, stageId?: string, existing?: Binding) {
   const a = assets.find(a => a.id === sourceId)!;
   const allowed: Record<Asset['kind'], string[]> = { workflow: ['role', 'skill', 'rule'], role: ['skill', 'rule'], skill: ['skill'], rule: [] };
@@ -158,7 +171,7 @@ async function action(value: string, target: HTMLElement) {
     modal('資産削除の確認', `<p><strong>${esc(preview.asset.name)}</strong>を削除状態にし、検索・利用対象から外します。過去revisionとRun Snapshotは保持します。</p>${hasReferences ? `<section class="section"><h3>同時に解除する参照</h3>${bindingItems ? `<h4>紐づけ</h4><ul>${bindingItems}</ul>` : ''}${commonItems ? `<h4>Project Common</h4><ul>${commonItems}</ul>` : ''}</section>` : '<p class="hint">このAssetを参照する紐づけとProject Commonはありません。</p>'}<form data-form="asset-delete" class="form-stack"><input type="hidden" name="assetId" value="${esc(preview.asset.id)}"><input type="hidden" name="expectedRevision" value="${preview.asset.revision}"><input type="hidden" name="expectedBindingRevisions" value="${esc(JSON.stringify(expectedBindings))}"><input type="hidden" name="expectedProjectCommonRevisions" value="${esc(JSON.stringify(expectedProjectCommons))}"><label class="checkbox-label"><input type="checkbox" name="confirm" required>このAssetの削除${hasReferences ? 'と一覧の参照解除' : ''}を確定します</label>${formEnd(hasReferences ? '参照を解除して削除' : 'このAssetを削除')}</form>`);
     return;
   }
-  if (key === 'stage-add') { const root = dialog.querySelector('#stage-rows')!; root.insertAdjacentHTML('beforeend', stageRow({ id: crypto.randomUUID(), name: '', completion_condition: '' }, root.children.length)); return; }
+  if (key === 'stage-add') { const root = dialog.querySelector('#stage-rows')!; root.insertAdjacentHTML('beforeend', stageRow({ id: crypto.randomUUID(), name: '', completion_condition: '' }, root.children.length, '', [], readStages(dialog))); updateTransitionTargets(dialog); return; }
   if (key === 'role-create') {
     const row = target.closest<HTMLElement>('.stage-editor')!, panel = row.querySelector<HTMLElement>('.new-role-fields')!, role = row.querySelector<HTMLSelectElement>('[name=stageRole]')!;
     panel.hidden = !panel.hidden;
@@ -169,8 +182,31 @@ async function action(value: string, target: HTMLElement) {
     return;
   }
   if (key === 'file-add') { dialog.querySelector('#file-rows')!.insertAdjacentHTML('beforeend', fileRow()); return; }
-  if (key === 'transition-add') { const stages = readStages(dialog); if (!stages.length) throw new Error('先に工程を追加してください。'); dialog.querySelector('#transition-rows')!.insertAdjacentHTML('beforeend', transitionRow({ id: crypto.randomUUID(), from: stages[0].id, to: 'completed', type: 'complete', label: '' }, stages)); return; }
-  if (key === 'row-remove') { target.closest('.editor-row,.transition-row')!.remove(); return; }
+  if (key === 'transition-add') {
+    const stage = target.closest<HTMLElement>('.stage-editor'), stages = readStages(dialog);
+    if (!stage || !stages.length) throw new Error('先に工程を追加してください。');
+    const index = stages.findIndex(s => s.id === stage.dataset.id), next = stages[index + 1];
+    const transition = { id: crypto.randomUUID(), from: stage.dataset.id!, to: next?.id ?? 'completed', type: next ? 'next' : 'complete', label: '' };
+    stage.querySelector('.stage-transition-empty')?.remove();
+    stage.querySelector('.stage-transition-list')!.insertAdjacentHTML('beforeend', transitionRow(transition, stages));
+    return;
+  }
+  if (key === 'row-remove') {
+    const transition = target.closest<HTMLElement>('.transition-row');
+    if (transition) { const stage = transition.closest<HTMLElement>('.stage-editor')!; transition.remove(); updateTransitionEmptyState(stage); return; }
+    const stage = target.closest<HTMLElement>('.stage-editor');
+    if (stage) {
+      const stageId = stage.dataset.id!;
+      for (const row of dialog.querySelectorAll<HTMLElement>('.transition-row')) if (row.closest('.stage-editor') === stage || (row.querySelector('[name=to]') as HTMLSelectElement).value === stageId) row.remove();
+      stage.remove();
+      updateStageNumbers(dialog);
+      updateTransitionTargets(dialog);
+      dialog.querySelectorAll<HTMLElement>('.stage-editor').forEach(updateTransitionEmptyState);
+      return;
+    }
+    target.closest('.file-editor')?.remove();
+    return;
+  }
   if (key === 'usecase') { await api('skill.usecase', { assetId: id, enabled: !a!.useCase, provenance: provenance('直接起動設定を変更') }, true); await refresh(); return; }
   if (key === 'binding-new') { bindingEditor(id, extra); return; }
   if (key === 'binding-edit') { const b = bindings.find(b => b.id === id)!; bindingEditor(b.sourceId, b.stageId, b); return; }
@@ -218,7 +254,7 @@ async function submit(form: HTMLFormElement) {
   } else if (key === 'asset') {
     const old = assets.find(a => a.id === form.dataset.id), kind = form.dataset.kind as Asset['kind'];
     const stages = readStages(form);
-    const transitions = [...form.querySelectorAll<HTMLElement>('.transition-row')].map(row => { const v = (key: string) => (row.querySelector(`[name=${key}]`) as HTMLInputElement).value; return { id: row.dataset.id!, from: v('from'), to: v('to'), type: v('transitionType') as Asset['transitions'][number]['type'], label: v('transitionLabel') }; });
+    const transitions = readTransitions(form);
     const files = [...form.querySelectorAll('.file-editor')].map(row => [(row.querySelector('[name=filePath]') as HTMLInputElement).value, (row.querySelector('[name=fileBody]') as HTMLTextAreaElement).value]);
     if (new Set(files.map(([name]) => name)).size !== files.length) throw new Error('補助ファイル名が重複しています。');
     const asset = { kind, name: get('name'), description: get('description'), scope: get('scope'), taskType: get('taskType'), body: kind === 'role' || kind === 'workflow' ? old?.body ?? '' : get('body'), responsibilities: kind === 'role' ? get('body') : old?.responsibilities ?? '', useCase: kind === 'skill' && data.has('useCase'), supportingFiles: Object.fromEntries(files), stages, transitions, entryStage: old?.entryStage && stages.some(s => s.id === old.entryStage) ? old.entryStage : stages[0]?.id ?? '', metadata: old?.metadata ?? {} };
@@ -296,8 +332,7 @@ document.addEventListener('change', event => {
   const input = event.target as HTMLInputElement;
   if (input.id === 'scope-select') { selectedScope = input.value; location.hash = route()[0]; void refresh(); }
   if (input.name === 'stageName') {
-    const stages = readStages(dialog);
-    for (const select of dialog.querySelectorAll<HTMLSelectElement>('[name=from],[name=to]')) { const value = select.value; select.innerHTML = stages.map(s => opt(s.id, s.name || '未命名の工程', value)).join('') + (select.name === 'to' ? opt('completed', '完了', value) : ''); }
+    updateTransitionTargets(dialog);
   }
 });
 document.addEventListener('input', event => {
