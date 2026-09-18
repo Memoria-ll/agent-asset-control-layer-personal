@@ -32,8 +32,12 @@ test('C16 C25 C26 C33: CLI setup / custom directory / auto-start / init / backup
   assert.deepEqual(list.assets.map(a => a.name).sort(), ['journal', 'journal-review']);
   const installAgain = await fetch(`http://127.0.0.1:${port}/api/setup.skills`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ operationId: randomUUID() }) });
   assert.deepEqual((await installAgain.json() as { installed: unknown[] }).installed, []);
-  mkdirSync(project); const init = await run(['init'], project); assert.ok(JSON.parse(init.stdout).project.id);
-  const entry = join(project, '.codex/skills', list.assets[0].name, 'SKILL.md'); assert.ok(existsSync(entry));
+  mkdirSync(project); const init = await run(['init'], project);
+  const projectId = (JSON.parse(init.stdout) as { project: { id: string } }).project.id;
+  const globalEntry = join(project, '.codex/skills', list.assets[0].name, 'SKILL.md'); assert.ok(!existsSync(globalEntry));
+  const saved = await fetch(`http://127.0.0.1:${port}/api/asset.save`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ operationId: randomUUID(), asset: { kind: 'skill', name: 'project-only', description: 'Project Skill', body: '本文', scope: projectId, useCase: true }, provenance: { origin: 'cli' } }) });
+  assert.equal(saved.status, 200);
+  const entry = join(project, '.codex/skills/project-only/SKILL.md'); assert.ok(existsSync(entry));
   await run(['backup', join(root, 'copy.sqlite')]);
   await run(['export', join(root, 'export')]); assert.ok(existsSync(join(root, 'export/records.json')));
   await run(['stop']);
@@ -43,5 +47,5 @@ test('C16 C25 C26 C33: CLI setup / custom directory / auto-start / init / backup
   assert.ok(existsSync(join(restoreDir, 'aacl.sqlite'))); assert.ok(existsSync(join(restoreDir, 'bin/aacl')));
   await assert.rejects(run(['uninstall']), /--yes/);
   await run(['uninstall', '--yes']);
-  assert.equal(existsSync(dir), false); assert.ok(existsSync(entry)); assert.equal(readFileSync(join(unrelated, 'keep.txt'), 'utf8'), '保持する');
+  assert.equal(existsSync(dir), false); assert.ok(existsSync(entry)); assert.ok(!existsSync(globalEntry)); assert.equal(readFileSync(join(unrelated, 'keep.txt'), 'utf8'), '保持する');
 });

@@ -7,7 +7,7 @@
 | C01、C35 | `run.start`、`journal.write`、`proposal.*` | Run→Journal→承認→一部気づきと変更の同時適用→次Runのrevision |
 | C02、C04 | `asset.save`、`asset.restore` | 共通schema、不正入力拒否、安定ID、古いrevisionを許可、冪等性、不変履歴 |
 | C03、C08、C10 | `usecase.search`、`skill.get`、`run.skill.get` | Skill直接取得でRun等を作らない。本文・補助ファイルの遅延取得 |
-| C05、C07 | `project.init`、`project.resolve`、`common.*` | path正規化、root完全一致、重複登録拒否、Global紐づけだけの複製、空のCommon、Project入口 |
+| C05、C07 | `project.init`、`project.resolve`、`common.*` | path正規化、root完全一致、重複登録拒否、Global紐づけだけの複製、空のCommon、scopeに一致するProject入口とGlobal入口の非重複 |
 | C06 | `binding.*` | コピー後の独立性、IDでの参照、Role→Skill→Skill、循環拒否 |
 | C09、C19 | `asset.save`、`run.transition` | Stage完了条件必須、遷移元・先・種別、許可されていない遷移の拒否、完了報告 |
 | C11、C12、C13 | `context.get`、`context.handoff` | Role責務と明示Rule、分類、Model文字列の不透明な受け渡し、Capabilityを入力契約へ追加しない |
