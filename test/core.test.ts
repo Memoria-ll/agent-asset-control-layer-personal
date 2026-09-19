@@ -374,6 +374,40 @@ test('C03 C08 C10 C16 C34: direct Skill retrieval never creates a managed execut
   assert.deepEqual((await f.call<{ assets: Asset[] }>('usecase.search')).assets.map(a => a.id), [w.id]);
 });
 
+test('AACL Skill bindings become ordinary candidates with host-side loaders independently of useCase', async t => {
+  const f = fixture(t);
+  const parent = await f.asset('skill', { name: 'setup-project-architecture', useCase: true, body: '親Skill本文' });
+  const child = await f.asset('skill', { name: 'setup-codegraph-project', description: '新規プロジェクトへCodeGraphを導入する', useCase: false, body: '子Skill本文' });
+  const grandchild = await f.asset('skill', { name: 'verify-codegraph', description: 'CodeGraphの導入結果を確認する', useCase: false, body: '孫Skill本文' });
+  await f.asset('skill', { name: child.name, description: '別Assetの同名Skill', body: 'フォールバックしてはいけない本文' });
+  await f.bind(parent, child, { purpose: 'reference' });
+  await f.bind(child, grandchild, { purpose: 'reference' });
+
+  const loaded = await f.call<{
+    body: string;
+    skillCatalog: { id: string; name: string; description: string }[];
+    skillLoaders: { catalogKey: string; name: string; source: string; loader: { type: string; assetId: string; revision: number } }[];
+  }>('skill.get', { assetId: parent.id });
+  assert.equal(loaded.body, '親Skill本文');
+  assert.deepEqual(loaded.skillCatalog, [
+    { id: child.id, name: child.name, description: child.description },
+    { id: grandchild.id, name: grandchild.name, description: grandchild.description },
+  ]);
+  assert.deepEqual(loaded.skillLoaders, [
+    { catalogKey: `aacl:${child.id}:${child.revision}`, name: child.name, source: 'aacl', loader: { type: 'aacl-asset', assetId: child.id, revision: child.revision } },
+    { catalogKey: `aacl:${grandchild.id}:${grandchild.revision}`, name: grandchild.name, source: 'aacl', loader: { type: 'aacl-asset', assetId: grandchild.id, revision: grandchild.revision } },
+  ]);
+
+  const workflow = await f.workflow(); await f.bind(workflow, parent);
+  const run = await f.start(workflow);
+  assert.deepEqual(run.context.skillCatalog.map(skill => skill.name), [parent.name, child.name, grandchild.name]);
+  assert.deepEqual(run.context.skillLoaders.map(loader => loader.catalogKey), [
+    `aacl:${parent.id}:${parent.revision}`, `aacl:${child.id}:${child.revision}`, `aacl:${grandchild.id}:${grandchild.revision}`,
+  ]);
+  assert.equal((await f.call<{ body: string }>('skill.get', { assetId: child.id })).body, '子Skill本文');
+  await assert.rejects(f.call('skill.get', { assetId: child.id, revision: child.revision + 100 }), new RegExp(`name=${child.name}.*assetId=${child.id}.*revision=${child.revision + 100}`));
+});
+
 test('C09 C11 C12 C17 C20 C21 C22 C23 C24 C31: immutable resolution, progressive delivery, concurrent Handles', async t => {
   const f = fixture(t), role = await f.asset('role', { responsibilities: '責務' }), w = await f.workflow(role), a = await f.asset('skill', { body: '未取得本文'.repeat(100), supportingFiles: { 'guide.md': '元ファイル' } }), b = await f.asset('skill', { name: 'B' }), rule = await f.asset('rule');
   await f.bind(w, role, { purpose: 'entry-role' }); await f.bind(role, a); await f.bind(a, b); await f.bind(role, rule);
@@ -589,6 +623,23 @@ test('Runtime entry names come from Workflow and direct Skill names, with IDs on
   assert.ok(!existsSync(join(claudeRoot, 'commands', 'design-review.md')));
   assert.ok(!existsSync(join(codexRoot, 'skills', 'design-review')));
   assert.ok(!existsSync(join(claudeRoot, 'commands', `${internalSkill.id}.md`)));
+});
+
+test('Binding-referenced Skills are implicit Codex candidates without becoming direct use cases', async t => {
+  const f = fixture(t), parent = await f.asset('skill', { name: 'setup-project-architecture', useCase: false }), child = await f.asset('skill', { name: 'setup-codegraph-project', description: 'CodeGraphを導入する', useCase: false });
+  const root = mkdtempSync(join(tmpdir(), 'aacl-runtime-binding-'));
+  await f.bind(parent, child);
+  await f.call('runtime.register', { runtime: 'codex', platform: 'wsl', scope: 'global', path: root });
+  const path = join(root, 'skills', child.name, 'SKILL.md'), policyPath = join(root, 'skills', child.name, 'agents', 'openai.yaml');
+  assert.equal(existsSync(path), true);
+  assert.match(readFileSync(path, 'utf8'), /^description: "CodeGraphを導入する"$/m);
+  assert.equal(readFileSync(policyPath, 'utf8'), 'policy:\n  allow_implicit_invocation: true\n');
+  const entry = f.store.list<{ assetId: string; implicitInvocation?: boolean }>('runtime-entry').find(item => item.assetId === child.id)!;
+  assert.equal(entry.implicitInvocation, true);
+  await f.call('binding.remove', { id: f.core.bindings().find(binding => binding.sourceId === parent.id && binding.targetId === child.id)!.id, expectedRevision: f.core.bindings().find(binding => binding.sourceId === parent.id && binding.targetId === child.id)!.revision, provenance });
+  await f.call('runtime.sync');
+  assert.equal(existsSync(path), false);
+  assert.equal(existsSync(policyPath), false);
 });
 
 test('Runtime sync moves an owned ID-named entry to its asset name', async t => {

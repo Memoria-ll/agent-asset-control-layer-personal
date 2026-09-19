@@ -3,7 +3,7 @@ import { posix } from 'node:path';
 import { Store } from './store.ts';
 import { renderModelChoiceTemplate } from './model-template.ts';
 import { assetSchema, bindingSchema, parseJournal } from './schema.ts';
-import type { Asset, AssetDeletionPreview, Binding, Change, ChangeSet, Common, Context, ContextAsset, ContextStage, Decision, Delivery, Diagnostic, ExecutionPlan, History, Insight, Journal, Project, Proposal, Provenance, ReviewItem, Run, RunEvent, Snapshot, Stamp } from './schema.ts';
+import type { Asset, AssetDeletionPreview, Binding, Change, ChangeSet, Common, Context, ContextAsset, ContextStage, Decision, Delivery, Diagnostic, ExecutionPlan, History, Insight, Journal, Project, Proposal, Provenance, ReviewItem, Run, RunEvent, SkillCatalogEntry, SkillLoader, Snapshot, Stamp } from './schema.ts';
 
 export class ConflictError extends Error {
   readonly code = 'CONFLICT';
@@ -43,6 +43,37 @@ export class Core {
     return asset;
   }
   bindings(scope?: string) { return this.store.list<Binding>('binding', scope).filter(b => b.active); }
+  private skillCatalogFrom(rootId: string, assets: Iterable<Asset>, bindings: Iterable<Binding>) {
+    const assetMap = new Map([...assets].map(asset => [asset.id, asset]));
+    const bindingList = [...bindings];
+    const entries: SkillCatalogEntry[] = [];
+    const loaders: SkillLoader[] = [];
+    const visited = new Set<string>();
+    const walk = (sourceId: string) => {
+      for (const binding of bindingList) {
+        if (binding.sourceId !== sourceId || binding.stageId || binding.purpose !== 'reference') continue;
+        const target = assetMap.get(binding.targetId);
+        if (!target || target.kind !== 'skill' || visited.has(target.id)) continue;
+        visited.add(target.id);
+        entries.push({ id: target.id, name: target.name, description: target.description });
+        loaders.push({
+          catalogKey: `aacl:${target.id}:${target.revision}`,
+          name: target.name,
+          source: 'aacl',
+          loader: { type: 'aacl-asset', assetId: target.id, revision: target.revision },
+        });
+        walk(target.id);
+      }
+    };
+    walk(rootId);
+    return { entries, loaders };
+  }
+  skillCatalog(assetId: string, resolvedRoot?: Asset) {
+    const root = resolvedRoot ?? this.asset(assetId);
+    if (root.kind !== 'skill') throw new Error('Skillを指定してください。');
+    const assets = this.store.list<Asset>('asset').filter(asset => !asset.deletedAt && (asset.scope === 'global' || asset.scope === root.scope));
+    return this.skillCatalogFrom(root.id, assets, this.bindings(root.scope));
+  }
   common(projectId: string): Common {
     this.store.get<Project>(projectId, 'project');
     return this.store.list<Common>('common', projectId)[0];
@@ -329,6 +360,12 @@ export class Core {
       roles: [...chosen.values()].filter(a => a.kind === 'role').map(contextAsset),
       rules: [...chosen.values()].filter(a => a.kind === 'rule').map(contextAsset),
       skillCatalog: [...chosen.values()].filter(a => a.kind === 'skill').map(({ id, name, description }) => ({ id, name, description })),
+      skillLoaders: [...chosen.values()].filter(a => a.kind === 'skill').map(({ id, name, revision }) => ({
+        catalogKey: `aacl:${id}:${revision}`,
+        name,
+        source: 'aacl' as const,
+        loader: { type: 'aacl-asset' as const, assetId: id, revision },
+      })),
       ...(model && subagent ? { subagent: { id: subagent.id, roleId: stageRoleId, modelId: model.id, continuity: subagent.continuity, instruction: 'このStageは指定Modelをサブエージェントとして呼び出して実行する。直前のStageと担当Role・Modelが同じ場合は同じサブエージェントへ依頼する。' } } : {}),
       resolution, unavailable: [],
     };
@@ -418,10 +455,27 @@ export class Core {
     this.deliver(run, roleId ? `role:${roleId}` : 'context', context, true, [snapshot.workflow.id, run.stageId], snapshot.workflow.revision, context.roles.map(a => a.id));
     return payload;
   }
-  skillGet(assetId: string) {
-    const asset = this.asset(assetId);
-    if (asset.kind !== 'skill') throw new Error('Skillを指定してください。');
-    return { id: asset.id, name: asset.name, description: asset.description, revision: asset.revision, body: asset.body };
+  private loadSkill(assetId: string, revision?: number) {
+    const current = this.store.maybe<Asset>(assetId);
+    const requestedRevision = revision ?? current?.revision;
+    try {
+      const asset = revision === undefined ? this.asset(assetId) : this.store.revision<Asset>(assetId, revision);
+      if (asset.kind !== 'skill') throw new Error('Skillを指定してください。');
+      if (asset.deletedAt) throw new Error('削除済みAssetは利用できません。');
+      return asset;
+    } catch (error) {
+      const name = current?.name ?? '(unknown)';
+      const cause = error instanceof Error ? error.message : String(error);
+      throw new Error(`AACL Skill取得失敗: name=${name}, assetId=${assetId}, revision=${requestedRevision ?? 'unknown'}: ${cause}`);
+    }
+  }
+  skillGet(assetId: string, revision?: number) {
+    const asset = this.loadSkill(assetId, revision);
+    const catalog = this.skillCatalog(asset.id, asset);
+    return { id: asset.id, name: asset.name, description: asset.description, revision: asset.revision, body: asset.body, skillCatalog: catalog.entries, skillLoaders: catalog.loaders };
+  }
+  private skillBody(asset: Asset, file?: string) {
+    return file === undefined ? asset.body : asset.supportingFiles[file];
   }
   runSkillGet(handle: string, assetId: string, file?: string) {
     const run = this.run(handle), snapshot = this.store.get<Snapshot>(run.snapshotId, 'snapshot');
@@ -433,7 +487,7 @@ export class Core {
       this.deliver(run, target, null, false, reference?.path ?? [], asset?.revision, context.roles.map(r => r.id), reason);
       return { available: false, target, reason };
     }
-    const result = { available: true, id: asset.id, revision: asset.revision, file, body: file === undefined ? asset.body : asset.supportingFiles[file] };
+    const result = { available: true, id: asset.id, name: asset.name, description: asset.description, revision: asset.revision, file, body: this.skillBody(asset, file) };
     this.deliver(run, target, result, true, reference.path, asset.revision, context.roles.map(r => r.id));
     return result;
   }

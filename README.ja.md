@@ -117,7 +117,7 @@ flowchart TD
 
 ## Runtime入口を生成する
 
-Assetの管理先に対応するGlobalまたはProject scopeへ、Claude CodeまたはCodexのRuntime設定先を登録します。Workflowと直接起動が有効なSkillの入口が生成されます。
+Assetの管理先に対応するGlobalまたはProject scopeへ、Claude CodeまたはCodexのRuntime設定先を登録します。Workflow、直接起動が有効なSkill、`reference` bindingで参照されたSkillの入口が生成されます。後者は`useCase=false`でも通常のCodex description一致による暗黙起動候補になります。
 
 | Runtime | 生成される入口 |
 | --- | --- |
@@ -167,7 +167,7 @@ sequenceDiagram
 
 ## Contextと必要時のSkill取得
 
-Run開始時に、選択したWorkflow、選択肢条件に一致した関連Asset、Binding、Project Common設定を不変Snapshotへ固定します。初期Contextには現在の工程、担当Role、指定Modelの選択肢展開済みModel名・呼び出し方・選択値、適用するRule本文、候補Skillの説明、サブエージェント継続指示を含めます。Skill本文と補助ファイルは必要時にSnapshotの固定revisionから取得します。
+Run開始時に、選択したWorkflow、選択肢条件に一致した関連Asset、Binding、Project Common設定を不変Snapshotへ固定します。初期Contextには現在の工程、担当Role、指定Modelの選択肢展開済みModel名・呼び出し方・選択値、適用するRule本文、候補Skillの説明、サブエージェント継続指示を含めます。`reference` bindingで到達したSkillは、`useCase=false`でも通常Skill候補として扱います。ホストはAACL Asset ID・revisionのloader対応を内部で保持し、選択された本文を`aacl_skill_get`で取得します。同名のローカルSkillへ推測フォールバックしません。Skill本文と補助ファイルは必要時にSnapshotの固定revisionから取得します。
 
 Contextの提供記録と、Skillを利用したという報告は別々に保存します。Skillを確認のため取得しただけでは実利用として報告されません。Run画面には現在StageのContextとSkill候補が表示され、診断ではContext提供量をUTF-8バイト数で確認できます。
 
