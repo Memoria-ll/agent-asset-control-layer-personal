@@ -10,3 +10,4 @@
 - テストで利用者のRuntime設定先や既存DBを変更しない。CLI・filesystemの試験はOSの一時ディレクトリを使う。
 - 改行は`.gitattributes`のLFへ統一し、編集後は行数と差分を確認する。
 - CodeGraphの索引は`.codegraph/`、ローカルMCP設定は`.mcp.json`。どちらもGitの対象外。コード理解は`codegraph node <symbol>`または`codegraph explore <query>`から始める。
+- ここではskills、rules、models、workflowはこのプロジェクトaaclの中の話として受け取って。
