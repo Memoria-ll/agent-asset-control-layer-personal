@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { posix } from 'node:path';
 import { Store } from './store.ts';
+import { renderModelChoiceTemplate } from './model-template.ts';
 import { assetSchema, bindingSchema, parseJournal } from './schema.ts';
 import type { Asset, AssetDeletionPreview, Binding, Change, ChangeSet, Common, Context, ContextAsset, ContextStage, Decision, Delivery, Diagnostic, ExecutionPlan, History, Insight, Journal, Project, Proposal, Provenance, ReviewItem, Run, RunEvent, Snapshot, Stamp } from './schema.ts';
 
@@ -320,9 +321,10 @@ export class Core {
     if (stageModelId && model?.kind !== 'model') throw new Error(`このStageのModelを取得できません: ${stageId}`);
     const contextStage = ({ description: _description, ...contextStage }: Asset['stages'][number]): ContextStage => contextStage;
     const contextAsset = ({ description: _description, stages, ...contextAsset }: Asset): ContextAsset => ({ ...contextAsset, stages: stages.map(contextStage) });
+    const contextModel = model?.kind === 'model' ? { ...contextAsset(model), modelName: renderModelChoiceTemplate(model.modelName, modelSelections), invocationMethod: renderModelChoiceTemplate(model.invocationMethod, modelSelections) } : undefined;
     return {
       runId: snapshot.runId, workflow: contextAsset(workflow), stage: contextStage(stage), stageRoleId,
-      ...(model ? { model: contextAsset(model) } : {}),
+      ...(contextModel ? { model: contextModel } : {}),
       ...(model ? { modelSelections } : {}),
       roles: [...chosen.values()].filter(a => a.kind === 'role').map(contextAsset),
       rules: [...chosen.values()].filter(a => a.kind === 'rule').map(contextAsset),

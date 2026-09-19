@@ -100,7 +100,7 @@ Claude Code / Codex (Windows または同一WSL内のLinux)
 
 - Skill recordの必須本文fieldはname、description、explanation、bodyとし、`description`はRuntime入口のYAML front matter、`explanation`はUIで人が呼び出し方を判断する説明として保存する。useCase設定をRuntime target生成処理へ渡す。
 - Workflow recordはStage listとtransition定義を保持し、StageはWorkflow内の子recordとして保存する。
-- Model recordはModel名、呼び出し方、選択肢グループを保持する。ModelからSkill / Ruleを参照でき、WorkflowのStageから`stage-model` purposeとstageIdでModelを1件まで指定できる。Model→Skill / Ruleの`reference` bindingには`choiceConditions`を保存でき、各条件内の選択値をAND、条件配列をORとして解決する。条件なしのbindingは無条件参照とする。
+- Model recordはModel名、呼び出し方、選択肢グループを保持する。Model名と呼び出し方には`{{choice.<選択肢名>}}`を埋め込め、RunのContextとExecution PlanではStageで選んだ値へ展開する。未定義または未選択の選択肢は拒否する。ModelからSkill / Ruleを参照でき、WorkflowのStageから`stage-model` purposeとstageIdでModelを1件まで指定できる。Model→Skill / Ruleの`reference` bindingには`choiceConditions`を保存でき、各条件内の選択値をAND、条件配列をORとして解決する。条件なしのbindingは無条件参照とする。
 - Workflow内の各Stageに`stage-role` purposeとstageIdで指定したRoleを1件割り当て、各transitionに遷移先へ進む必須`condition`を保存・検証する。担当Roleの責務をStageの基本とし、Stageの`additionalInstructions`は任意の追加指示として保存する。Modelを指定したStageはサブエージェント実行の指示とし、連続する同じRole・Modelでは同じsubagent IDをRunへ保持する。
 - Workflow編集UIではStageごとにRoleを割り当て、任意の追加指示を設定できる。新規RoleとWorkflowは`asset.create`でIDを確定してからbindingと同じChange Setで作成し、Roleを複数Workflow / Stageから再利用する。重複IDは拒否する。
 - 作業分類のfieldはWorkflow、Role、Stage、Rule、Modelへ格納しない。旧recordに残る分類値は読み出し・更新時に破棄する。
@@ -112,10 +112,10 @@ Claude Code / Codex (Windows または同一WSL内のLinux)
 - Workflow Run開始用とSkill本文取得用に、別々のtyped MCP operationを実装する。Skill取得operationはRun Contextを生成しない。
 - `run.start`の応答にRun ID、Run Context Handle、次に実施するStageのExecution Planを含め、CoreはRun IDとHandleの対応を保存する。開始応答にはContext本文を含めない。
 - Run単位のMCP operationはContext Handleを必須入力として受け取り、その値から対象Runを解決する。AIは`run.start`から受け取ったHandleを同じAI実行Contextの後続operationへ渡す。
-- Execution Planには次StageのID・表示名、実行主体（`orchestrator`または`subagent`）、指定ModelのID・Model名・呼び出し方・選択値、サブエージェントの継続情報、Context Handle、Run versionを含める。Skill・Rule本文やStage Context本文は含めず、Planを受け取った実施主体が`context.get`で取得する。
+- Execution Planには次StageのID・表示名、実行主体（`orchestrator`または`subagent`）、指定ModelのID・選択肢展開済みのModel名・呼び出し方・選択値、サブエージェントの継続情報、Context Handle、Run versionを含める。Skill・Rule本文やStage Context本文は含めず、Planを受け取った実施主体が`context.get`で取得する。
 - Run開始transactionでWorkflowと参照revisionの境界を固定し、変更不能なExecution Snapshotを作成する。Snapshotにはrun id、Workflowとrevision、resolution revision boundary、Project、使用した紐づけとrevision、Project CommonのrevisionとRule参照、該当するStage、Role、Runtime、利用対象Assetとrevision、提供したRuleとSkill catalog、timestampを保持する。
 - Resolution recordには、利用対象になった各Assetの参照経路と解決理由を保持する。取得できなかったContextと理由も記録し、初期Contextに渡した情報と区別する。
-- Initial ContextはWorkflow Definition、現在Stageからの許可transitionと各`condition`、`stageRoleId`、担当Roleのresponsibilities、Stageの`additionalInstructions`、明示参照されたRule、利用対象Skill catalog、指定Modelの固定revision、呼び出し方、サブエージェント継続指示で構成する。
+- Initial ContextはWorkflow Definition、現在Stageからの許可transitionと各`condition`、`stageRoleId`、担当Roleのresponsibilities、Stageの`additionalInstructions`、明示参照されたRule、利用対象Skill catalog、指定Modelの固定revision、選択肢展開済みのModel名と呼び出し方、サブエージェント継続指示で構成する。
 - Context、Skill本文、supporting fileをRunへ返すRead operationは、RunとSnapshotに対応するappend-only delivery recordを残す。recordには取得対象とrevision、参照経路、提供結果、提供した内容または同一内容を再現できる不変参照を含める。取得できない場合は対象と理由を記録する。
 - 利用対象になった状態、実際に提供した状態、Journal等で報告された実利用を別々に保持する。取得記録だけから実利用を推定しない。Context Costは提供recordを集計し、未取得のSkill本文を含めない。
 - ResolverはAsset ID relationを再帰的にたどり、visited setで重複排除と循環検出を行う。必須参照不在時の開始失敗と、任意supporting fileの取得失敗理由を別結果として扱う。
@@ -216,7 +216,7 @@ Claude Code / Codex (Windows または同一WSL内のLinux)
 | C08 | §8 Use Case | Use Case search、Run start、direct Skill retrieval | 検索はWorkflowと`useCase=true` Skillを扱い、Run startはWorkflowだけを受け付ける。Skill取得はRunを作らない。 |
 | C09 | §9 Workflow | Workflow / Stage schema、transition API | 各Stageの担当Role 1件、任意のStage Model 1件、各transitionの必須condition、許可transitionが検証され、Workflow定義にない遷移を受理しない。追加指示は任意で保存される。 |
 | C10 | §10 Skill | Skill CRUD、body / supporting file retrieval | 本文とsupporting filesを固定revisionで取得でき、対象・取得・実利用報告を別状態として参照できる。 |
-| C11 | §11 RoleとModel名の受け渡し | Role / Model API、Context builder、Runtime report | Stageの担当Roleと責務をContextの基本とし、追加指示を任意で含める。指定Modelの固定revision、Model名、呼び出し方、明示参照Skill / Rule、サブエージェント継続指示をContextへ含める。外部Modelの実在性は検証しない。 |
+| C11 | §11 RoleとModel名の受け渡し | Role / Model API、Context builder、Runtime report | Stageの担当Roleと責務をContextの基本とし、追加指示を任意で含める。指定Modelの固定revision、選択肢展開済みのModel名と呼び出し方、明示参照Skill / Rule、サブエージェント継続指示をContextへ含める。外部Modelの実在性は検証しない。 |
 | C12 | §12 RuleとSkillのRuntime description | Rule CRUD、Skill description / explanation、Context builder | Ruleは明示参照でのみContextに入り、Skillの`description`はRuntime入口へ渡し、`explanation`はUI向けに保持する。非Skillの作業分類は保持しない。 |
 | C13 | §13 Capability | Core schema / validation境界 | Capability情報がCoreの保存・検証やRun開始・遷移条件に使われない。 |
 | C14 | §14 自然言語によるAsset管理 | MCP Asset / Binding / Project Common API、UI編集API、Provenance | 検索・取得・作成・更新・解除・削除の変更が明示操作で保存され、依頼と変更理由へ関連づく。削除は影響一覧と明示確認を経て確定する。 |

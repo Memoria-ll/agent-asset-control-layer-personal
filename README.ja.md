@@ -95,7 +95,7 @@ Assetは再利用する指示や知識を保持します。各AssetはID、種�
 | Rule | 紐づけたAssetや工程へ適用する指示を保持します。 |
 | Model | Model名と呼び出し方、選択肢を保持し、SkillやRuleを条件付きで紐づけられます。 |
 
-Workflowの各工程には1つのRoleを割り当て、必要な工程にはModelを指定できます。Modelを指定した工程はそのサブエージェントで実行する指示になり、連続する同じRole・Modelの工程では同じサブエージェントを使います。ModelからSkillやRuleを参照するときは、Stageで選んだ選択肢の組み合わせごとに適用条件を設定できます。必要な場所にSkillとRuleを紐づけます。SkillはRuntimeから直接起動する設定もできます。Asset作成後に種類や管理先は変更できません。異なる種類・管理先にする場合は、正しい値でAssetを作成して関係を付け替えます。
+Workflowの各工程には1つのRoleを割り当て、必要な工程にはModelを指定できます。Modelを指定した工程はそのサブエージェントで実行する指示になり、連続する同じRole・Modelの工程では同じサブエージェントを使います。Model名と呼び出し方には`{{choice.<選択肢名>}}`を記載でき、Stageで選んだ値へ展開されます。ModelからSkillやRuleを参照するときは、Stageで選んだ選択肢の組み合わせごとに適用条件を設定できます。必要な場所にSkillとRuleを紐づけます。SkillはRuntimeから直接起動する設定もできます。Asset作成後に種類や管理先は変更できません。異なる種類・管理先にする場合は、正しい値でAssetを作成して関係を付け替えます。
 
 ```mermaid
 flowchart TD
@@ -167,7 +167,7 @@ sequenceDiagram
 
 ## Contextと必要時のSkill取得
 
-Run開始時に、選択したWorkflow、選択肢条件に一致した関連Asset、Binding、Project Common設定を不変Snapshotへ固定します。初期Contextには現在の工程、担当Role、指定ModelのModel名・呼び出し方・選択値、適用するRule本文、候補Skillの説明、サブエージェント継続指示を含めます。Skill本文と補助ファイルは必要時にSnapshotの固定revisionから取得します。
+Run開始時に、選択したWorkflow、選択肢条件に一致した関連Asset、Binding、Project Common設定を不変Snapshotへ固定します。初期Contextには現在の工程、担当Role、指定Modelの選択肢展開済みModel名・呼び出し方・選択値、適用するRule本文、候補Skillの説明、サブエージェント継続指示を含めます。Skill本文と補助ファイルは必要時にSnapshotの固定revisionから取得します。
 
 Contextの提供記録と、Skillを利用したという報告は別々に保存します。Skillを確認のため取得しただけでは実利用として報告されません。Run画面には現在StageのContextとSkill候補が表示され、診断ではContext提供量をUTF-8バイト数で確認できます。
 

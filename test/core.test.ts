@@ -164,7 +164,7 @@ test('Model assets bind Skills and Rules, and consecutive matching Stage assignm
 
 test('Model choices are configured freely, selected per Workflow Stage, and delivered in Context', async t => {
   const f = fixture(t), model = await f.asset('model', {
-    name: '選択式Model', modelName: 'agent', invocationMethod: 'Runtimeへ渡す',
+    name: '選択式Model', modelName: 'agent-{{choice.実行系}}', invocationMethod: 'Runtimeへ渡す {{choice.実行系}} / {{choice.effort}}',
     choices: [
       { name: '実行系', options: ['codex luna', 'codex sol', 'claude opes', 'claude fable'] },
       { name: 'effort', options: ['low', 'medium', 'high'] },
@@ -187,6 +187,10 @@ test('Model choices are configured freely, selected per Workflow Stage, and deli
   assert.deepEqual(binding.selectedChoices, selectedChoices);
   assert.deepEqual(run.context.modelSelections, selectedChoices);
   assert.deepEqual(run.context.model?.choices, model.choices);
+  assert.equal(run.context.model?.modelName, 'agent-codex sol');
+  assert.equal(run.context.model?.invocationMethod, 'Runtimeへ渡す codex sol / high');
+  assert.equal(run.nextExecution.model?.modelName, 'agent-codex sol');
+  assert.equal(run.nextExecution.model?.invocationMethod, 'Runtimeへ渡す codex sol / high');
   assert.deepEqual(new Set(run.context.skillCatalog.map(skill => skill.id)), new Set([codexSkill.id, codexHighSkill.id, multiCombinationSkill.id]));
   assert.deepEqual(run.context.rules.map(rule => rule.id), [highRule.id]);
   assert.ok(run.context.resolution.some(reference => reference.assetId === codexHighSkill.id && reference.reason.includes('選択肢条件')));
@@ -198,6 +202,8 @@ test('Model choices are configured freely, selected per Workflow Stage, and deli
   const invalidSkill = await f.asset('skill', { name: '無効条件Skill' });
   await assert.rejects(f.bind(model, invalidSkill, { choiceConditions: [{ 実行系: 'other' }] }), /選択肢条件.*利用できません/);
   assert.throws(() => assetSchema.parse({ kind: 'model', name: '重複', description: '説明', modelName: 'agent', invocationMethod: 'Runtime', choices: [{ name: 'effort', options: ['low', 'low'] }] }), /重複/);
+  assert.throws(() => assetSchema.parse({ kind: 'model', name: '未定義', description: '説明', modelName: 'agent-{{choice.variant}}', invocationMethod: 'Runtime', choices: [{ name: 'effort', options: ['low'] }] }), /定義されていません/);
+  assert.throws(() => assetSchema.parse({ kind: 'model', name: '不正', description: '説明', modelName: 'agent-{{choice.}}', invocationMethod: 'Runtime', choices: [{ name: 'effort', options: ['low'] }] }), /空、または不正/);
 });
 
 test('C02 C04 C13 C14 C15 C28 C29: schema / stable identity / idempotent writes / provenance / restoration', async t => {

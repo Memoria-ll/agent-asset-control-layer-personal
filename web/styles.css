@@ -932,6 +932,32 @@ pre {
   display:grid;
   gap:10px
 }
+.template-assist {
+  display:grid;
+  gap:5px;
+  margin-top:7px
+}
+.template-assist-label {
+  color:#6b8190;
+  font-size:11px;
+  font-weight:600
+}
+.template-token-list {
+  display:flex;
+  flex-wrap:wrap;
+  gap:5px;
+  align-items:center
+}
+.template-token {
+  padding:4px 8px;
+  border:1px solid #aec8d5;
+  background:#f4f9fb;
+  color:#326f95;
+  font:11px ui-monospace,"Cascadia Code",monospace
+}
+.template-token:hover {
+  background:#fff
+}
 .model-option-rows {
   display:grid;
   gap:9px
