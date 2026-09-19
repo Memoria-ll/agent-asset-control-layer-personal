@@ -100,7 +100,7 @@ Claude Code / Codex (Windows または同一WSL内のLinux)
 
 - Skill recordの必須本文fieldはname、description、explanation、bodyとし、`description`はRuntime入口のYAML front matter、`explanation`はUIで人が呼び出し方を判断する説明として保存する。useCase設定をRuntime target生成処理へ渡す。
 - Workflow recordはStage listとtransition定義を保持し、StageはWorkflow内の子recordとして保存する。
-- Model recordはModel名と呼び出し方を保持する。ModelからSkill / Ruleを参照でき、WorkflowのStageから`stage-model` purposeとstageIdでModelを1件まで指定できる。
+- Model recordはModel名、呼び出し方、選択肢グループを保持する。ModelからSkill / Ruleを参照でき、WorkflowのStageから`stage-model` purposeとstageIdでModelを1件まで指定できる。Model→Skill / Ruleの`reference` bindingには`choiceConditions`を保存でき、各条件内の選択値をAND、条件配列をORとして解決する。条件なしのbindingは無条件参照とする。
 - Stage recordのcompletion_conditionを必須fieldとして検証し、Workflow内の各Stageに`stage-role` purposeとstageIdで指定したRoleを1件割り当てる。担当Roleの責務をStageの基本とし、Stageの`additionalInstructions`は任意の追加指示として保存する。Modelを指定したStageはサブエージェント実行の指示とし、連続する同じRole・Modelでは同じsubagent IDをRunへ保持する。
 - Workflow編集UIではStageごとにRoleを割り当て、任意の追加指示を設定できる。新規RoleとWorkflowは`asset.create`でIDを確定してからbindingと同じChange Setで作成し、Roleを複数Workflow / Stageから再利用する。重複IDは拒否する。
 - 作業分類のfieldはWorkflow、Role、Stage、Rule、Modelへ格納しない。旧recordに残る分類値は読み出し・更新時に破棄する。
@@ -118,6 +118,7 @@ Claude Code / Codex (Windows または同一WSL内のLinux)
 - Context、Skill本文、supporting fileをRunへ返すRead operationは、RunとSnapshotに対応するappend-only delivery recordを残す。recordには取得対象とrevision、参照経路、提供結果、提供した内容または同一内容を再現できる不変参照を含める。取得できない場合は対象と理由を記録する。
 - 利用対象になった状態、実際に提供した状態、Journal等で報告された実利用を別々に保持する。取得記録だけから実利用を推定しない。Context Costは提供recordを集計し、未取得のSkill本文を含めない。
 - ResolverはAsset ID relationを再帰的にたどり、visited setで重複排除と循環検出を行う。必須参照不在時の開始失敗と、任意supporting fileの取得失敗理由を別結果として扱う。
+- ResolverはStageのModel選択値に一致するModel→Skill / Ruleの`choiceConditions`だけを再帰的にたどり、SnapshotとContextへ含める。条件不一致の参照資産はRunの利用対象に含めない。
 - Run IDをpartition keyとして状態、Context参照、Snapshot、Journal link、append-only eventを分離する。Snapshot本体は作成後に更新せず、以後の提供記録をdelivery recordとして追記する。
 
 ### 6.2 MCPのRun関連づけ

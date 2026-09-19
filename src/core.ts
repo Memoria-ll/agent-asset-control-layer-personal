@@ -98,7 +98,24 @@ export class Core {
       const missing = choices.find(choice => !(choice.name in selectedChoices));
       if (missing) throw new Error(`Modelの選択肢「${missing.name}」を選択してください。`);
     }
+    const choiceConditions = b.choiceConditions ?? [];
+    if (choiceConditions.length && (source.kind !== 'model' || b.purpose !== 'reference' || !['skill', 'rule'].includes(target.kind))) {
+      throw new Error('選択肢条件はModelからSkillまたはRuleへの参照にだけ指定できます。');
+    }
+    if (source.kind === 'model' && choiceConditions.length) {
+      const choices = source.choices ?? [];
+      for (const condition of choiceConditions) for (const [name, value] of Object.entries(condition)) {
+        const choice = choices.find(candidate => candidate.name === name);
+        if (!choice || !choice.options.includes(value)) throw new Error(`Modelの選択肢条件「${name}=${value}」は利用できません。`);
+      }
+    }
     if (source.id === target.id) throw new Error('Skillの循環参照は登録できません。');
+  }
+  bindingMatchesChoices(binding: Pick<Binding, 'choiceConditions'>, selectedChoices?: Record<string, string>) {
+    const conditions = binding.choiceConditions ?? [];
+    if (!conditions.length) return true;
+    if (!selectedChoices) return false;
+    return conditions.some(condition => Object.entries(condition).every(([name, value]) => selectedChoices[name] === value));
   }
   private validateExpectedRevisions(changes: Change[]) {
     const virtual = new Map<string, number>();
@@ -256,7 +273,7 @@ export class Core {
     const project = this.store.put('project', { name, root });
     const common = this.store.put('common', { projectId: project.id, ruleIds: [] }, project.id);
     const originals = this.bindings('global');
-    const result = this.applyChanges(originals.map(b => ({ type: 'binding.save', binding: { scope: project.id, sourceId: b.sourceId, targetId: b.targetId, stageId: b.stageId, purpose: b.purpose, selectedChoices: b.selectedChoices ?? {} } })), {
+    const result = this.applyChanges(originals.map(b => ({ type: 'binding.save', binding: { scope: project.id, sourceId: b.sourceId, targetId: b.targetId, stageId: b.stageId, purpose: b.purpose, selectedChoices: b.selectedChoices ?? {}, choiceConditions: b.choiceConditions ?? [] } })), {
       origin: 'init', reason: 'Globalの紐づけをProject初期構成へコピー', userRequest: `Project初期導入: ${root}`, proposedBy: '', decision: '',
       sources: originals.map(b => ({ type: 'binding-revision', reference: `${b.id}@${b.revision}` })),
     });
@@ -277,7 +294,7 @@ export class Core {
     const assets = new Map(snapshot.assets.map(a => [a.id, a]));
     const chosen = new Map<string, Asset>(), resolution: Context['resolution'] = [];
     const seen = new Set<string>();
-    const walk = (assetId: string, path: string[], stack: Set<string>, reason: string) => {
+    const walk = (assetId: string, path: string[], stack: Set<string>, reason: string, selectedChoices?: Record<string, string>) => {
       if (stack.has(assetId)) throw new Error(`循環参照: ${[...path, assetId].join(' → ')}`);
       const a = assets.get(assetId);
       if (!a) throw new Error(`必須参照を取得できません: ${assetId}`);
@@ -286,10 +303,15 @@ export class Core {
       if (seen.has(assetId)) return;
       seen.add(assetId);
       const next = new Set(stack).add(assetId);
-      for (const b of bindings.filter(b => b.sourceId === assetId && !b.stageId)) walk(b.targetId, [...path, assetId, `${b.id}@${b.revision}`], next, '明示的な紐づけ');
+      for (const b of bindings.filter(b => b.sourceId === assetId && !b.stageId)) {
+        if (a.kind === 'model' && !this.bindingMatchesChoices(b, selectedChoices)) continue;
+        walk(b.targetId, [...path, assetId, `${b.id}@${b.revision}`], next, b.choiceConditions?.length ? '選択肢条件に一致した明示的な紐づけ' : '明示的な紐づけ');
+      }
     };
     for (const b of bindings.filter(b => b.sourceId === workflow.id && (!b.stageId || b.stageId === stageId))) {
-      walk(b.targetId, [workflow.id, ...(b.stageId ? [b.stageId] : []), `${b.id}@${b.revision}`], new Set([workflow.id]), b.stageId ? 'Stageの直接参照' : 'Workflowの直接参照');
+      const target = assets.get(b.targetId);
+      const selected = target?.kind === 'model' && b.stageId === stageId ? b.selectedChoices : undefined;
+      walk(b.targetId, [workflow.id, ...(b.stageId ? [b.stageId] : []), `${b.id}@${b.revision}`], new Set([workflow.id]), b.stageId ? 'Stageの直接参照' : 'Workflowの直接参照', selected);
     }
     for (const id of common?.ruleIds ?? []) walk(id, [`Project Common@${common!.revision}`], new Set(), 'Project Common');
     if (chosen.get(stageRoleId)?.kind !== 'role') throw new Error(`このStageの担当Roleを取得できません: ${stageId}`);
@@ -325,21 +347,25 @@ export class Core {
     const common = project ? this.common(project.id) : null;
     const needed = new Set<string>([workflow.id, ...(common?.ruleIds ?? [])]);
     const visited = new Set<string>();
-    const visit = (source: string, stack: Set<string>) => {
+    const visit = (source: string, stack: Set<string>, selectedChoices?: Record<string, string>) => {
       if (stack.has(source)) throw new Error('循環参照を検出しました。');
-      if (visited.has(source)) return;
-      visited.add(source);
+      const sourceAsset = this.asset(source);
+      const visitKey = sourceAsset.kind === 'model' ? `${source}:${JSON.stringify(selectedChoices ?? {})}` : source;
+      if (visited.has(visitKey)) return;
+      visited.add(visitKey);
       const next = new Set(stack).add(source);
-      this.asset(source);
       for (const b of allBindings.filter(b => b.sourceId === source)) {
         this.validateBinding(b);
-        needed.add(b.targetId); visit(b.targetId, next);
+        if (sourceAsset.kind === 'model' && !this.bindingMatchesChoices(b, selectedChoices)) continue;
+        const target = this.asset(b.targetId);
+        const targetChoices = sourceAsset.kind === 'workflow' && target.kind === 'model' && b.stageId ? b.selectedChoices : undefined;
+        needed.add(b.targetId); visit(b.targetId, next, targetChoices);
       }
     };
     visit(workflow.id, new Set());
     for (const ruleId of common?.ruleIds ?? []) if (this.asset(ruleId).kind !== 'rule') throw new Error('Project CommonにRule以外の参照があります。');
     const assets = [...needed].map(id => this.asset(id));
-    const bindings = allBindings.filter(b => needed.has(b.sourceId));
+    const bindings = allBindings.filter(b => needed.has(b.sourceId) && needed.has(b.targetId));
     const runId = randomUUID(), snapshotId = randomUUID(), contextHandle = randomUUID();
     const draft = { id: snapshotId, runId, boundary: this.store.boundary(), workflow, assets, bindings, common, project, runtime: input.runtime } as Snapshot;
     for (const stage of workflow.stages) this.resolve(draft, stage.id);
@@ -590,7 +616,7 @@ export class Core {
         if (h.kind === 'asset') operations.push({ type: 'asset.save', id: h.entityId, expectedRevision: expectedRevision('asset', h.entityId), asset: this.assetPayload(this.store.revision(h.entityId, h.before)) });
         if (h.kind === 'binding') {
           const b = this.store.revision<Binding>(h.entityId, h.before);
-          operations.push(b.active ? { type: 'binding.save', id: b.id, expectedRevision: expectedRevision('binding', b.id), binding: { scope: b.scope, sourceId: b.sourceId, targetId: b.targetId, stageId: b.stageId, purpose: b.purpose, selectedChoices: b.selectedChoices ?? {} } } : { type: 'binding.remove', id: b.id, expectedRevision: expectedRevision('binding', b.id) });
+          operations.push(b.active ? { type: 'binding.save', id: b.id, expectedRevision: expectedRevision('binding', b.id), binding: { scope: b.scope, sourceId: b.sourceId, targetId: b.targetId, stageId: b.stageId, purpose: b.purpose, selectedChoices: b.selectedChoices ?? {}, choiceConditions: b.choiceConditions ?? [] } } : { type: 'binding.remove', id: b.id, expectedRevision: expectedRevision('binding', b.id) });
         }
         if (h.kind === 'common') { const c = this.store.revision<Common>(h.entityId, h.before); operations.push({ type: 'common.save', projectId: c.projectId, expectedRevision: expectedRevision('common', h.entityId), ruleIds: c.ruleIds }); }
       }

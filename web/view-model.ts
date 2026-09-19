@@ -24,10 +24,10 @@ export function stageRoleBindingChanges(workflowId: string, scope: string, assig
     const stageId = binding.stageId ?? '';
     const roleId = desired.get(stageId);
     if (!roleId) changes.push({ type: 'binding.remove', id: binding.id, expectedRevision: binding.revision });
-    else if (roleId !== binding.targetId) changes.push({ type: 'binding.save', id: binding.id, expectedRevision: binding.revision, binding: { scope, sourceId: workflowId, stageId, targetId: roleId, purpose: 'stage-role', selectedChoices: {} } });
+    else if (roleId !== binding.targetId) changes.push({ type: 'binding.save', id: binding.id, expectedRevision: binding.revision, binding: { scope, sourceId: workflowId, stageId, targetId: roleId, purpose: 'stage-role', selectedChoices: {}, choiceConditions: [] } });
     desired.delete(stageId);
   }
-  for (const [stageId, roleId] of desired) changes.push({ type: 'binding.save', binding: { scope, sourceId: workflowId, stageId, targetId: roleId, purpose: 'stage-role', selectedChoices: {} } });
+  for (const [stageId, roleId] of desired) changes.push({ type: 'binding.save', binding: { scope, sourceId: workflowId, stageId, targetId: roleId, purpose: 'stage-role', selectedChoices: {}, choiceConditions: [] } });
   return changes;
 }
 
@@ -40,11 +40,11 @@ export function stageModelBindingChanges(workflowId: string, scope: string, assi
     const stageId = binding.stageId ?? '';
     const modelId = desired.get(stageId);
     if (!modelId) changes.push({ type: 'binding.remove', id: binding.id, expectedRevision: binding.revision });
-    else if (modelId !== binding.targetId || JSON.stringify(desiredChoices.get(stageId) ?? {}) !== JSON.stringify(binding.selectedChoices ?? {})) changes.push({ type: 'binding.save', id: binding.id, expectedRevision: binding.revision, binding: { scope, sourceId: workflowId, stageId, targetId: modelId, purpose: 'stage-model', selectedChoices: desiredChoices.get(stageId) ?? {} } });
+    else if (modelId !== binding.targetId || JSON.stringify(desiredChoices.get(stageId) ?? {}) !== JSON.stringify(binding.selectedChoices ?? {})) changes.push({ type: 'binding.save', id: binding.id, expectedRevision: binding.revision, binding: { scope, sourceId: workflowId, stageId, targetId: modelId, purpose: 'stage-model', selectedChoices: desiredChoices.get(stageId) ?? {}, choiceConditions: [] } });
     desired.delete(stageId);
     desiredChoices.delete(stageId);
   }
-  for (const [stageId, modelId] of desired) changes.push({ type: 'binding.save', binding: { scope, sourceId: workflowId, stageId, targetId: modelId, purpose: 'stage-model', selectedChoices: desiredChoices.get(stageId) ?? {} } });
+  for (const [stageId, modelId] of desired) changes.push({ type: 'binding.save', binding: { scope, sourceId: workflowId, stageId, targetId: modelId, purpose: 'stage-model', selectedChoices: desiredChoices.get(stageId) ?? {}, choiceConditions: [] } });
   return changes;
 }
 

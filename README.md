@@ -93,9 +93,9 @@ An Asset holds reusable instructions or knowledge. Each Asset has an ID, kind, r
 | Role | Defines the responsibility and expected output for a Workflow stage. |
 | Skill | Holds reusable procedures or knowledge, with optional supporting files. |
 | Rule | Holds instructions shared by the Assets or stages to which it is bound. |
-| Model | Holds a model name and invocation method, and can reference Skills and Rules. |
+| Model | Holds a model name, invocation method, and choices, and can conditionally reference Skills and Rules. |
 
-Each Workflow stage has one assigned Role and can optionally bind one Model. A Model-bound stage is an instruction to execute through that subagent; consecutive stages with the same Role and Model reuse the same subagent. Skills and Rules are bound where they are needed. A Skill can also be enabled for direct Runtime invocation. Asset kind and scope are fixed when it is created; to change either, create an Asset with the desired values and update its relationships.
+Each Workflow stage has one assigned Role and can optionally bind one Model. A Model-bound stage is an instruction to execute through that subagent; consecutive stages with the same Role and Model reuse the same subagent. Model-to-Skill and Model-to-Rule references can be conditioned on the selected choice combination for that stage. Skills and Rules are bound where they are needed. A Skill can also be enabled for direct Runtime invocation. Asset kind and scope are fixed when it is created; to change either, create an Asset with the desired values and update its relationships.
 
 ```mermaid
 flowchart TD
@@ -167,7 +167,7 @@ Read the MCP tool definitions for each operation's current input schema. The Run
 
 ## Context and on-demand Skills
 
-At Run start, AACL pins the selected Workflow, relevant Assets, bindings, and Project Common settings in an immutable Snapshot. The initial Context includes the current stage, its Role, applicable Rule bodies, and candidate Skill names plus Runtime descriptions. Skill bodies and supporting files are retrieved from the Snapshot's pinned revisions when needed.
+At Run start, AACL pins the selected Workflow, choice-matching Assets, bindings, and Project Common settings in an immutable Snapshot. The initial Context includes the current stage, its Role, selected Model choices, applicable Rule bodies, and candidate Skill names plus Runtime descriptions. Skill bodies and supporting files are retrieved from the Snapshot's pinned revisions when needed.
 
 Context delivery and reported Skill use are stored separately. Retrieving a Skill for inspection does not by itself report that the AI used it. The execution view shows the current stage's Context and Skill candidates; Diagnostics reports the delivered Context size in UTF-8 bytes.
 

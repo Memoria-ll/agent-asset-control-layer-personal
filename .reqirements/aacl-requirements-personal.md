@@ -270,7 +270,7 @@ Coreは次をRole Contextとして構成する。
 - Workflow / Stageで使うと明示されたSkill / Rule
 - Project Commonに登録されたRule
 
-ModelはModel名と呼び出し方を保持し、Modelから明示参照されたSkill / RuleをContextへ含める。外部Modelの実在性と利用可否、実際のサブエージェント起動はユーザーとRuntime / AIが担う。
+ModelはModel名と呼び出し方、任意の選択肢グループを保持し、Modelから明示参照されたSkill / RuleをContextへ含める。StageのModel紐づけには各選択肢グループの選択値を保存する。ModelからSkill / Ruleへの紐づけには選択肢条件を指定でき、同じ条件内はAND、複数条件はORとして一致する参照だけをContextへ含める。条件を指定しない参照はすべての選択状態で有効とする。外部Modelの実在性と利用可否、実際のサブエージェント起動はユーザーとRuntime / AIが担う。
 
 ---
 

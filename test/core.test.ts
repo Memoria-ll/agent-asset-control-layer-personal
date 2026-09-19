@@ -132,6 +132,16 @@ test('Model choices are configured freely, selected per Workflow Stage, and deli
       { name: 'effort', options: ['low', 'medium', 'high'] },
     ],
   });
+  const codexSkill = await f.asset('skill', { name: 'Codex用Skill' });
+  const highRule = await f.asset('rule', { name: 'High用Rule' });
+  const codexHighSkill = await f.asset('skill', { name: 'Codex High用Skill' });
+  const multiCombinationSkill = await f.asset('skill', { name: '複数組み合わせSkill' });
+  const otherSkill = await f.asset('skill', { name: 'Claude Low用Skill' });
+  await f.bind(model, codexSkill, { choiceConditions: [{ 実行系: 'codex sol' }] });
+  await f.bind(model, highRule, { choiceConditions: [{ effort: 'high' }] });
+  await f.bind(model, codexHighSkill, { choiceConditions: [{ 実行系: 'codex sol', effort: 'high' }] });
+  await f.bind(model, multiCombinationSkill, { choiceConditions: [{ 実行系: 'codex sol', effort: 'high' }, { 実行系: 'claude opes', effort: 'low' }] });
+  await f.bind(model, otherSkill, { choiceConditions: [{ 実行系: 'claude opes', effort: 'low' }] });
   const workflow = await f.workflow();
   const selectedChoices = { 実行系: 'codex sol', effort: 'high' };
   const binding = await f.bind(workflow, model, { stageId: 'build', purpose: 'stage-model', selectedChoices });
@@ -139,7 +149,16 @@ test('Model choices are configured freely, selected per Workflow Stage, and deli
   assert.deepEqual(binding.selectedChoices, selectedChoices);
   assert.deepEqual(run.context.modelSelections, selectedChoices);
   assert.deepEqual(run.context.model?.choices, model.choices);
+  assert.deepEqual(new Set(run.context.skillCatalog.map(skill => skill.id)), new Set([codexSkill.id, codexHighSkill.id, multiCombinationSkill.id]));
+  assert.deepEqual(run.context.rules.map(rule => rule.id), [highRule.id]);
+  assert.ok(run.context.resolution.some(reference => reference.assetId === codexHighSkill.id && reference.reason.includes('選択肢条件')));
+  assert.ok(!run.context.resolution.some(reference => reference.assetId === otherSkill.id));
+  const snapshot = f.store.get<Snapshot>(run.snapshotId, 'snapshot');
+  assert.ok(!snapshot.assets.some(asset => asset.id === otherSkill.id));
+  assert.ok(!snapshot.bindings.some(binding => binding.targetId === otherSkill.id));
   await assert.rejects(f.bind(workflow, model, { stageId: 'review', purpose: 'stage-model', selectedChoices: { 実行系: 'other', effort: 'high' } }), /利用できません/);
+  const invalidSkill = await f.asset('skill', { name: '無効条件Skill' });
+  await assert.rejects(f.bind(model, invalidSkill, { choiceConditions: [{ 実行系: 'other' }] }), /選択肢条件.*利用できません/);
   assert.throws(() => assetSchema.parse({ kind: 'model', name: '重複', description: '説明', modelName: 'agent', invocationMethod: 'Runtime', choices: [{ name: 'effort', options: ['low', 'low'] }] }), /重複/);
 });
 
