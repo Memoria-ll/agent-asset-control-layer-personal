@@ -16,7 +16,9 @@
 }
 body {
   margin:0;
-  min-width:880px
+  min-width:880px;
+  height:100vh;
+  overflow:hidden
 }
 button,input,textarea,select {
   font:inherit
@@ -185,7 +187,9 @@ pre {
   gap:30px;
   padding:22px;
   max-width:1800px;
-  min-height:100vh;
+  height:100vh;
+  min-height:0;
+  overflow:hidden;
   margin:auto
 }
 .sidebar {
@@ -286,14 +290,28 @@ pre {
 }
 .main {
   min-width:0;
-  padding:8px 12px 25px 0
+  min-height:0;
+  display:flex;
+  flex-direction:column;
+  padding:8px 12px 0 0
 }
 .topbar {
+  flex:none;
   display:flex;
   align-items:center;
   justify-content:space-between;
   height:38px;
   margin-bottom:37px
+}
+.main-content {
+  min-height:0;
+  flex:1 1 auto;
+  overflow:auto;
+  padding-bottom:25px
+}
+.asset-main-content {
+  overflow:hidden;
+  padding-bottom:0
 }
 .breadcrumb {
   font-size:11px;
@@ -370,58 +388,151 @@ pre {
   border-color:#fff;
   font-size:11px
 }
-.asset-layout {
+.asset-shell {
+  height:100%;
+  min-height:0;
+  display:flex;
+  flex-direction:column;
+  position:relative
+}
+.asset-shell .page-heading,
+.asset-shell .toolbar {
+  flex:none
+}
+.asset-scroll {
+  position:relative;
+  min-height:0;
+  flex:1 1 auto;
+  overflow:auto;
+  padding:2px 3px 24px
+}
+.asset-grid {
   display:grid;
-  grid-template-columns:300px minmax(0,1fr);
-  gap:18px;
-  align-items:start
+  grid-template-columns:repeat(auto-fill,minmax(220px,1fr));
+  align-content:start;
+  gap:15px
 }
-.asset-list {
+.asset-card {
+  display:flex;
+  flex-direction:column;
+  align-items:stretch;
+  min-width:0;
+  min-height:214px;
+  padding:19px;
+  border:1px solid #ffffffed;
+  border-radius:18px;
+  background:linear-gradient(145deg,#ffffffc7,#ffffff72);
+  box-shadow:var(--shadow),inset 0 1px #fff;
+  text-align:left
+}
+.asset-card:hover {
+  background:#ffffffe0;
+  box-shadow:0 14px 30px #31526314,inset 0 1px #fff;
+  transform:translateY(-2px)
+}
+.asset-card.selected {
+  border-color:#72a9bf;
+  box-shadow:0 0 0 2px #72a9bf35,0 14px 30px #31526314,inset 0 1px #fff
+}
+.asset-card-top {
+  display:flex;
+  align-items:center;
+  gap:8px;
+  margin-bottom:19px
+}
+.asset-card-top .type-icon {
+  width:40px;
+  height:40px;
+  border-radius:12px;
+  font-size:18px
+}
+.asset-card-scope {
+  margin-left:auto;
   overflow:hidden;
-  min-height:530px
+  color:#76909d;
+  font-size:10px;
+  text-overflow:ellipsis;
+  white-space:nowrap
 }
-.list-caption {
-  padding:18px 19px 13px;
+.asset-card strong {
+  display:block;
+  overflow:hidden;
+  color:#19364b;
+  font-size:15px;
+  font-weight:700;
+  line-height:1.5;
+  text-overflow:ellipsis;
+  white-space:nowrap
+}
+.asset-card p {
+  display:-webkit-box;
+  -webkit-box-orient:vertical;
+  -webkit-line-clamp:3;
+  overflow:hidden;
+  min-height:4.8em;
+  margin:8px 0 18px;
+  color:#657b8d;
+  font-size:11px;
+  line-height:1.6
+}
+.asset-card-meta {
   display:flex;
   align-items:center;
   justify-content:space-between;
-  font-size:11px;
-  color:#7b8e9b
+  gap:8px;
+  margin-top:auto
 }
-.asset-row {
+.asset-card-open {
+  color:#326f95;
+  font-size:11px;
+  font-weight:650
+}
+.asset-drawer-backdrop {
+  position:absolute;
+  z-index:4;
+  inset:0;
+  background:#1b3e551c;
+  backdrop-filter:blur(2px)
+}
+.asset-drawer {
+  position:absolute;
+  z-index:5;
+  top:0;
+  right:0;
+  bottom:0;
   display:flex;
-  align-items:flex-start;
-  gap:12px;
-  width:100%;
-  text-align:left;
-  padding:17px 17px;
+  flex-direction:column;
+  width:min(720px,calc(100% - 24px));
+  border-left:1px solid #fff;
+  background:#f6fafdf2;
+  backdrop-filter:blur(35px);
+  box-shadow:-20px 0 60px #16394c1c;
+  animation:asset-drawer-in .2s ease-out
+}
+.asset-drawer-head {
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  flex:none;
+  padding:14px 20px;
+  border-bottom:1px solid var(--line);
+  color:#6d8795;
+  font-size:11px;
+  font-weight:650
+}
+.asset-drawer > .detail {
+  min-height:0;
+  overflow:auto;
   border:0;
   border-radius:0;
   background:transparent;
-  border-top:1px solid #c4d5e033
-}
-.asset-row:hover {
   box-shadow:none;
-  background:#fff8
+  backdrop-filter:none;
+  padding:24px 26px 40px
 }
-.asset-row.selected {
-  background:#ffffffd4;
-  box-shadow:inset 3px 0 #3c809f
-}
-.asset-row strong {
-  display:block;
-  font-size:12px;
-  font-weight:650;
-  line-height:1.6
-}
-.asset-row small {
-  display:-webkit-box;
-  -webkit-line-clamp:2;
-  -webkit-box-orient:vertical;
-  overflow:hidden;
-  margin-top:4px;
-  font-size:10px;
-  line-height:1.8
+@keyframes asset-drawer-in {
+  from { opacity:0; transform:translateX(18px) }
+  to { opacity:1; transform:translateX(0) }
 }
 .type-icon {
   width:33px;

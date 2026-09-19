@@ -36,6 +36,16 @@ test('C33: Chromium UI assigns existing and new Roles from Workflow editor, runs
   await dialog.getByRole('button', { name: '保存する', exact: true }).click();
   await expect(dialog).not.toBeVisible();
   await expect(page.getByRole('heading', { name: '検証手順', exact: true })).toBeVisible();
+  await expect(page.locator('.asset-grid')).toBeVisible();
+  await expect(page.locator('.asset-card')).toHaveCount(1);
+  await expect(page.locator('.asset-drawer')).toBeVisible();
+  await expect(page.locator('.asset-layout')).toHaveCount(0);
+  await expect(page.locator('.asset-main-content')).toHaveCSS('overflow', 'hidden');
+  await expect(page.locator('.asset-scroll')).toHaveCSS('overflow', 'auto');
+  await page.locator('.asset-drawer').getByRole('button', { name: '×', exact: true }).click();
+  await expect(page.locator('.asset-drawer')).toHaveCount(0);
+  await page.locator('.asset-card').click();
+  await expect(page.locator('.asset-drawer')).toBeVisible();
   await expect(page.getByText('実データを使う検証手順を選ぶ', { exact: true })).toBeVisible();
   await page.getByRole('switch').click();
   await expect(page.getByRole('switch')).toHaveAttribute('aria-checked', 'true');
