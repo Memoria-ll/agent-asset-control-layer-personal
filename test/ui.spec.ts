@@ -20,18 +20,30 @@ function contrastRatio(foreground: string, background: string) {
   return (light! + 0.05) / (dark! + 0.05);
 }
 
+test('UI defaults to English and switches the rendered interface to Japanese', async ({ page }) => {
+  await page.goto(`http://127.0.0.1:${app.port}`);
+  await expect(page.locator('html')).toHaveAttribute('lang', 'en');
+  await expect(page.getByRole('link', { name: 'Asset Library', exact: true })).toBeVisible();
+  await page.locator('#language-select').selectOption('ja');
+  await expect(page.locator('html')).toHaveAttribute('lang', 'ja');
+  await expect(page.getByRole('link', { name: '資産ライブラリ', exact: true })).toBeVisible();
+  await page.locator('#language-select').selectOption('en');
+  await expect(page.getByRole('link', { name: 'Asset Library', exact: true })).toBeVisible();
+});
+
 test('C33: Chromium UI assigns existing and new Roles from Workflow editor, runs a Workflow, records and reviews Journal', async ({ page }) => {
   const errors: string[] = [];
   page.on('pageerror', e => errors.push(e.message));
   page.on('console', e => { if (e.type() === 'error') errors.push(e.text()); });
+  await page.addInitScript(() => localStorage.setItem('aacl-language', 'ja'));
   await page.goto(`http://127.0.0.1:${app.port}`);
   await expect(page.getByRole('heading', { name: '開発方法を、育てる。' })).toBeVisible();
   await page.screenshot({ path: '/tmp/aacl-empty.png', fullPage: true });
   await page.getByRole('button', { name: '最初の資産を作成' }).click();
   const dialog = page.getByRole('dialog');
   await dialog.getByLabel('名前', { exact: true }).fill('検証手順');
-  await dialog.getByLabel('説明', { exact: true }).fill('実際のデータ経路で結果を確かめる');
-  await dialog.getByLabel('description（Runtime YAML）', { exact: true }).fill('実データを使う検証手順を選ぶ');
+  await dialog.getByLabel('コメント', { exact: true }).fill('実際のデータ経路で結果を確かめる');
+  await dialog.getByLabel('説明（Runtime YAML）', { exact: true }).fill('実データを使う検証手順を選ぶ');
   await dialog.getByLabel('本文（Markdown）').fill('変更に関係する検証を実行し、結果を記録する。');
   await dialog.getByRole('button', { name: '保存する', exact: true }).click();
   await expect(dialog).not.toBeVisible();
@@ -93,6 +105,11 @@ test('C33: Chromium UI assigns existing and new Roles from Workflow editor, runs
   await dialog.getByLabel('説明', { exact: true }).fill('実装と確認の二工程で改善を確かめる');
   await dialog.getByRole('button', { name: '＋ 工程を追加' }).click();
   await dialog.getByLabel('工程名', { exact: true }).fill('実装');
+  await expect(dialog.locator('.info-button')).toHaveCount(2);
+  await dialog.locator('.info-button').first().hover();
+  await expect(dialog.locator('.info-button').first()).toHaveCSS('opacity', '1');
+  await expect(dialog.getByLabel('担当Role').first()).toHaveAttribute('translate', 'no');
+  await expect(dialog.getByLabel('Model').first()).toHaveAttribute('translate', 'no');
   await dialog.getByLabel('Model').nth(0).selectOption({ label: '実装Model / provider/implementer · 実行系: codex luna / codex sol · effort: low / high（Global）' });
   await expect(dialog.locator('[name=modelChoice][data-choice-name="実行系"]')).toBeVisible();
   await dialog.locator('[name=modelChoice][data-choice-name="実行系"]').selectOption('codex sol');

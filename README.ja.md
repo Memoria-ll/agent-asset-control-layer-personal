@@ -19,7 +19,7 @@ flowchart LR
 
 | インターフェース | できること |
 | --- | --- |
-| ブラウザーUI | Assetの管理、Workflow Runの開始・確認、Journal・提案・履歴・診断の確認。現在のUI表示は日本語です。 |
+| ブラウザーUI | Assetの管理、Workflow Runの開始・確認、Journal・提案・履歴・診断の確認。UIは英語を既定とし、画面上の言語セレクターで日本語へ切り替えられます。 |
 | HTTP MCP | `/mcp` endpointから接続AIクライアントがAACLの状態を読み書きします。 |
 | CLI | ローカルServiceの導入・起動、Project登録、Runtime接続、保守を行います。 |
 

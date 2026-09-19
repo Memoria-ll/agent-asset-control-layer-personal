@@ -19,7 +19,7 @@ flowchart LR
 
 | Interface | What it does |
 | --- | --- |
-| Browser UI | Manage assets, start and inspect Workflow Runs, review Journals, proposals, history, and diagnostics. The current UI labels are Japanese. |
+| Browser UI | Manage assets, start and inspect Workflow Runs, review Journals, proposals, history, and diagnostics. The UI defaults to English; use the language selector to switch to Japanese. |
 | HTTP MCP | Lets connected AI clients read and update AACL state through the MCP endpoint at `/mcp`. |
 | CLI | Installs and starts the local service, registers Projects, connects clients, and performs maintenance. |
 

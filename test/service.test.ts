@@ -34,8 +34,8 @@ test('C02 C17 C32 C33: real HTTP / typed MCP / loopback / two concurrent chat Ha
   };
   assert.equal((app.server.address() as { address: string }).address, '127.0.0.1');
   assert.equal((await fetch(`${base}/health`)).status, 200);
-  assert.match(await (await fetch(base)).text(), /lang="ja"/);
-  for (const file of ['/app.js', '/view-model.js', '/styles.css']) assert.equal((await fetch(base + file)).status, 200);
+  assert.match(await (await fetch(base)).text(), /lang="en"/);
+  for (const file of ['/app.js', '/i18n.js', '/view-model.js', '/styles.css']) assert.equal((await fetch(base + file)).status, 200);
   assert.equal((await fetch(`${base}/api/asset.list`, { method: 'POST', headers: { 'Content-Type': 'application/json', Origin: 'https://example.com' }, body: '{}' })).status, 403);
   assert.equal(await new Promise<number | undefined>((resolve, reject) => { const req = request(`${base}/health`, { headers: { Host: 'attacker.example' } }, res => { res.resume(); resolve(res.statusCode); }); req.on('error', reject); req.end(); }), 403);
   assert.equal((await fetch(`${base}/api/asset.list`, { method: 'POST', body: '{}' })).status, 415);
