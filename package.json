@@ -19,8 +19,8 @@
     "build": "tsc",
     "test": "node --test test/*.test.ts",
     "check": "npm run build && npm test && npm run test:ui",
-    "start": "node dist/src/cli.js serve",
-    "dev": "npm run build && node dist/src/cli.js serve --dir .local",
+    "start": "node dist/src/cli.js serve --port 4319",
+    "dev": "npm run build && node dist/src/cli.js serve --dir .local --port 4318",
     "test:ui": "playwright test"
   },
   "dependencies": {

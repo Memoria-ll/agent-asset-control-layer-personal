@@ -23,7 +23,7 @@ flowchart LR
 | HTTP MCP | Lets connected AI clients read and update AACL state through the MCP endpoint at `/mcp`. |
 | CLI | Installs and starts the local service, registers Projects, connects clients, and performs maintenance. |
 
-The app is for local, single-user operation. It listens on `127.0.0.1`; the default port is `4318`. The supported environment is WSL with Node.js 24 and a JavaScript-enabled Chromium-based browser.
+The app is for local, single-user operation. The installed service listens on `127.0.0.1:4319`; the development and test service uses `127.0.0.1:4318`. The supported environment is WSL with Node.js 24 and a JavaScript-enabled Chromium-based browser.
 
 ## Install and start
 
@@ -42,6 +42,13 @@ npm exec --yes --allow-git=all --package=github:Memoria-ll/agent-asset-control-l
 `setup` copies the built app into the managed directory (`$XDG_DATA_HOME/aacl`, or `~/.local/share/aacl` by default).
 Run the same command again to update the app files in that managed directory; the SQLite data and generated Runtime entries are preserved.
 
+If an existing installation still uses port `4318`, stop that service once before moving it to the new production port:
+
+```bash
+npm exec --yes --prefer-online --package=github:Memoria-ll/agent-asset-control-layer-personal -- aacl --port 4318 stop
+npm exec --yes --prefer-online --package=github:Memoria-ll/agent-asset-control-layer-personal -- aacl setup
+```
+
 The default managed directory is `$XDG_DATA_HOME/aacl`, or `~/.local/share/aacl` when `XDG_DATA_HOME` is unset. Add its `bin` directory to `PATH`, then check the service and open the UI:
 
 ```bash
@@ -49,7 +56,7 @@ export PATH="$HOME/.local/share/aacl/bin:$PATH"
 aacl health
 ```
 
-Open [http://127.0.0.1:4318](http://127.0.0.1:4318). Run `aacl connect` to print MCP registration commands for Codex and Claude Code. The command prints the setup steps; run the command for the client you use. Its endpoint is `http://127.0.0.1:4318/mcp`.
+Open [http://127.0.0.1:4319](http://127.0.0.1:4319). Run `aacl connect` to print MCP registration commands for Codex and Claude Code. The command prints the setup steps; run the command for the client you use. Its endpoint is `http://127.0.0.1:4319/mcp`.
 
 `setup` also installs the editable `journal` and `journal-review` Skill assets. To manage a project, run `aacl init` from its root. It registers that Project and prepares Project-scoped Runtime targets.
 

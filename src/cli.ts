@@ -12,7 +12,7 @@ import { restoreBackup } from './maintenance.ts';
 import { prepareManagedDirectory } from './managed-directory.ts';
 import { WindowsAutostart } from './autostart.ts';
 
-const { values, positionals } = parseArgs({ allowPositionals: true, options: { dir: { type: 'string' }, port: { type: 'string', default: '4318' }, yes: { type: 'boolean', default: false } } });
+const { values, positionals } = parseArgs({ allowPositionals: true, options: { dir: { type: 'string' }, port: { type: 'string', default: '4319' }, yes: { type: 'boolean', default: false } } });
 const directory = resolve(values.dir ?? join(process.env.XDG_DATA_HOME ?? join(homedir(), '.local/share'), 'aacl'));
 const port = Number(values.port), url = `http://127.0.0.1:${port}`;
 if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error('portは1〜65535で指定してください。');
@@ -130,7 +130,7 @@ async function main() {
     rmSync(directory, { recursive: true });
     print(`削除しました: ${directory}`);
   } else {
-    print('AACL — 開発方法を育てる\n\naacl setup [--dir PATH]  アプリとデータの保存先へ導入\naacl serve              localhost Serviceを起動\naacl ensure             未起動ならバックグラウンドで起動\naacl autostart enable   Windowsログオン時の自動起動を有効化\naacl autostart disable  自動起動を解除\naacl autostart status   自動起動の状態を確認\naacl connect            起動してMCP接続方法を表示\naacl init               現在のProjectを登録\naacl health             接続確認\naacl diagnostics        診断\naacl export DIRECTORY   Markdown / JSONを出力\naacl backup FILE        SQLite Backup\naacl restore FILE --dir NEW_DIRECTORY  新規フォルダーへ復元\naacl stop               Service停止\naacl uninstall --yes    管理フォルダーを削除\n\n共通: --dir PATH --port 4318');
+    print('AACL — 開発方法を育てる\n\naacl setup [--dir PATH]  アプリとデータの保存先へ導入\naacl serve              localhost Serviceを起動\naacl ensure             未起動ならバックグラウンドで起動\naacl autostart enable   Windowsログオン時の自動起動を有効化\naacl autostart disable  自動起動を解除\naacl autostart status   自動起動の状態を確認\naacl connect            起動してMCP接続方法を表示\naacl init               現在のProjectを登録\naacl health             接続確認\naacl diagnostics        診断\naacl export DIRECTORY   Markdown / JSONを出力\naacl backup FILE        SQLite Backup\naacl restore FILE --dir NEW_DIRECTORY  新規フォルダーへ復元\naacl stop               Service停止\naacl uninstall --yes    管理フォルダーを削除\n\n共通: --dir PATH --port 4319');
     if (command !== 'help') process.exitCode = 1;
   }
 }

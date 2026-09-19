@@ -23,7 +23,7 @@ flowchart LR
 | HTTP MCP | `/mcp` endpointから接続AIクライアントがAACLの状態を読み書きします。 |
 | CLI | ローカルServiceの導入・起動、Project登録、Runtime接続、保守を行います。 |
 
-個人向けのローカル利用を対象とします。Serviceは`127.0.0.1`で待ち受け、既定portは`4318`です。対応環境はWSL上のNode.js 24とJavaScriptが有効なChromium系ブラウザーです。
+個人向けのローカル利用を対象とします。導入後のServiceは`127.0.0.1:4319`、開発・テスト用Serviceは`127.0.0.1:4318`で待ち受けます。対応環境はWSL上のNode.js 24とJavaScriptが有効なChromium系ブラウザーです。
 
 ## 導入して起動する
 
@@ -42,6 +42,13 @@ npm exec --yes --allow-git=all --package=github:Memoria-ll/agent-asset-control-l
 `setup`はBuildしたアプリを管理フォルダー（既定は`$XDG_DATA_HOME/aacl`、未設定なら`~/.local/share/aacl`）へコピーします。
 同じコマンドをもう一度実行すると、SQLiteのデータと生成済みRuntime入口を保持したままアプリ部分だけ更新します。
 
+4318で導入済みの環境を4319へ移行する場合だけ、先に4318のServiceを停止します。
+
+```bash
+npm exec --yes --prefer-online --package=github:Memoria-ll/agent-asset-control-layer-personal -- aacl --port 4318 stop
+npm exec --yes --prefer-online --package=github:Memoria-ll/agent-asset-control-layer-personal -- aacl setup
+```
+
 既定の管理フォルダーは`$XDG_DATA_HOME/aacl`です。未設定の場合は`~/.local/share/aacl`を使います。その`bin`ディレクトリを`PATH`へ追加し、Serviceを確認します。
 
 ```bash
@@ -49,7 +56,7 @@ export PATH="$HOME/.local/share/aacl/bin:$PATH"
 aacl health
 ```
 
-[http://127.0.0.1:4318](http://127.0.0.1:4318)を開きます。`aacl connect`はCodexとClaude Code向けのMCP登録コマンドを表示します。利用するクライアント用のコマンドを実行してください。接続先は`http://127.0.0.1:4318/mcp`です。
+[http://127.0.0.1:4319](http://127.0.0.1:4319)を開きます。`aacl connect`はCodexとClaude Code向けのMCP登録コマンドを表示します。利用するクライアント用のコマンドを実行してください。接続先は`http://127.0.0.1:4319/mcp`です。
 
 `setup`は編集可能な`journal`と`journal-review`のSkill Assetも導入します。管理するProjectのルートで`aacl init`を実行すると、Project登録とProject scopeのRuntime設定先を準備します。
 

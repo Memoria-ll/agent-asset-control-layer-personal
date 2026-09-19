@@ -32,7 +32,14 @@ npm exec --yes --allow-git=all --package=github:Memoria-ll/agent-asset-control-l
 `setup`はBuildしたアプリと依存パッケージを管理フォルダーへコピーします。
 更新時も同じコマンドを実行してください。Serviceを停止してアプリ部分だけを入れ替え、SQLiteのデータと生成済みRuntime入口は保持します。
 
-既定の管理フォルダーは`$XDG_DATA_HOME/aacl`、未設定なら`~/.local/share/aacl`です。アプリ・依存パッケージ・データ・起動用CLIをこの中に配置します。初期設定時は`--dir /absolute/path/to/aacl`で別の保存先を選べます。既存の一般フォルダーを誤って管理対象にしないよう、空のフォルダーかAACL管理フォルダーを受け付けます。
+4318で導入済みの環境を4319へ移行する場合だけ、先に4318のServiceを停止します。
+
+```bash
+npm exec --yes --prefer-online --package=github:Memoria-ll/agent-asset-control-layer-personal -- aacl --port 4318 stop
+npm exec --yes --prefer-online --package=github:Memoria-ll/agent-asset-control-layer-personal -- aacl setup
+```
+
+既定の管理フォルダーは`$XDG_DATA_HOME/aacl`、未設定なら`~/.local/share/aacl`です。導入後のServiceとMCPは`127.0.0.1:4319`を使います。アプリ・依存パッケージ・データ・起動用CLIをこの中に配置します。初期設定時は`--dir /absolute/path/to/aacl`で別の保存先を選べます。既存の一般フォルダーを誤って管理対象にしないよう、空のフォルダーかAACL管理フォルダーを受け付けます。
 
 導入後に表示される`bin`のパスをPATHへ追加してください。既定場所なら次のとおりです。
 
@@ -68,8 +75,8 @@ Serviceを確認した後、接続先RuntimeでMCPを登録します。
 
 ```bash
 aacl connect
-codex mcp add aacl --url http://127.0.0.1:4318/mcp
-claude mcp add --transport http aacl http://127.0.0.1:4318/mcp
+codex mcp add aacl --url http://127.0.0.1:4319/mcp
+claude mcp add --transport http aacl http://127.0.0.1:4319/mcp
 ```
 
 MCP endpointはStreamable HTTP、protocol revisionは`2026-07-28`です。Runの対応づけには`run.start`が返す`contextHandle`を使用します。後続のRun操作へAIがこの値を渡します。
