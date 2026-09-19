@@ -37,6 +37,15 @@ async function ensure() {
   for (let i = 0; i < 40; i++) { await delay(150); if (await health()) return; }
   throw new Error(`Serviceを起動できません。${join(directory, 'service.log')}を確認してください。`);
 }
+async function stopRunningService() {
+  if (!(await health())) return;
+  await api('service.stop');
+  for (let i = 0; i < 40; i++) {
+    if (!(await health())) return;
+    await delay(100);
+  }
+  throw new Error('Serviceを停止できません。');
+}
 async function api(name: string, input: object = {}) {
   await ensure();
   const response = await fetch(`${url}/api/${name}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(input) });
@@ -45,10 +54,13 @@ async function api(name: string, input: object = {}) {
   return result;
 }
 function print(data: unknown) { process.stdout.write(`${typeof data === 'string' ? data : JSON.stringify(data, null, 2)}\n`); }
-function installApplication(target: string) {
+function installApplication(target: string, replace = false) {
   prepareManagedDirectory(target);
   const root = fileURLToPath(new URL('../../', import.meta.url)), app = join(target, 'app');
-  if (existsSync(app)) throw new Error('この管理フォルダーにはアプリが導入済みです。');
+  if (existsSync(app)) {
+    if (!replace) throw new Error('この管理フォルダーにはアプリが導入済みです。');
+    rmSync(app, { recursive: true, force: true });
+  }
   mkdirSync(app, { recursive: true, mode: 0o700 });
   for (const path of ['dist', 'web', 'package.json']) cpSync(join(root, path), join(app, path), { recursive: true, dereference: false });
   const dependencies = [join(root, 'node_modules'), dirname(root)].find(path => basename(path) === 'node_modules' && existsSync(path));
@@ -85,12 +97,14 @@ async function main() {
     if (autostart.available) autostart.enable();
     print(`復元しました: ${join(directory, 'bin/aacl')}`);
   } else if (command === 'setup') {
-    installApplication(directory);
+    const updating = existsSync(join(directory, 'app'));
+    if (updating) await stopRunningService();
+    installApplication(directory, updating);
     await ensure();
     await api('setup.skills', { operationId: randomUUID() });
     const autostart = new WindowsAutostart(directory);
     if (autostart.available) autostart.enable();
-    print(`導入しました: ${join(directory, 'bin/aacl')}\nPATHに${join(directory, 'bin')}を追加してください。\nWindowsログオン時の自動起動: ${autostart.available ? '有効' : 'WSL外のため未設定'}\nUI: ${url}\nMCP: ${url}/mcp`);
+    print(`${updating ? '更新しました' : '導入しました'}: ${join(directory, 'bin/aacl')}\nPATHに${join(directory, 'bin')}を追加してください。\nWindowsログオン時の自動起動: ${autostart.available ? '有効' : 'WSL外のため未設定'}\nUI: ${url}\nMCP: ${url}/mcp`);
   } else if (command === 'autostart') {
     const autostart = new WindowsAutostart(directory);
     const action = positionals[1];

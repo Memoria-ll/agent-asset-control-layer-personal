@@ -40,6 +40,7 @@ npm exec --yes --allow-git=all --package=github:Memoria-ll/agent-asset-control-l
 ```
 
 `setup` copies the built app into the managed directory (`$XDG_DATA_HOME/aacl`, or `~/.local/share/aacl` by default).
+Run the same command again to update the app files in that managed directory; the SQLite data and generated Runtime entries are preserved.
 
 The default managed directory is `$XDG_DATA_HOME/aacl`, or `~/.local/share/aacl` when `XDG_DATA_HOME` is unset. Add its `bin` directory to `PATH`, then check the service and open the UI:
 

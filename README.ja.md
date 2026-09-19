@@ -40,6 +40,7 @@ npm exec --yes --allow-git=all --package=github:Memoria-ll/agent-asset-control-l
 ```
 
 `setup`はBuildしたアプリを管理フォルダー（既定は`$XDG_DATA_HOME/aacl`、未設定なら`~/.local/share/aacl`）へコピーします。
+同じコマンドをもう一度実行すると、SQLiteのデータと生成済みRuntime入口を保持したままアプリ部分だけ更新します。
 
 既定の管理フォルダーは`$XDG_DATA_HOME/aacl`です。未設定の場合は`~/.local/share/aacl`を使います。その`bin`ディレクトリを`PATH`へ追加し、Serviceを確認します。
 

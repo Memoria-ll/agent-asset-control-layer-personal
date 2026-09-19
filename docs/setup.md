@@ -30,6 +30,7 @@ npm exec --yes --allow-git=all --package=github:Memoria-ll/agent-asset-control-l
 ```
 
 `setup`はBuildしたアプリと依存パッケージを管理フォルダーへコピーします。
+更新時も同じコマンドを実行してください。Serviceを停止してアプリ部分だけを入れ替え、SQLiteのデータと生成済みRuntime入口は保持します。
 
 既定の管理フォルダーは`$XDG_DATA_HOME/aacl`、未設定なら`~/.local/share/aacl`です。アプリ・依存パッケージ・データ・起動用CLIをこの中に配置します。初期設定時は`--dir /absolute/path/to/aacl`で別の保存先を選べます。既存の一般フォルダーを誤って管理対象にしないよう、空のフォルダーかAACL管理フォルダーを受け付けます。
 
