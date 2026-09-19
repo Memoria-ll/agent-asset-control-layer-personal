@@ -832,9 +832,15 @@ pre {
 }
 .transition-fields {
   display:grid;
-  grid-template-columns:minmax(0,1fr) minmax(110px,.8fr) minmax(0,1fr) 32px;
   gap:8px;
-  align-items:end
+  min-width:0
+}
+.transition-main-fields {
+  display:grid;
+  grid-template-columns:minmax(0,1fr) minmax(110px,.8fr) 32px;
+  gap:8px;
+  align-items:end;
+  min-width:0
 }
 .transition-row button {
   padding:8px 4px;
@@ -847,6 +853,13 @@ pre {
   font-size:12px;
   padding:9px 7px;
   min-width:0
+}
+.transition-fields > label {
+  min-width:0
+}
+.transition-fields textarea {
+  min-height:58px;
+  resize:vertical
 }
 .transition-remove {
   color:#40596b
