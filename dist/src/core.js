@@ -726,9 +726,18 @@ export class Core {
             catch (e) {
                 diagnostics.push({ severity: 'error', code: 'snapshot', target: run.id, message: String(e), evidence: { snapshotId: run.snapshotId } });
             }
-            const retries = this.store.list('event').filter(e => e.runId === run.id && e.type === 'transition' && ['retry', 'return', 'reject'].includes(e.data.transition.type));
-            if (retries.length >= 3)
-                diagnostics.push({ severity: 'warning', code: 'repeated-transition', target: run.id, message: `${retries.length}回のretry・差し戻しがあります。`, evidence: retries.map(e => e.id) });
+            const transitions = this.store.list('event').filter(e => e.runId === run.id && e.type === 'transition');
+            const counts = new Map();
+            for (const event of transitions) {
+                const transition = event.data.transition;
+                counts.set(transition.id, (counts.get(transition.id) ?? 0) + 1);
+            }
+            const repeated = transitions.filter(event => {
+                const transition = event.data.transition;
+                return transition.from === transition.to || (counts.get(transition.id) ?? 0) >= 3;
+            });
+            if (repeated.length >= 3)
+                diagnostics.push({ severity: 'warning', code: 'repeated-transition', target: run.id, message: `${repeated.length}回の自己ループ・同一遷移の反復があります。`, evidence: repeated.map(e => e.id) });
         }
         return { diagnostics: [...this.store.list('diagnostic').filter(d => !d.resolvedAt), ...diagnostics], costs: this.costs() };
     }

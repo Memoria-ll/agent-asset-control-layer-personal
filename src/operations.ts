@@ -14,7 +14,7 @@ aacl_run_startから返るcontextHandleを、同じAI実行Contextの後続Run�
 ContextのSkill catalogから必要な本文・補助ファイルをaacl_run_skill_getで取得します。意味判断と開発操作はAI・Runtimeが行います。
 StageにModelが紐づいている場合、ContextのModel情報とsubagent指示に従ってそのStageを実行します。連続する同じRole・ModelのStageでは同じsubagentを継続します。
 Modelには自由な名前の選択肢グループを複数定義できます。WorkflowのStageへModelを紐づけるときは、各選択肢の値をselectedChoicesで指定し、ContextのmodelSelectionsで確認します。
-Stageのcompletion_conditionを評価し、完了報告とaacl_run_getのversionを付けて許可された遷移を要求します。retry・returnとRun全体のfailedは別です。
+現在Stageから進む遷移のconditionを評価し、遷移判断の報告とaacl_run_getのversionを付けて許可された遷移を要求します。自己ループや差し戻しとRun全体のfailedは別です。
 資産管理はまずaacl_asset_list（既定は概要のみ）またはaacl_asset_get_manyで対象を確かめ、Asset ID・scope・完全なAsset内容・理由・userRequestを明示して型付き操作を実行します。既存Asset・紐づけ・Project Commonの更新／解除とChange Set内の各変更には取得時点のexpectedRevisionを必ず付け、Conflictなら最新状態を再取得して変更全体を組み直します。asset.saveは差分更新ではなく全置換なのでbodyやsupportingFilesを省略しません。複数変更はまずaacl_changeset_previewでDry Runし、問題がなければaacl_changeset_applyを実行します。Assetを削除する前にaacl_asset_delete_previewの参照一覧をユーザーへ示し、削除と参照解除の明示承認を得てからaacl_asset_deleteを実行します。方針が曖昧なら具体案を示してユーザーへ確認します。認証情報は保存しません。
 書き込みのoperationIdにはUUIDを使用し、同じ操作の再送だけで再利用します。
 気づきがあればaacl_journal_templateのMarkdownでaacl_journal_writeへ送ります。Core IDは本文に書かず、contextHandleまたは終了後のpostRunIdを操作入力に指定します。Run外のJournalにはTaskを指定します。
@@ -87,7 +87,7 @@ export class Operations {
     read('context.get', '固定revisionで現在StageのContextを提供', { ...handle, model: z.string().optional() }, p => core.context(p.contextHandle, undefined, p.model));
     read('context.handoff', '明示されたRoleへの引き渡しContextを構成', { ...handle, roleId: id, model: z.string().optional() }, p => core.context(p.contextHandle, p.roleId, p.model));
     read('run.skill.get', 'Runの固定revisionからSkill本文・補助ファイルを取得', { ...handle, assetId: id, file: text.optional() }, p => core.runSkillGet(p.contextHandle, p.assetId, p.file));
-    write('run.transition', '完了報告を付けて許可されたStage遷移を選択', { ...handle, version: z.int().positive(), transitionId: text, report: text, evidence, comment: z.string().default('') }, p => core.transition(p));
+    write('run.transition', '遷移条件への判断報告を付けて許可されたStage遷移を選択', { ...handle, version: z.int().positive(), transitionId: text, report: text, evidence, comment: z.string().default('') }, p => core.transition(p));
     write('run.cancel', 'ユーザー意思によるRunの中止', { ...handle, reason: text }, p => core.endRun(p.contextHandle, 'cancelled', p.reason));
     write('run.fail', '継続不能なRunの終了報告', { ...handle, reason: text }, p => core.endRun(p.contextHandle, 'failed', p.reason));
     write('run.report', '実際に使用したAssetと実行結果を報告', { ...handle, body: text, usedAssetIds: z.array(id).default([]), evidence }, p => {

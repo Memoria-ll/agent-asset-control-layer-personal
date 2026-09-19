@@ -54,7 +54,7 @@ test('C02 C17 C32 C33: real HTTP / typed MCP / loopback / two concurrent chat Ha
   const badHeader = await rpc('tools/list', {}, undefined, { 'Mcp-Method': 'tools/call' }); assert.equal(badHeader.status, 400);
   const workflowId = randomUUID(), roleId = randomUUID();
   const created = await api<{ entities: Asset[] }>('changeset.apply', { operationId: randomUUID(), provenance: { origin: 'ui' }, changes: [
-    { type: 'asset.create', id: workflowId, asset: { kind: 'workflow', name: 'HTTP Workflow', description: '結合試験', entryStage: 'start', stages: [{ id: 'start', name: '作業', completion_condition: '作業を報告' }], transitions: [{ id: 'end', from: 'start', to: 'completed', type: 'complete', label: '完了' }] } },
+    { type: 'asset.create', id: workflowId, asset: { kind: 'workflow', name: 'HTTP Workflow', description: '結合試験', entryStage: 'start', stages: [{ id: 'start', name: '作業' }], transitions: [{ id: 'end', from: 'start', to: 'completed', condition: '作業を報告できる', label: '完了' }] } },
     { type: 'asset.create', id: roleId, asset: { kind: 'role', name: 'HTTP担当Role', description: '工程の責務を担う', responsibilities: '作業結果を報告する。' } },
     { type: 'binding.save', binding: { sourceId: workflowId, targetId: roleId, stageId: 'start', purpose: 'stage-role' } },
   ] });

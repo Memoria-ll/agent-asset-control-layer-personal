@@ -226,12 +226,11 @@ Workflowは次を保持する。
 
 - ID、name、description、revision
 - transitions
-- retry / reject / return
-- Stageの一覧と、各Stageに必須のcompletion_condition
+- Stageの一覧と、各Stageからのtransition定義
 
 Workflow / Stageで使うRole・Skill・Rule・Modelは紐づけで指定し、対象Projectの構成から取得する。
 
-StageをWorkflowの実行単位とする。各Stageには担当Roleを必ず1件割り当て、Roleのresponsibilitiesを工程の基本としてContextへ含める。Stage固有の追加指示は任意の自由記述としてRoleのresponsibilitiesを補足し、completion_conditionとは別に保存してStage Contextへ含める。Stageが参照するSkill、Rule、Modelは任意とする。Modelを指定したStageはそのModelのサブエージェントで実行する指示としてContextへ含める。連続するStageの担当RoleとModelが同一なら、同じサブエージェントIDを継続して使う。completion_conditionはAIが完了を判断するための必須自由記述であり、Coreはその意味を判定しない。CoreはWorkflowのStage一覧、担当Role、Model、許可されたtransitionを管理し、完了判断後にAIまたはユーザーが選んだtransitionの構造と現在状態を検証する。
+StageをWorkflowの実行単位とする。各Stageには担当Roleを必ず1件割り当て、Roleのresponsibilitiesを工程の基本としてContextへ含める。Stage固有の追加指示は任意の自由記述としてRoleのresponsibilitiesを補足してStage Contextへ含める。Stageが参照するSkill、Rule、Modelは任意とする。Modelを指定したStageはそのModelのサブエージェントで実行する指示としてContextへ含める。連続するStageの担当RoleとModelが同一なら、同じサブエージェントIDを継続して使う。各transitionは遷移先へ進むための必須自由記述conditionを持ち、Coreはその意味を判定しない。CoreはWorkflowのStage一覧、担当Role、Model、許可されたtransitionを管理し、AIまたはユーザーが選んだtransitionのconditionに対する判断報告を受けて構造と現在状態を検証する。
 
 ---
 
@@ -396,25 +395,25 @@ Runの状態を次のように扱う。
 | 状態 | 意味 |
 |---|---|
 | active | 実行が進行中である |
-| completed | 完了要求が受理され、完了条件の構造的検証を通った |
+| completed | `completed`への許可された遷移要求が受理された |
 | cancelled | ユーザー意思により中止した |
 | failed | 継続不能として終了した |
 
-Workflow Runでは、Coreが現在Stageを保持し、定義に従って可能なtransitionを示す。retry / reject / returnと、Run全体のfailedを区別する。
+Workflow Runでは、Coreが現在Stageを保持し、定義に従って可能なtransitionと各conditionを示す。自己ループ・差し戻しと、Run全体のfailedを区別する。
 
-現在Stage、許可されたtransition、Run状態はCoreが管理する。完了条件の意味的な評価、Stageの完了報告、利用可能なtransitionの選択はユーザーまたは接続中AIが行う。Coreはtransitionの構造と状態を検証して保存する。
+現在Stage、許可されたtransition、Run状態はCoreが管理する。transition conditionの意味的な評価、遷移判断の報告、利用可能なtransitionの選択はユーザーまたは接続中AIが行う。Coreはtransitionの構造と状態を検証して保存する。
 
 Runの終端状態はcompleted、cancelled、failedとする。ユーザーによる中止はcancelled、継続不能の報告または非活動timeoutはfailedとする。timeoutは既定24時間とし、Global設定で変更できる。読み取りを含むRun関連MCP操作は非活動時間を更新する。同一操作の再送はduplicate、状態が進行した後の別transitionはstaleとして扱う。
 
 ---
 
-# 19. 完了条件と終了
+# 19. 遷移条件と終了
 
-各Stageは、AIが完了を判断するための必須自由記述completion_conditionを持つ。
+各transitionは、その遷移先へ進むとAIまたはユーザーが判断するための必須自由記述conditionを持つ。conditionは現在Stageからの経路ごとに保存し、同じ遷移先でも遷移元や判断内容が異なる場合に別々に記述できる。
 
-AIはcompletion_conditionを評価し、Stageを完了したと判断した場合、完了報告と任意の根拠・コメントを添えてCoreへtransitionを要求する。
+AIまたはユーザーは現在Stageから選ぶtransitionのconditionを評価し、遷移すると判断した場合、遷移判断の報告と任意の根拠・コメントを添えてCoreへtransitionを要求する。conditionの意味や根拠の真偽はCoreが判定しない。
 
-CoreはAIの意味判断や根拠の真偽を評価せず、現在のRun状態、許可されたtransition、必須入力の構造を検証する。Workflowの終端Stageへの許可されたtransitionが受理されたとき、Runをcompletedにする。
+CoreはAIやユーザーの意味判断や根拠の真偽を評価せず、現在のRun状態、許可されたtransition、必須入力の構造を検証する。`to=completed`の許可されたtransitionが受理されたとき、Runをcompletedにする。
 
 ユーザーは接続中AIを通じてRunのcancelを要求する。Runtime / AIは継続不能なRunをfailedとして終了報告する。
 
@@ -453,7 +452,7 @@ Resolutionの入力は、Project、使用する紐づけ、Project Common、Work
 - Workflow Definition
 - 紐づけとProject Commonで明示参照されたRule
 - 利用対象Skillのcatalog
-- 現在Stage、担当Roleとresponsibilities、任意の追加指示、completion_condition
+- 現在Stage、担当Roleとresponsibilities、任意の追加指示、現在Stageからの許可transitionと各condition
 
 Stageの担当Roleとresponsibilitiesを工程の基本Contextとして含める。Stage固有の追加指示があればRoleへの補足として含める。StageにModelが紐づく場合はModel名、呼び出し方、Modelから参照したSkill / Rule、およびサブエージェント継続指示をContextへ含める。
 
@@ -469,7 +468,7 @@ AACLは、資産がどの参照経路から利用対象になったか、何を�
 
 Workflowで別のRoleへ作業を委譲する場合、Coreは引き渡すContextを構成する。
 
-Contextには、Run ID、Workflowとrevision、Stage、stageRoleId、Roleとresponsibilities、任意の追加指示、completion_condition、明示参照されたRuleとSkillを含める。
+Contextには、Run ID、Workflowとrevision、Stage、stageRoleId、Roleとresponsibilities、任意の追加指示、現在Stageからの許可transitionと各condition、明示参照されたRuleとSkillを含める。
 
 実際の割り当てと実行主体の起動は、接続中AIとRuntimeが担う。
 
@@ -565,7 +564,7 @@ AIはCoreから新しいJournalと以前のレビューで保留した気づき�
 
 改善提案は次を対象とする。
 
-- Workflowの工程・遷移・完了条件
+- Workflowの工程・遷移・遷移条件
 - Roleの責務
 - Skill / Ruleの内容
 - 明示参照の追加・変更・削除
@@ -693,7 +692,7 @@ UIの視覚表現はリキッドグラス風とする。画面構成や個別の
 - UIから紐づけを追加・解除・付け替えでき、SkillのuseCase設定を有効・無効に簡単に切り替えられる。現在の設定状態を見分けられる。
 - Workflow編集画面でStageごとに既存Roleを必ず1件選ぶか、新しいRoleをGlobal Assetとして作成して割り当てられる。担当Roleの責務がStageの基本となり、追加指示は任意で記入できる。作成したRoleは他のWorkflow / Stageでも再利用できる。
 - Workflow編集画面でStageごとにModelを任意に指定できる。Modelを指定したStageはサブエージェント実行の指示になり、連続する同じRole・ModelのStageでは同じサブエージェントへ依頼する。
-- WorkflowのStage間の許可された遷移を図で表示する。次工程への遷移、差し戻し、retry等の自己ループを含む遷移元・遷移先・種別が分かる。
+- WorkflowのStage間の許可された遷移を図で表示する。各遷移の遷移元・遷移先・condition・表示名が分かり、自己ループや差し戻しも確認できる。
 - UIの対応保証はviewport幅880 CSS px以上とする。
 
 Runtime差は、Runtime identifierとRuntime固有Bootstrapとして扱う。外部Modelの実在性・利用可否はRuntimeが扱い、Model Assetの名前、Model名、呼び出し方、Skill / Rule参照、Stageへの割当はCoreが管理する。

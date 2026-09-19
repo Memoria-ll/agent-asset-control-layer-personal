@@ -20,9 +20,9 @@ function fixture(t: { after: (fn: () => void) => void }) {
   const asset = async (kind: Asset['kind'], overrides: object = {}) => (await call<{ entities: Asset[] }>('asset.save', { asset: { kind, name: kind, description: '説明', body: '本文', ...overrides }, provenance })).entities[0];
   const workflow = async (assignedRole?: Asset) => {
     const workflowId = randomUUID(), roleId = assignedRole?.id ?? randomUUID();
-    const stages = [{ id: 'build', name: '実装', completion_condition: '実装を確認' }, { id: 'review', name: '確認', completion_condition: '確認結果を報告' }];
+    const stages = [{ id: 'build', name: '実装' }, { id: 'review', name: '確認' }];
     const changes = [
-      { type: 'asset.create', id: workflowId, asset: { kind: 'workflow', name: 'テストWorkflow', description: '説明', entryStage: 'build', stages, transitions: [{ id: 'next', from: 'build', to: 'review', type: 'next', label: '確認へ' }, { id: 'retry', from: 'build', to: 'build', type: 'retry', label: '再試行' }, { id: 'return', from: 'review', to: 'build', type: 'return', label: '差し戻し' }, { id: 'done', from: 'review', to: 'completed', type: 'complete', label: '完了' }] } },
+      { type: 'asset.create', id: workflowId, asset: { kind: 'workflow', name: 'テストWorkflow', description: '説明', entryStage: 'build', stages, transitions: [{ id: 'next', from: 'build', to: 'review', condition: '実装とテストが完了した', label: '確認へ' }, { id: 'retry', from: 'build', to: 'build', condition: '実装結果が不十分で再作業が必要', label: '再試行' }, { id: 'return', from: 'review', to: 'build', condition: '修正が必要', label: '差し戻し' }, { id: 'done', from: 'review', to: 'completed', condition: '確認結果を受け入れられる', label: '完了' }] } },
       ...(assignedRole ? [] : [{ type: 'asset.create', id: roleId, asset: { kind: 'role', name: '担当Role', description: '各工程の責務を担う' } }]),
       ...stages.map(stage => ({ type: 'binding.save', binding: { sourceId: workflowId, targetId: roleId, stageId: stage.id, purpose: 'stage-role' } })),
     ];
@@ -53,6 +53,17 @@ test('Skill metadata separates the human explanation from Runtime description an
   assert.equal('taskType' in run.run, false);
 });
 
+test('Legacy Workflow completion fields are normalized into transition conditions', () => {
+  const workflow = assetSchema.parse({
+    kind: 'workflow', name: '旧Workflow', description: '旧形式', entryStage: 'work',
+    stages: [{ id: 'work', name: '作業', completion_condition: '作業結果を確認' }],
+    transitions: [{ id: 'done', from: 'work', to: 'completed', type: 'complete', label: '完了' }],
+  });
+  assert.equal(Object.hasOwn(workflow.stages[0]!, 'completion_condition'), false);
+  assert.equal(Object.hasOwn(workflow.transitions[0]!, 'type'), false);
+  assert.equal(workflow.transitions[0]!.condition, '作業結果を確認');
+});
+
 test('Runtime Skill entries carry only frontmatter metadata and the AACL entry ID', async t => {
   const f = fixture(t), skill = await f.asset('skill', { name: 'runtime-description', description: 'yaml frontmatter description', explanation: '人が呼んで分かる説明', body: 'CANONICAL_SKILL_BODY_42', useCase: true });
   const root = mkdtempSync(join(tmpdir(), 'aacl-runtime-description-'));
@@ -69,14 +80,14 @@ test('Runtime Skill entries carry only frontmatter metadata and the AACL entry I
 
 test('C09: a Workflow cannot be saved while a Stage lacks its responsible Role', async t => {
   const f = fixture(t);
-  const workflow = { kind: 'workflow', name: 'Role前提Workflow', description: '担当Roleを必須にする', entryStage: 'work', stages: [{ id: 'work', name: '作業', completion_condition: '作業結果を確認' }], transitions: [{ id: 'done', from: 'work', to: 'completed', type: 'complete', label: '完了' }] };
+  const workflow = { kind: 'workflow', name: 'Role前提Workflow', description: '担当Roleを必須にする', entryStage: 'work', stages: [{ id: 'work', name: '作業' }], transitions: [{ id: 'done', from: 'work', to: 'completed', condition: '作業結果を確認できる', label: '完了' }] };
   await assert.rejects(f.call('asset.save', { asset: workflow, provenance }), /担当Role/);
   assert.equal(f.store.list('asset').length, 0);
 });
 
 test('C09 C11 C17: optional Stage instructions accompany its responsible Role in Context', async t => {
   const f = fixture(t), workflowId = randomUUID(), roleId = randomUUID();
-  const workflow = { kind: 'workflow', name: 'Role前提Workflow', description: 'Roleと追加指示をContextへ渡す', entryStage: 'work', stages: [{ id: 'work', name: '作業', completion_condition: '作業結果を確認', additionalInstructions: '既存のRole責務を踏まえて、対象範囲を先に確認する。' }], transitions: [{ id: 'done', from: 'work', to: 'completed', type: 'complete', label: '完了' }] };
+  const workflow = { kind: 'workflow', name: 'Role前提Workflow', description: 'Roleと追加指示をContextへ渡す', entryStage: 'work', stages: [{ id: 'work', name: '作業', additionalInstructions: '既存のRole責務を踏まえて、対象範囲を先に確認する。' }], transitions: [{ id: 'done', from: 'work', to: 'completed', condition: '作業結果を確認できる', label: '完了' }] };
   await f.call('changeset.apply', { changes: [
     { type: 'asset.create', id: workflowId, asset: workflow },
     { type: 'asset.create', id: roleId, asset: { kind: 'role', name: '実装担当', description: '実装を担う', responsibilities: '変更の意図を守り、結果を検証する。' } },
@@ -372,7 +383,7 @@ test('C18 C19 C30: transitions are structural, idempotent, stale-safe; timeout i
   await f.call('run.fail', { contextHandle: failed.contextHandle, reason: '継続不能' });
   assert.equal(f.core.run(failed.contextHandle).status, 'failed');
   await assert.rejects(f.call('asset.get', { assetId: failed.run.id, revision: 1 }), /対象が見つかりません/);
-  assert.throws(() => assetSchema.parse({ kind: 'workflow', name: 'x', description: 'x', stages: [{ id: 'x', name: 'x', completion_condition: '' }], entryStage: 'x' }));
+  assert.throws(() => assetSchema.parse({ kind: 'workflow', name: 'x', description: 'x', stages: [{ id: 'x', name: 'x' }], transitions: [{ id: 'done', from: 'x', to: 'completed', label: '完了' }], entryStage: 'x' }));
 });
 
 test('C25: Markdown raw, duplicate headings, unknown fragments, fences, independent insights', async t => {
@@ -562,15 +573,15 @@ test('C29 C33: Change Set restoration / persistent SQLite / export / consistent 
   const opened = new Store(join(root, 'restored/aacl.sqlite')); assert.equal(opened.get<Asset>(skill.id).body, '本文'); opened.close();
 });
 
-test('C33: UI relationship projections distinguish direct / Role paths and graph includes return and retry', async t => {
+test('C33: UI relationship projections distinguish direct / Role paths and graph includes conditional loops', async t => {
   const f = fixture(t), role = await f.asset('role'), w = await f.workflow(role), s = await f.asset('skill');
   await f.bind(role, s); await f.bind(w, s, { stageId: 'review' });
   const views = relatedWorkflows(s.id, f.store.list('asset'), f.core.bindings());
   assert.ok(views.some(v => v.stageId === 'build' && v.via[0] === role.name && v.binding.sourceId === role.id));
   assert.ok(views.some(v => v.stageId === 'review' && !v.via.length));
   const graph = workflowDiagram(w);
-  assert.equal(graph.edges.length, 4); assert.ok(graph.edges.some(e => e.type === 'retry' && e.from === e.to));
-  assert.ok(graph.edges.some(e => e.type === 'return' && e.to === 'build'));
+  assert.equal(graph.edges.length, 4); assert.ok(graph.edges.some(e => e.from === e.to && e.condition.includes('再作業')));
+  assert.ok(graph.edges.some(e => e.to === 'build' && e.condition === '修正が必要'));
 });
 
 test('C11 C33: one Global Role is reused across Workflow stages and workflows, and removed Stage links save atomically', async t => {

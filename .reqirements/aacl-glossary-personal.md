@@ -41,7 +41,7 @@ filesystem、shell、GitHub、browser、external API等、Runtimeが提供する
 
 ### Context
 
-Workflow RunでAIへ渡す実行情報。Workflow Definition、現在Stageとcompletion_condition、担当Role IDと責務、Stageの追加指示、明示参照されたRuleとSkill、指定Modelの固定情報、サブエージェント継続指示等を含む。直接起動Skillの取得は指定Assetの本文を返す。
+Workflow RunでAIへ渡す実行情報。Workflow Definition、現在Stage、担当Role IDと責務、Stageの追加指示、現在Stageからの遷移と各condition、明示参照されたRuleとSkill、指定Modelの固定情報、サブエージェント継続指示等を含む。直接起動Skillの取得は指定Assetの本文を返す。
 
 ### Context Handle
 
@@ -161,11 +161,11 @@ Run中に提供したContext、Asset、revision、参照経路、実行情報を
 
 ### schema
 
-Coreが受け付けるデータの構造と、保存時に確認する項目の定義。本実装ではModelを含むAsset、Journal、Workflow、Stageをschema検証の対象とする。本文、completion_condition、コメント、根拠説明等の意味はschemaで判定しない。
+Coreが受け付けるデータの構造と、保存時に確認する項目の定義。本実装ではModelを含むAsset、Journal、Workflow、Stageをschema検証の対象とする。本文、遷移condition、コメント、根拠説明等の意味はschemaで判定しない。
 
 ### Stage
 
-Workflow内の工程であり、Workflowの実行単位。Stage固有の必須`completion_condition`を持ち、Runの現在位置として管理される。各Stageには担当Roleを1件割り当て、そのRoleの責務を基本とする。任意でModelを1件割り当てると、そのModelをサブエージェントとして実行する。連続するStageで担当RoleとModelが同じ場合は同じサブエージェントへ依頼する。`additionalInstructions`は必要に応じて加える自由記述であり、Roleの責務と完了条件を補う。WorkflowがStage一覧と許可するtransitionを定義する。
+Workflow内の工程であり、Workflowの実行単位。Runの現在位置として管理される。各Stageには担当Roleを1件割り当て、そのRoleの責務を基本とする。任意でModelを1件割り当てると、そのModelをサブエージェントとして実行する。連続するStageで担当RoleとModelが同じ場合は同じサブエージェントへ依頼する。`additionalInstructions`は必要に応じて加える自由記述である。WorkflowがStage一覧と、各Stageからの許可transitionおよび遷移conditionを定義する。
 
 ## T
 
@@ -179,7 +179,7 @@ Skillの`description`はRuntime入口のYAML front matterへ渡す短い説明�
 
 ### transition
 
-Workflowの現在Stageから別のStageまたは終端状態へ進む定義。Coreが許可されたtransitionを管理し、AIまたはユーザーが選択する。
+Workflowの現在Stageから別のStageまたは終端状態へ進む定義。`from`、`to`、行き先を選ぶための必須`condition`、表示用の`label`を持つ。Coreが許可されたtransitionを管理し、conditionの意味判断と選択はAIまたはユーザーが行う。
 
 ## U
 
@@ -195,7 +195,7 @@ Skillが直接起動可能なUse Caseであることを示す設定値。trueへ
 
 ### Workflow
 
-複数のStageとtransitionからなる再利用可能な開発方法を定義するCanonical Asset。各Stageは担当Roleを1件、任意のModelを1件、必須の`completion_condition`を持ち、任意の`additionalInstructions`でそのStageの作業を補足できる。
+複数のStageとtransitionからなる再利用可能な開発方法を定義するCanonical Asset。各Stageは担当Roleを1件、任意のModelを1件持ち、各transitionは行き先へ進む必須の`condition`を持つ。`additionalInstructions`でそのStageの作業を補足できる。
 
 ### Workspace
 
@@ -211,13 +211,13 @@ Runが実際の作業で使うディレクトリまたはGit worktree。選択�
 
 AACLの状態管理・検証・解決・保存を担う中心Service。アプリケーションとデータを同じAACL管理フォルダーに置き、その中のSQLite、Project registry、Asset、Run、Context、Snapshot、Journal、History、Provenance、Diagnosticsを管理する。AIや外部Toolを実行しない。
 
-### completion_condition
+### transition.condition
 
-Workflow Stageが完了したとAIが判断するための条件記述。Stageごとの必須自由記述として保存し、CoreがAIへContextとして渡す。Coreは内容の意味を判定しない。
+Workflowの現在Stageからその遷移先へ進むとAIまたはユーザーが判断するための条件記述。各transitionの必須自由記述として保存し、現在Stageの許可遷移とともにContextへ渡す。Coreは内容の意味を判定しない。
 
 ### additionalInstructions
 
-Workflow Stageの担当Roleと責務を基本としたうえで、必要に応じて加える任意の自由記述。completion_conditionとは別fieldとして保存し、StageのContextに含める。
+Workflow Stageの担当Roleと責務を基本としたうえで、必要に応じて加える任意の自由記述。遷移conditionとは別fieldとして保存し、StageのContextに含める。
 
 ### revision
 

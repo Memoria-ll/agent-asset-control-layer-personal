@@ -75,7 +75,6 @@ test('C33: Chromium UI assigns existing and new Roles from Workflow editor, runs
   await dialog.getByLabel('説明', { exact: true }).fill('実装と確認の二工程で改善を確かめる');
   await dialog.getByRole('button', { name: '＋ 工程を追加' }).click();
   await dialog.getByLabel('工程名', { exact: true }).fill('実装');
-  await dialog.getByLabel('完了条件', { exact: true }).fill('実装内容を確認できる');
   await dialog.getByLabel('Model').nth(0).selectOption({ label: '実装Model / provider/implementer · 実行系: codex luna / codex sol · effort: low / high（Global）' });
   await expect(dialog.locator('[name=modelChoice][data-choice-name="実行系"]')).toBeVisible();
   await dialog.locator('[name=modelChoice][data-choice-name="実行系"]').selectOption('codex sol');
@@ -84,7 +83,6 @@ test('C33: Chromium UI assigns existing and new Roles from Workflow editor, runs
   await dialog.getByLabel('追加指示（任意）').nth(0).fill('Roleの責務を土台にして、変更範囲を先に確認する。');
   await dialog.getByRole('button', { name: '＋ 工程を追加' }).click();
   await dialog.getByLabel('工程名', { exact: true }).nth(1).fill('確認');
-  await dialog.getByLabel('完了条件', { exact: true }).nth(1).fill('検証結果を報告した');
   await dialog.getByLabel('Model').nth(1).selectOption({ label: '実装Model / provider/implementer · 実行系: codex luna / codex sol · effort: low / high（Global）' });
   await dialog.locator('[name=modelChoice][data-choice-name="実行系"]').nth(1).selectOption('codex luna');
   await dialog.locator('[name=modelChoice][data-choice-name="effort"]').nth(1).selectOption('low');
@@ -94,12 +92,12 @@ test('C33: Chromium UI assigns existing and new Roles from Workflow editor, runs
   await secondStage.getByLabel('新しいRole名').fill('レビュー担当');
   await secondStage.getByLabel('Roleの説明').fill('変更内容を独立して確認する');
   await secondStage.getByLabel('Roleの責務').fill('実際の動作と完了条件を照合する。');
-  for (const [fromIndex, to, type, label] of [[0, '確認', 'next', '確認へ'], [1, '実装', 'return', '戻す'], [0, '実装', 'retry', 'やり直す'], [1, '完了', 'complete', '完了する']] as [number, string, string, string][]) {
+  for (const [fromIndex, to, condition, label] of [[0, '確認', '実装とテストが完了した', '確認へ'], [1, '実装', '修正が必要', '戻す'], [0, '実装', '実装結果が不十分', 'やり直す'], [1, '完了', '検証結果を受け入れられる', '完了する']] as [number, string, string, string][]) {
     const stage = dialog.locator('.stage-editor').nth(fromIndex);
     await stage.getByRole('button', { name: '＋ 行き先を追加' }).click();
     const row = stage.locator('.transition-row').last();
     await row.getByLabel('行き先').selectOption({ label: to });
-    await row.getByLabel('種別').selectOption(type);
+    await row.getByLabel('遷移条件').fill(condition);
     await row.getByLabel('表示名').fill(label);
   }
   await dialog.getByRole('button', { name: '保存する', exact: true }).click();
@@ -123,6 +121,7 @@ test('C33: Chromium UI assigns existing and new Roles from Workflow editor, runs
   const restoredTransition = firstStageEditor.locator('.transition-row').last();
   await expect(firstStageEditor.getByRole('group', { name: '遷移設定 2' })).toBeVisible();
   await expect(restoredTransition.getByRole('button', { name: '遷移設定 2を削除' })).toBeVisible();
+  await restoredTransition.getByLabel('遷移条件').fill('実装とテストが完了した');
   await restoredTransition.getByLabel('表示名').fill('確認へ');
   const colors = await firstStageEditor.evaluate(stage => {
     const panel = stage.querySelector<HTMLElement>('.stage-transitions')!;
@@ -198,7 +197,7 @@ test('C33: Chromium UI assigns existing and new Roles from Workflow editor, runs
   await expect(dialog).not.toBeVisible();
   await expect(page.getByRole('img', { name: '改善の確認の許可遷移' })).toBeVisible();
   await expect(page.locator('path.edge')).toHaveCount(4);
-  await expect(page.locator('path.edge.retry')).toHaveCount(1);
+  await expect(page.locator('path.edge.loop')).toHaveCount(1);
   await expect(page.getByText('検証担当 経由')).toBeVisible();
   await expect(page.getByText('実装Model（サブエージェント実行）').first()).toBeVisible();
   await expect(page.locator('.detail .editor-row').nth(1).locator('p.hint').first()).toContainText('担当Role: レビュー担当');
@@ -212,12 +211,12 @@ test('C33: Chromium UI assigns existing and new Roles from Workflow editor, runs
   await expect(page.getByText('Roleの責務を土台にして、変更範囲を先に確認する。', { exact: true })).toBeVisible();
   await expect(page.getByRole('button', { name: '確認へ', exact: true })).toBeVisible();
   await page.getByRole('button', { name: '確認へ', exact: true }).click();
-  await dialog.getByLabel('完了報告').fill('実装内容を確認した');
+  await dialog.getByLabel('遷移判断の報告').fill('実装内容を確認した');
   await dialog.getByRole('button', { name: '選択した遷移を実行' }).click();
   await expect(dialog).not.toBeVisible();
   await expect(page.getByRole('button', { name: '完了する', exact: true })).toBeVisible();
   await page.getByRole('button', { name: '完了する', exact: true }).click();
-  await dialog.getByLabel('完了報告').fill('検証結果を報告した');
+  await dialog.getByLabel('遷移判断の報告').fill('検証結果を報告した');
   await dialog.getByRole('button', { name: '選択した遷移を実行' }).click();
   await expect(dialog).not.toBeVisible();
   await page.getByRole('button', { name: 'Journalを記録', exact: true }).click();

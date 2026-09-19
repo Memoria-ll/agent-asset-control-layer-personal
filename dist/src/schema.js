@@ -17,8 +17,38 @@ export function normalizeAssetRecord(value) {
     const oldTaskType = typeof record.taskType === 'string' ? record.taskType : '';
     const oldDescription = typeof record.description === 'string' ? record.description : '';
     delete normalized.taskType;
-    if (Array.isArray(normalized.stages))
-        normalized.stages = normalized.stages.map(withoutTaskType);
+    if (Array.isArray(normalized.stages)) {
+        const completionConditions = new Map(normalized.stages.map(stage => {
+            const value = withoutTaskType(stage);
+            const item = value && typeof value === 'object' && !Array.isArray(value) ? value : {};
+            return [typeof item.id === 'string' ? item.id : '', typeof item.completion_condition === 'string' ? item.completion_condition : ''];
+        }));
+        normalized.stages = normalized.stages.map(stage => {
+            const value = withoutTaskType(stage);
+            const item = value && typeof value === 'object' && !Array.isArray(value) ? value : {};
+            const { completion_condition: _completionCondition, ...current } = item;
+            return current;
+        });
+        if (Array.isArray(normalized.transitions))
+            normalized.transitions = normalized.transitions.map(transition => {
+                if (!transition || typeof transition !== 'object' || Array.isArray(transition))
+                    return transition;
+                const item = transition;
+                const { type: oldType, ...current } = item;
+                if (typeof current.condition === 'string' && current.condition.trim())
+                    return current;
+                if (typeof oldType !== 'string')
+                    return current;
+                const from = typeof current.from === 'string' ? current.from : '';
+                const previous = completionConditions.get(from) ?? '';
+                const condition = oldType === 'complete' || oldType === 'next'
+                    ? previous || '現在の工程の成果を次の工程へ渡せる'
+                    : oldType === 'retry'
+                        ? '現在の成果では次へ進めず、同じ工程で再作業が必要'
+                        : '前の工程へ戻して修正が必要';
+                return { ...current, condition };
+            });
+    }
     if (record.kind === 'skill') {
         normalized.description = oldTaskType.trim() || oldDescription;
         normalized.explanation = typeof record.explanation === 'string' ? record.explanation : oldDescription;
@@ -29,12 +59,11 @@ export function normalizeAssetRecord(value) {
     return normalized;
 }
 export const stageSchema = z.preprocess(withoutTaskType, z.object({
-    id: text, name: text, completion_condition: text,
+    id: text, name: text,
     additionalInstructions: z.string().default(''), description: z.string().default(''),
 }).strict());
 export const transitionSchema = z.object({
-    id: text, from: text, to: text,
-    type: z.enum(['next', 'return', 'retry', 'reject', 'complete']), label: text,
+    id: text, from: text, to: text, condition: text, label: text,
 }).strict();
 export const modelChoiceSchema = z.object({
     name: text,
@@ -84,10 +113,6 @@ export const assetSchema = z.preprocess(normalizeAssetRecord, assetInputSchema).
         for (const t of a.transitions) {
             if (!stages.has(t.from) || (!stages.has(t.to) && t.to !== 'completed'))
                 fail('遷移先・遷移元が存在しません。');
-            if ((t.type === 'complete') !== (t.to === 'completed'))
-                fail('完了遷移の行き先はcompletedです。');
-            if (t.type === 'retry' && t.from !== t.to)
-                fail('retryは同じStageへの遷移です。');
         }
     }
     for (const path of Object.keys(a.supportingFiles)) {

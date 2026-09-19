@@ -876,12 +876,22 @@ pre {
   stroke:#7e9eaf;
   stroke-width:1.5
 }
-.diagram .edge.return,.diagram .edge.reject {
-  stroke:#ad9067;
+.diagram .edge.loop {
+  stroke:#9789ad;
   stroke-dasharray:5 3
 }
-.diagram .edge.retry {
-  stroke:#9789ad
+.diagram .edge.complete {
+  stroke:#5c9b76
+}
+.transition-option {
+  display:flex;
+  flex-direction:column;
+  gap:4px
+}
+.transition-option small {
+  max-width:220px;
+  color:#718a99;
+  font-size:11px
 }
 .diagram .edge-label {
   font-size:10px;
