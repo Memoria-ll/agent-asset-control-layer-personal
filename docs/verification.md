@@ -5,13 +5,13 @@
 | 確認ID | 主な操作 | 試験で固定する条件 |
 | --- | --- | --- |
 | C01、C35 | `run.start`、`journal.write`、`proposal.*` | Run→Journal→承認→一部気づきと変更の同時適用→次Runのrevision |
-| C02、C04 | `asset.save`、`asset.restore` | 共通schema、不正入力拒否、安定ID、古いrevisionを許可、冪等性、不変履歴 |
+| C02、C04 | `asset.save`、`asset.restore`、`changeset.preview` | 共通schema、不正入力拒否、安定ID、expectedRevisionによるConflict、Dry Run、冪等性、不変履歴 |
 | C03、C08、C10 | `usecase.search`、`skill.get`、`run.skill.get` | Skill直接取得でRun等を作らない。本文・補助ファイルの遅延取得 |
 | C05、C07 | `project.init`、`project.resolve`、`common.*` | path正規化、root完全一致、重複登録拒否、Global紐づけだけの複製、空のCommon、scopeに一致するProject入口とGlobal入口の非重複 |
 | C06 | `binding.*` | コピー後の独立性、IDでの参照、Role→Skill→Skill、循環拒否 |
 | C09、C19 | `asset.save`、`run.transition` | Stage完了条件必須、遷移元・先・種別、許可されていない遷移の拒否、完了報告 |
 | C11、C12、C13 | `context.get`、`context.handoff` | Role責務と明示Rule、指定Modelの固定情報とサブエージェント継続、分類、Capabilityを入力契約へ追加しない |
-| C14、C15、C28 | `asset.save`、`changeset.apply`、`history.get` | 依頼・理由の保存、UI／MCPの共通処理、通常利用をRunにしない |
+| C14、C15、C28 | `asset.save`、`changeset.preview`、`changeset.apply`、`history.get` | 依頼・理由の保存、完全Assetの全置換、expectedRevisionによる一括Conflict、UI／MCPの共通処理、通常利用をRunにしない |
 | C16、C34 | `runtime.*`、`setup.skills` | Skillのname・description・IDだけを持つ入口、名称変更、useCase解除、衝突検出、設定先管理解除後のファイル保持、ユーザー所有の定義 |
 | C17 | `run.start`とRun単位の各操作 | 異なるHandle、並行HTTP／MCP要求のContextと状態の分離 |
 | C18 | `run.get`、`run.transition`、`run.cancel`、`run.fail` | duplicate／stale、自己ループ、終端状態、読み取りによる活動時刻、timeout |

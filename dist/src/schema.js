@@ -2,6 +2,7 @@ import { z } from 'zod';
 export const text = z.string().trim().min(1);
 export const id = z.uuid();
 export const scope = z.union([z.literal('global'), id]);
+export const revision = z.int().positive();
 function withoutTaskType(value) {
     if (!value || typeof value !== 'object' || Array.isArray(value))
         return value;
@@ -35,12 +36,17 @@ export const transitionSchema = z.object({
     id: text, from: text, to: text,
     type: z.enum(['next', 'return', 'retry', 'reject', 'complete']), label: text,
 }).strict();
+export const modelChoiceSchema = z.object({
+    name: text,
+    options: z.array(text).min(1),
+}).strict();
 const assetInputSchema = z.object({
     kind: z.enum(['workflow', 'skill', 'role', 'rule', 'model']),
     name: text, description: text, body: z.string().default(''),
     responsibilities: z.string().default(''), scope: scope.default('global'),
     explanation: z.string().optional(), useCase: z.boolean().default(false),
     modelName: z.string().default(''), invocationMethod: z.string().default(''),
+    choices: z.array(modelChoiceSchema).default([]),
     metadata: z.record(z.string(), z.unknown()).default({}),
     supportingFiles: z.record(z.string(), z.string()).default({}),
     stages: z.array(stageSchema).default([]),
@@ -57,6 +63,14 @@ export const assetSchema = z.preprocess(normalizeAssetRecord, assetInputSchema).
         fail('Model名は必須です。');
     if (a.kind === 'model' && !a.invocationMethod.trim())
         fail('呼び出し方は必須です。');
+    if (a.kind === 'model') {
+        const choiceNames = a.choices.map(choice => choice.name);
+        if (new Set(choiceNames).size !== choiceNames.length)
+            fail('Modelの選択肢名は重複できません。');
+        for (const choice of a.choices)
+            if (new Set(choice.options).size !== choice.options.length)
+                fail(`Modelの選択肢「${choice.name}」の値は重複できません。`);
+    }
     if (a.kind !== 'skill' && a.useCase)
         fail('直接起動を設定できるのはSkillです。');
     if (a.kind === 'workflow') {
@@ -89,6 +103,7 @@ export const assetSchema = z.preprocess(normalizeAssetRecord, assetInputSchema).
 export const bindingSchema = z.object({
     scope: scope.default('global'), sourceId: id, stageId: text.optional(), targetId: id,
     purpose: z.enum(['reference', 'entry-role', 'stage-role', 'stage-model']).default('reference'),
+    selectedChoices: z.record(z.string(), text).default({}),
 }).strict();
 export const provenanceSchema = z.object({
     origin: z.enum(['ui', 'ai', 'cli', 'restore', 'proposal', 'init']),
@@ -100,12 +115,12 @@ export const provenanceSchema = z.object({
         ctx.addIssue({ code: 'custom', message: 'AIによる変更には依頼と変更理由が必要です。' });
 });
 export const changeSchema = z.discriminatedUnion('type', [
-    z.object({ type: z.literal('asset.delete'), id, expectedRevision: z.int().positive(), expectedBindingRevisions: z.array(z.object({ id, revision: z.int().positive() }).strict()), expectedProjectCommonRevisions: z.array(z.object({ id, revision: z.int().positive() }).strict()), confirmed: z.literal(true) }).strict(),
-    z.object({ type: z.literal('asset.save'), id: id.optional(), asset: assetSchema }).strict(),
+    z.object({ type: z.literal('asset.delete'), id, expectedRevision: revision, expectedBindingRevisions: z.array(z.object({ id, revision }).strict()), expectedProjectCommonRevisions: z.array(z.object({ id, revision }).strict()), confirmed: z.literal(true) }).strict(),
+    z.object({ type: z.literal('asset.save'), id: id.optional(), expectedRevision: revision.optional(), asset: assetSchema }).strict(),
     z.object({ type: z.literal('asset.create'), id, asset: assetSchema }).strict(),
-    z.object({ type: z.literal('binding.save'), id: id.optional(), binding: bindingSchema }).strict(),
-    z.object({ type: z.literal('binding.remove'), id }).strict(),
-    z.object({ type: z.literal('common.save'), projectId: id, ruleIds: z.array(id) }).strict(),
+    z.object({ type: z.literal('binding.save'), id: id.optional(), expectedRevision: revision.optional(), binding: bindingSchema }).strict(),
+    z.object({ type: z.literal('binding.remove'), id, expectedRevision: revision }).strict(),
+    z.object({ type: z.literal('common.save'), projectId: id, expectedRevision: revision, ruleIds: z.array(id) }).strict(),
 ]);
 export const journalHeadings = ['Task', '実際に使ったもの', '良かった点', '困った点', '改善の種', '根拠・確かさ', '日付', 'Project', 'Branch', 'Type'];
 export const journalTemplate = journalHeadings.map(h => `## ${h}\n`).join('\n');

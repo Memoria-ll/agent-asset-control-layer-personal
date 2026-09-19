@@ -87,7 +87,8 @@ test('C09 C11 C17: optional Stage instructions accompany its responsible Role in
   assert.equal(context.stageRoleId, roleId);
   assert.equal(context.stage.additionalInstructions, '既存のRole責務を踏まえて、対象範囲を先に確認する。');
   assert.equal(context.roles.find(role => role.id === roleId)?.responsibilities, '変更の意図を守り、結果を検証する。');
-  await assert.rejects(f.call('binding.remove', { id: f.core.bindings().find(b => b.sourceId === workflowId && b.purpose === 'stage-role')!.id, provenance }), /担当Role/);
+  const stageRoleBinding = f.core.bindings().find(b => b.sourceId === workflowId && b.purpose === 'stage-role')!;
+  await assert.rejects(f.call('binding.remove', { id: stageRoleBinding.id, expectedRevision: stageRoleBinding.revision, provenance }), /担当Role/);
 });
 
 test('Model assets bind Skills and Rules, and consecutive matching Stage assignments reuse one subagent', async t => {
@@ -123,15 +124,34 @@ test('Model assets bind Skills and Rules, and consecutive matching Stage assignm
   assert.equal(next.subagent.instruction.includes('同じサブエージェント'), true);
 });
 
+test('Model choices are configured freely, selected per Workflow Stage, and delivered in Context', async t => {
+  const f = fixture(t), model = await f.asset('model', {
+    name: '選択式Model', modelName: 'agent', invocationMethod: 'Runtimeへ渡す',
+    choices: [
+      { name: '実行系', options: ['codex luna', 'codex sol', 'claude opes', 'claude fable'] },
+      { name: 'effort', options: ['low', 'medium', 'high'] },
+    ],
+  });
+  const workflow = await f.workflow();
+  const selectedChoices = { 実行系: 'codex sol', effort: 'high' };
+  const binding = await f.bind(workflow, model, { stageId: 'build', purpose: 'stage-model', selectedChoices });
+  const run = await f.start(workflow);
+  assert.deepEqual(binding.selectedChoices, selectedChoices);
+  assert.deepEqual(run.context.modelSelections, selectedChoices);
+  assert.deepEqual(run.context.model?.choices, model.choices);
+  await assert.rejects(f.bind(workflow, model, { stageId: 'review', purpose: 'stage-model', selectedChoices: { 実行系: 'other', effort: 'high' } }), /利用できません/);
+  assert.throws(() => assetSchema.parse({ kind: 'model', name: '重複', description: '説明', modelName: 'agent', invocationMethod: 'Runtime', choices: [{ name: 'effort', options: ['low', 'low'] }] }), /重複/);
+});
+
 test('C02 C04 C13 C14 C15 C28 C29: schema / stable identity / idempotent writes / provenance / restoration', async t => {
   const f = fixture(t), a = await f.asset('skill');
-  const operationId = randomUUID(), input = { id: a.id, revision: 0, asset: { ...f.core.assetPayload(a), name: '改名', body: '更新' }, provenance };
+  const operationId = randomUUID(), input = { id: a.id, expectedRevision: a.revision, asset: { ...f.core.assetPayload(a), name: '改名', body: '更新' }, provenance };
   const first = await f.call<{ entities: Asset[] }>('asset.save', input, operationId);
   const retry = await f.call<{ duplicate: boolean; entities: Asset[] }>('asset.save', input, operationId);
   assert.equal(first.entities[0].id, a.id); assert.equal(retry.duplicate, true); assert.equal(f.core.asset(a.id).revision, 2);
   await assert.rejects(f.call('asset.save', { ...input, asset: { ...input.asset, body: '別操作' } }, operationId), /operation ID/);
   assert.equal(f.store.revision<Asset>(a.id, 1).body, '本文');
-  await f.call('asset.restore', { assetId: a.id, revision: 1 });
+  await f.call('asset.restore', { assetId: a.id, revision: 1, expectedRevision: f.core.asset(a.id).revision });
   assert.equal(f.core.asset(a.id).revision, 3); assert.equal(f.core.asset(a.id).body, '本文');
   await assert.rejects(f.asset('skill', { body: '' }));
   await assert.rejects(f.asset('skill', { metadata: { model: 'test' } }));
@@ -142,6 +162,40 @@ test('C02 C04 C13 C14 C15 C28 C29: schema / stable identity / idempotent writes 
   assert.throws(() => f.store.db.exec("UPDATE revisions SET data='{}'"), /immutable/);
 });
 
+test('Asset writes use optimistic revisions, Change Set preview is read-only, and lists omit content by default', async t => {
+  const f = fixture(t), asset = await f.asset('skill', { supportingFiles: { 'guide.md': '元' } });
+  const summary = await f.call<{ assets: Record<string, unknown>[] }>('asset.list', { kind: 'skill' });
+  assert.equal('body' in summary.assets[0]!, false);
+  assert.equal('supportingFiles' in summary.assets[0]!, false);
+  const many = await f.call<{ assets: Asset[] }>('asset.get_many', { assetIds: [asset.id] });
+  assert.equal(many.assets[0]!.body, '本文');
+  assert.deepEqual(many.assets[0]!.supportingFiles, { 'guide.md': '元' });
+
+  const preview = await f.call<{ valid: boolean; changeCount: number }>('changeset.preview', {
+    changes: [{ type: 'asset.save', id: asset.id, expectedRevision: asset.revision, asset: { ...f.core.assetPayload(asset), body: 'Preview' } }],
+  });
+  assert.deepEqual(preview, { valid: true, changeCount: 1, affected: [{ id: asset.id, revision: 2 }] });
+  assert.equal(f.core.asset(asset.id).revision, 1);
+  const saved = await f.call<{ entities: Asset[] }>('asset.save', { id: asset.id, expectedRevision: asset.revision, asset: { ...f.core.assetPayload(asset), body: '更新1' }, provenance });
+  assert.equal(saved.entities[0]!.revision, 2);
+  await assert.rejects(f.call('asset.save', { id: asset.id, expectedRevision: asset.revision, asset: { ...f.core.assetPayload(asset), body: '古い更新' }, provenance }), /Conflict/);
+  assert.equal(f.core.asset(asset.id).body, '更新1');
+  const before = f.core.asset(asset.id);
+  await assert.rejects(f.call('changeset.apply', { changes: [
+    { type: 'asset.save', id: asset.id, expectedRevision: before.revision, asset: { ...f.core.assetPayload(before), body: '一部だけ適用しない' } },
+    { type: 'asset.save', id: asset.id, expectedRevision: 1, asset: { ...f.core.assetPayload(before), body: '競合' } },
+  ], provenance }), /Conflict/);
+  assert.equal(f.core.asset(asset.id).body, '更新1');
+});
+
+test('Change Set restore detects edits made after the original Change Set', async t => {
+  const f = fixture(t), asset = await f.asset('skill');
+  const edit = await f.call<{ changeSet: ChangeSet }>('asset.save', { id: asset.id, expectedRevision: asset.revision, asset: { ...f.core.assetPayload(asset), body: '変更後' }, provenance });
+  await f.call('asset.save', { id: asset.id, expectedRevision: 2, asset: { ...f.core.assetPayload(f.core.asset(asset.id)), body: '後続変更' }, provenance });
+  await assert.rejects(f.call('changeset.restore', { changeSetId: edit.changeSet.id }), /Conflict/);
+  assert.equal(f.core.asset(asset.id).body, '後続変更');
+});
+
 test('Asset deletion shows both reference directions, requires fresh confirmation and restores recorded links', async t => {
   const f = fixture(t), workflow = await f.workflow(), parent = await f.asset('skill'), child = await f.asset('skill'), rule = await f.asset('rule'), role = await f.asset('role');
   const root = mkdtempSync(join(tmpdir(), 'aacl-delete-project-'));
@@ -150,7 +204,7 @@ test('Asset deletion shows both reference directions, requires fresh confirmatio
   await f.bind(role, parent);
   await f.bind(parent, child);
   await f.bind(workflow, rule, { scope: project.id });
-  await f.call('common.save', { projectId: project.id, ruleIds: [rule.id], provenance });
+  await f.call('common.save', { projectId: project.id, expectedRevision: f.core.common(project.id).revision, ruleIds: [rule.id], provenance });
   const run = await f.start(workflow);
 
   const preview = await f.call<{ asset: Asset; bindings: { id: string; revision: number; direction: string }[]; projectCommons: { id: string; revision: number; projectId: string }[] }>('asset.delete.preview', { assetId: parent.id });
@@ -188,7 +242,7 @@ test('Asset deletion shows both reference directions, requires fresh confirmatio
 
 test('C05 C06 C07: exact Project identity and independent copied bindings / common', async t => {
   const f = fixture(t), originalWorkflow = await f.workflow(), s = await f.asset('skill'), rule = await f.asset('rule');
-  const w = (await f.call<{ entities: Asset[] }>('asset.save', { id: originalWorkflow.id, asset: { ...f.core.assetPayload(originalWorkflow), name: 'issue-development' }, provenance })).entities[0];
+  const w = (await f.call<{ entities: Asset[] }>('asset.save', { id: originalWorkflow.id, expectedRevision: originalWorkflow.revision, asset: { ...f.core.assetPayload(originalWorkflow), name: 'issue-development' }, provenance })).entities[0];
   const globalBinding = await f.bind(w, s);
   assert.equal(normalizeRoot('C:\\work\\x\\..\\app\\'), '/mnt/c/work/app');
   assert.equal(normalizeRoot('\\\\wsl.localhost\\Ubuntu\\home\\me\\app'), '/home/me/app');
@@ -213,12 +267,12 @@ test('C05 C06 C07: exact Project identity and independent copied bindings / comm
   assert.ok(existsSync(join(root, '.codex/skills/project-only/SKILL.md')));
   assert.ok(!existsSync(join(globalRoot, '.claude/commands/project-only.md')));
   assert.ok(!existsSync(join(globalRoot, '.codex/skills/project-only/SKILL.md')));
-  await f.call('binding.remove', { id: globalBinding.id, provenance });
+  await f.call('binding.remove', { id: globalBinding.id, expectedRevision: globalBinding.revision, provenance });
   assert.equal(f.core.bindings(project.id).filter(b => b.targetId === s.id).length, 1);
   assert.equal(f.core.bindings(project.id).filter(b => b.purpose === 'stage-role').length, 2);
   assert.equal((await f.call<{ project: Project | null }>('project.resolve', { root: `${root}/child` })).project, null);
   assert.equal((await f.call<{ project: Project | null }>('project.resolve', { root: `${root}/../${root.split('/').at(-1)}` })).project?.id, project.id);
-  await f.call('common.save', { projectId: project.id, ruleIds: [rule.id], provenance });
+  await f.call('common.save', { projectId: project.id, expectedRevision: f.core.common(project.id).revision, ruleIds: [rule.id], provenance });
   const r = await f.start(w, { projectId: project.id });
   assert.equal(r.context.rules[0].id, rule.id);
   const count = f.store.list('project').length;
@@ -235,7 +289,7 @@ test('Project binding scope can be cleared without changing Global bindings', as
   assert.equal(projectBindings.length, 3);
 
   const removed = await f.call<{ changeSet: ChangeSet }>('changeset.apply', {
-    changes: projectBindings.map(binding => ({ type: 'binding.remove', id: binding.id })),
+    changes: projectBindings.map(binding => ({ type: 'binding.remove', id: binding.id, expectedRevision: binding.revision })),
     provenance,
   });
   assert.equal(f.core.bindings(project.id).length, 0);
@@ -268,8 +322,9 @@ test('C09 C11 C12 C17 C20 C21 C22 C23 C24 C31: immutable resolution, progressive
   const snapshot = f.store.get<Snapshot>(one.snapshotId, 'snapshot'), sealed = JSON.stringify(snapshot);
   const cost = f.core.costs().filter(c => c.runId === one.run.id).reduce((sum, c) => sum + c.bytes, 0);
   assert.equal(cost, Buffer.byteLength(JSON.stringify(one.context)));
-  await f.call('asset.save', { id: a.id, asset: { ...f.core.assetPayload(a), body: '新本文', supportingFiles: { 'guide.md': '新ファイル' } }, provenance });
-  await f.call('binding.remove', { id: f.core.bindings().find(b => b.sourceId === role.id && b.targetId === a.id)!.id, provenance });
+  await f.call('asset.save', { id: a.id, expectedRevision: a.revision, asset: { ...f.core.assetPayload(a), body: '新本文', supportingFiles: { 'guide.md': '新ファイル' } }, provenance });
+  const roleSkillBinding = f.core.bindings().find(b => b.sourceId === role.id && b.targetId === a.id)!;
+  await f.call('binding.remove', { id: roleSkillBinding.id, expectedRevision: roleSkillBinding.revision, provenance });
   assert.equal((await f.call<{ body: string }>('run.skill.get', { contextHandle: one.contextHandle, assetId: a.id })).body, a.body);
   assert.equal((await f.call<{ body: string }>('run.skill.get', { contextHandle: two.contextHandle, assetId: a.id, file: 'guide.md' })).body, '元ファイル');
   const missing = await f.call<{ available: boolean; reason: string }>('run.skill.get', { contextHandle: one.contextHandle, assetId: a.id, file: 'missing.md' });
@@ -360,7 +415,7 @@ test('C01 C26 C27 C28 C35: review approval applies changes and selected insights
   const r = await f.start(w);
   const journal = await f.call<{ journal: Journal; insights: Insight[] }>('journal.write', { contextHandle: r.contextHandle, body: '## 困った点\n改善する部分\n\n保留する部分' });
   assert.equal(journal.journal.snapshotId, r.snapshotId); assert.equal(journal.journal.assetRevisions?.find(a => a.id === skill.id)?.revision, 1);
-  const proposal = await f.call<{ proposal: { id: string } }>('proposal.save', { title: '改善', observedContext: '実際の観測', proposedChange: '本文を更新', reason: '気づきに対応', evidenceJournalIds: [journal.journal.id], reviewedJournalIds: [journal.journal.id], affectedAssetIds: [skill.id], affectedBindingIds: [], affectedProjectIds: [], changes: [{ type: 'asset.save', id: skill.id, asset: { ...f.core.assetPayload(skill), body: '改善後' } }], insightIds: [journal.insights[0].id] });
+  const proposal = await f.call<{ proposal: { id: string } }>('proposal.save', { title: '改善', observedContext: '実際の観測', proposedChange: '本文を更新', reason: '気づきに対応', evidenceJournalIds: [journal.journal.id], reviewedJournalIds: [journal.journal.id], affectedAssetIds: [skill.id], affectedBindingIds: [], affectedProjectIds: [], changes: [{ type: 'asset.save', id: skill.id, expectedRevision: skill.revision, asset: { ...f.core.assetPayload(skill), body: '改善後' } }], insightIds: [journal.insights[0].id] });
   const linked = await f.call<{ reviewItem: ReviewItem }>('review.item.get', { reviewItemId: f.store.list<ReviewItem>('review-item').find(item => item.insightId === journal.insights[0].id)!.id });
   assert.deepEqual(linked.reviewItem.proposalIds, [proposal.proposal.id]);
   const proposalSummary = await f.call<{ proposal: { changes?: unknown[] } }>('proposal.get', { proposalId: proposal.proposal.id });
@@ -380,7 +435,7 @@ test('C01 C26 C27 C28 C35: review approval applies changes and selected insights
   const next = await f.start(w);
   assert.equal((await f.call<{ body: string }>('run.skill.get', { contextHandle: next.contextHandle, assetId: skill.id })).body, '改善後');
   const before = f.core.asset(skill.id).revision;
-  await assert.rejects(f.call('changeset.apply', { changes: [{ type: 'asset.save', id: skill.id, asset: { ...f.core.assetPayload(skill), body: '失敗で戻る' } }, { type: 'binding.save', binding: { sourceId: skill.id, targetId: randomUUID() } }], provenance }));
+  await assert.rejects(f.call('changeset.apply', { changes: [{ type: 'asset.save', id: skill.id, expectedRevision: skill.revision + 1, asset: { ...f.core.assetPayload(skill), body: '失敗で戻る' } }, { type: 'binding.save', binding: { sourceId: skill.id, targetId: randomUUID() } }], provenance }));
   assert.equal(f.core.asset(skill.id).revision, before);
 });
 
@@ -394,12 +449,12 @@ test('C16 C33: Runtime entries are thin, owned, updated and retained on unregist
   assert.match(content, new RegExp(skill.id)); assert.match(content, /^name: journal-review$/m); assert.ok(!content.includes(skill.body)); assert.ok(!content.includes('aacl_run_start')); assert.ok(!content.includes('disable-model-invocation'));
   assert.equal(readFileSync(policyPath, 'utf8'), 'policy:\n  allow_implicit_invocation: false\n');
   writeFileSync(policyPath, 'policy:\n  allow_implicit_invocation: true\n');
-  const blockedPolicy = await f.call<{ runtimeSync: { ok: boolean }[] }>('runtime.sync');
-  assert.ok(blockedPolicy.runtimeSync.some(result => !result.ok)); assert.equal(readFileSync(policyPath, 'utf8'), 'policy:\n  allow_implicit_invocation: true\n');
+  const blockedPolicy = await f.call<{ runtimeSync: { failureCount: number } }>('runtime.sync');
+  assert.ok(blockedPolicy.runtimeSync.failureCount > 0); assert.equal(readFileSync(policyPath, 'utf8'), 'policy:\n  allow_implicit_invocation: true\n');
   writeFileSync(policyPath, f.ops.runtime.policy('codex')!); await f.call('runtime.sync');
   const renamedPath = join(root, 'skills', 'security-review', 'SKILL.md');
   const renamedPolicyPath = join(root, 'skills', 'security-review', 'agents', 'openai.yaml');
-  await f.call('asset.save', { id: skill.id, asset: { ...f.core.assetPayload(skill), name: 'security-review' }, provenance });
+  await f.call('asset.save', { id: skill.id, expectedRevision: skill.revision, asset: { ...f.core.assetPayload(skill), name: 'security-review' }, provenance });
   assert.equal(existsSync(path), false); assert.equal(existsSync(policyPath), false); assert.match(readFileSync(renamedPath, 'utf8'), /^name: security-review$/m); assert.equal(readFileSync(renamedPolicyPath, 'utf8'), 'policy:\n  allow_implicit_invocation: false\n');
   await f.call('skill.usecase', { assetId: skill.id, enabled: false, provenance }); assert.equal(existsSync(renamedPath), false); assert.equal(existsSync(renamedPolicyPath), false); assert.equal(existsSync(dirname(renamedPath)), false);
   await f.call('skill.usecase', { assetId: skill.id, enabled: true, provenance }); assert.equal(existsSync(renamedPath), true); assert.equal(existsSync(renamedPolicyPath), true);
@@ -408,8 +463,8 @@ test('C16 C33: Runtime entries are thin, owned, updated and retained on unregist
   const collision = join(root, 'other'); mkdirSync(join(collision, 'commands'), { recursive: true });
   const w = await f.workflow(), blocked = join(collision, 'commands', 'workflow.md');
   writeFileSync(blocked, '利用者のファイル');
-  const result = await f.call<{ runtimeSync: { ok: boolean }[] }>('runtime.register', { runtime: 'claude', platform: 'wsl', scope: 'global', path: collision });
-  assert.ok(result.runtimeSync.some(r => !r.ok)); assert.equal(readFileSync(blocked, 'utf8'), '利用者のファイル');
+  const result = await f.call<{ runtimeSync: { failureCount: number } }>('runtime.register', { runtime: 'claude', platform: 'wsl', scope: 'global', path: collision });
+  assert.ok(result.runtimeSync.failureCount > 0); assert.equal(readFileSync(blocked, 'utf8'), '利用者のファイル');
   const linkRoot = join(root, 'link'); symlinkSync(collision, linkRoot);
   await f.call('runtime.register', { runtime: 'claude', platform: 'wsl', scope: 'global', path: linkRoot });
   assert.ok(f.core.diagnostics().diagnostics.some(d => d.code === 'runtime-entry'));
@@ -433,7 +488,7 @@ test('Confirmed Asset deletion removes its owned Runtime entry', async t => {
 
 test('Runtime entry names come from Workflow and direct Skill names, with IDs only for collisions', async t => {
   const f = fixture(t), workflow = await f.workflow();
-  await f.call('asset.save', { id: workflow.id, asset: { ...f.core.assetPayload(workflow), name: 'shared-review' }, provenance });
+  await f.call('asset.save', { id: workflow.id, expectedRevision: workflow.revision, asset: { ...f.core.assetPayload(workflow), name: 'shared-review' }, provenance });
   const sharedSkill = await f.asset('skill', { name: 'shared-review', useCase: true });
   const anotherSharedSkill = await f.asset('skill', { name: 'shared-review', useCase: true });
   const uniqueSkill = await f.asset('skill', { name: 'architecture-review', useCase: true });
@@ -483,8 +538,8 @@ test('Runtime sync moves an owned ID-named entry to its asset name', async t => 
   const entry = f.store.list<{ id: string; targetId: string; assetId: string; path: string; hash: string; active: boolean }>('runtime-entry').find(item => item.targetId === target.id && item.assetId === skill.id)!;
   f.store.put('runtime-entry', { ...entry, path: oldPath, hash: createHash('sha256').update(oldBody).digest('hex') });
   writeFileSync(oldPath, '利用者による変更');
-  const blocked = await f.call<{ runtimeSync: { ok: boolean }[] }>('runtime.sync');
-  assert.ok(blocked.runtimeSync.some(result => !result.ok)); assert.equal(readFileSync(oldPath, 'utf8'), '利用者による変更'); assert.equal(existsSync(currentPath), false);
+  const blocked = await f.call<{ runtimeSync: { failureCount: number } }>('runtime.sync');
+  assert.ok(blocked.runtimeSync.failureCount > 0); assert.equal(readFileSync(oldPath, 'utf8'), '利用者による変更'); assert.equal(existsSync(currentPath), false);
   writeFileSync(oldPath, oldBody);
   await f.call('runtime.sync');
   assert.equal(existsSync(oldPath), false); assert.equal(existsSync(dirname(oldPath)), false);
@@ -493,7 +548,7 @@ test('Runtime sync moves an owned ID-named entry to its asset name', async t => 
 
 test('C29 C33: Change Set restoration / persistent SQLite / export / consistent Backup restore', async t => {
   const f = fixture(t), skill = await f.asset('skill');
-  const edit = await f.call<{ changeSet: ChangeSet }>('asset.save', { id: skill.id, asset: { ...f.core.assetPayload(skill), body: '編集後' }, provenance });
+  const edit = await f.call<{ changeSet: ChangeSet }>('asset.save', { id: skill.id, expectedRevision: skill.revision, asset: { ...f.core.assetPayload(skill), body: '編集後' }, provenance });
   await f.call('changeset.restore', { changeSetId: edit.changeSet.id }); assert.equal(f.core.asset(skill.id).body, '本文');
   const root = mkdtempSync(join(tmpdir(), 'aacl-backup-')), backupPath = join(root, 'backup.sqlite');
   await backupData(f.core, backupPath); await assert.rejects(backupData(f.core, backupPath));
@@ -539,7 +594,7 @@ test('C11 C33: one Global Role is reused across Workflow stages and workflows, a
 
   const remaining = stageRoleBindingChanges(first.id, 'global', [{ stageId: 'build', roleId: role.id }], f.core.bindings());
   const payload = { ...f.core.assetPayload(first), stages: [first.stages[0]], transitions: [] };
-  await f.call('changeset.apply', { changes: [...remaining, { type: 'asset.save', id: first.id, asset: payload }], provenance });
+  await f.call('changeset.apply', { changes: [...remaining, { type: 'asset.save', id: first.id, expectedRevision: first.revision, asset: payload }], provenance });
   assert.equal(f.core.asset(first.id).stages.length, 1);
   assert.deepEqual(f.core.bindings('global').filter(b => b.sourceId === first.id && b.purpose === 'stage-role').map(b => b.stageId), ['build']);
   assert.equal(f.core.bindings('global').filter(b => b.sourceId === second.id && b.purpose === 'stage-role').length, 2);

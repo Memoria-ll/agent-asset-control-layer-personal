@@ -118,7 +118,7 @@ Asset削除は対象Assetへの影響を確認してから確定する。確定�
 
 Asset本体と、利用するAssetを示す紐づけを分けて管理する。ModelはSkill / Ruleを参照できるCanonical Assetとして管理する。Asset本体と紐づけはそれぞれrevisionで履歴を保持する。
 
-revisionは履歴、Run、Snapshotの再現に用いる。通常のAsset Writeでは古いrevisionを理由に更新を拒否せず、現在状態を基に新しいrevisionを作成する。同じoperation IDによる再送は同一Writeとして扱う。過去revisionの復元は、その内容を新しいrevisionとして保存する。
+revisionは履歴、Run、Snapshotの再現に用いる。既存Asset・紐づけ・Project CommonのWriteは取得時点の`expectedRevision`を必須とし、現在revisionと一致しない場合はConflictとして変更全体を拒否する。同じoperation IDによる再送は同一Writeとして扱う。Asset Writeは差分更新ではなく完全なAssetの全置換とし、bodyやsupporting filesを省略しない。過去revisionの復元は、その内容を新しいrevisionとして保存する。
 
 ---
 
@@ -665,7 +665,7 @@ MCPを通じて次のdomain operationを提供する。
 
 Read操作はAsset、紐づけ、Project Common、Stage、Runの進行状態を変更しない。Workflow RunにContextやSkillを渡したReadは、提供記録を追記し、Runの非活動timeoutを更新する。これらの運用記録はCanonical AssetやWorkflow状態のWriteとは分けて扱う。
 
-Asset Writeでは古いrevisionを理由に更新を拒否しない。現在状態から新しいrevisionを作成し、同じoperation IDによる再送は冪等に扱う。Run transitionは現在状態と許可された遷移を検証し、同じ操作の再送をduplicate、進行後の別要求をstaleとして扱う。Run単位のMCP操作はContext Handleを入力として受け取り、CoreはそのHandleに対応するRunを特定する。
+Asset・Binding・Project Commonの更新・解除では取得時点の`expectedRevision`を受け取り、1件でも不一致ならChange Set全体をConflictとして保存しない。`changeset.preview`は同じ検証をDry Runし、適用予定の対象と不整合を返す。`changeset.restore`はChange Set適用後のrevisionが現在値と一致する場合だけ復元し、復元内容は新revisionとして保存する。Asset一覧は既定で概要だけを返し、本文・補助ファイルは明示指定または一括取得で返す。Runtime同期結果は成功数・失敗数・対象IDを返し、詳細な失敗理由はDiagnosticsへ保存する。Bootstrapの共通案内は専用operationで取得し、個別toolの説明は操作条件と入力例に絞る。Run transitionは現在状態と許可された遷移を検証し、同じ操作の再送をduplicate、進行後の別要求をstaleとして扱う。Run単位のMCP操作はContext Handleを入力として受け取り、CoreはそのHandleに対応するRunを特定する。
 
 ---
 

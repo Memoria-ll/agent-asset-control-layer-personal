@@ -82,7 +82,7 @@ Claude Code / Codex (Windows または同一WSL内のLinux)
 - Coreが生成するUUIDをAsset IDとし、名前変更後も同じIDを使う。
 - Asset revisionは単調増加整数とし、現在値と不変の過去revisionを分離して保存する。
 - Revision recordにはAsset ID、revision、本文、更新時刻を含め、Run開始時の参照を再現できるindexを用意する。
-- Writeの適用とoperation IDの冪等記録を同一transactionに含める。revision比較による通常Writeの拒否は設けない。
+- Writeの適用とoperation IDの冪等記録を同一transactionに含める。既存Asset・Binding・Project Commonの更新・解除は`expectedRevision`を検証し、不一致ならChange Set全体をConflictとして保存しない。Asset payloadは完全な全置換として扱う。
 - 過去revisionの復元は、その内容を新revisionとして保存する。
 - ScopeはGlobal / Projectを共通record上で識別し、同名Assetの一意性を名前に依存させない。
 - Asset削除は物理削除を行わず、`deletedAt`を持つ新revisionとして保存する。削除済みAssetは通常のAsset検索・利用・紐づけ候補から除外し、過去revisionとRun Snapshotは保持する。
@@ -162,7 +162,7 @@ Claude Code / Codex (Windows または同一WSL内のLinux)
 
 - UI、CLI、MCPはCore Serviceのapplication APIだけを利用する。UIからの変更も同じvalidation・transaction pathへ送る。
 - UIは開発要求§33の視覚・操作要件を満たし、Workflow / Stage視点とAsset視点の紐づき確認・編集、SkillのuseCase切替、許可遷移の図示を実装する。
-- MCP adapterはpurpose-specific typed operationを登録し、generic action dispatchやSQL passthroughを実装しない。
+- MCP adapterはpurpose-specific typed operationを登録し、generic action dispatchやSQL passthroughを実装しない。`changeset.preview`、`asset.get_many`を提供し、Asset一覧は概要を既定にする。Change Setの`changes`はasset.save / asset.create / binding.save / binding.remove / common.save等の具体的な判別unionとして公開する。共通Bootstrapは`bootstrap.get`へ分離し、個別tool説明へ長文案内を重複させない。
 - Request / Responseの型と内容schemaは内部契約として管理し、Skill、Journal、Workflow、Stageのpayloadを検証する。
 - CLI bootstrapはService起動、Project登録、health確認、診断、export / Backup commandを提供する。
 
@@ -206,7 +206,7 @@ Claude Code / Codex (Windows または同一WSL内のLinux)
 | C01 | §1 目的と利用形態 | Asset管理、Run、Context、Journal、Review、UI・CLI・Export各domain operation | Assetを管理し、Workflow実行からReviewによる改善までの機能境界が一貫して利用できる。 |
 | C02 | §2 基本原則と責務分担 | Core validation、MCP / UI application API | 構造不正はCoreが拒否し、本文の意味判断はCoreが行わない。UIとMCPの変更が同じCore経路を通る。 |
 | C03 | §3 管理対象の実行と通常利用 | Workflow選択・Run API、Skill取得API | 明示したWorkflowだけがRunを作り、通常利用と直接Skill利用ではRun等の管理記録を自動作成しない。 |
-| C04 | §4 Canonical Asset | Asset CRUD、revision、History API | 5種のAsset IDが名前変更後も維持され、Writeでrevisionが増え、古いrevision入力を理由に拒否せず再送は冪等となる。参照一覧をユーザーへ示して明示確認を得た後にだけ削除し、参照解除と削除状態を同じChange Setへ保存する。 |
+| C04 | §4 Canonical Asset | Asset CRUD、revision、History API | 5種のAsset IDが名前変更後も維持され、完全Asset payloadとexpectedRevisionでWriteを検証し、競合時は拒否、再送は冪等となる。参照一覧をユーザーへ示して明示確認を得た後にだけ削除し、参照解除と削除状態を同じChange Setへ保存する。 |
 | C05 | §5 Project Identity | Project registry、path adapter、Project Common API | Windows / Linux pathが定義どおり照合され、未登録rootや親・alias・symlinkから別Projectを推定しない。Project Commonの変更revisionとRule参照を確認できる。 |
 | C06 | §6 グローバルとプロジェクト別の紐づけ | Binding CRUD、Asset reference API | Global / Projectの紐づけが独立し、明示したAsset IDを参照する。Skillの再帰参照を解決し、同名Assetへ勝手に切り替わらない。 |
 | C07 | §7 プロジェクト初期導入 | `aacl init`、binding copy、Runtime entry生成 | Global紐づけのみがコピーされ、Asset本文は複製されず、Project Commonは空で始まる。失敗時に登録とコピーが部分状態にならない。 |

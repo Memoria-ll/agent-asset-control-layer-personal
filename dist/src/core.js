@@ -1,9 +1,22 @@
 import { randomUUID } from 'node:crypto';
 import { posix } from 'node:path';
 import { assetSchema, bindingSchema, parseJournal } from './schema.js';
+export class ConflictError extends Error {
+    code = 'CONFLICT';
+    details;
+    constructor(message, details) {
+        super(`Conflict: ${message}`);
+        this.name = 'ConflictError';
+        this.details = details;
+    }
+}
 function sameRevisions(a, b) {
     const sorted = (values) => [...values].sort((x, y) => x.id.localeCompare(y.id));
     return JSON.stringify(sorted(a)) === JSON.stringify(sorted(b));
+}
+class PreviewAbort extends Error {
+    result;
+    constructor(result) { super('preview'); this.result = result; }
 }
 export function normalizeRoot(input) {
     let path = input.trim().replaceAll('\\', '/');
@@ -56,10 +69,10 @@ export class Core {
         if (preview.asset.revision !== input.expectedRevision || !sameRevisions(bindingRevisions, input.expectedBindingRevisions) || !sameRevisions(projectCommonRevisions, input.expectedProjectCommonRevisions)) {
             throw new Error('Assetまたは参照関係が変わりました。参照一覧を再取得し、削除を確認してください。');
         }
-        const changes = preview.bindings.map(b => ({ type: 'binding.remove', id: b.id }));
+        const changes = preview.bindings.map(b => ({ type: 'binding.remove', id: b.id, expectedRevision: b.revision }));
         for (const reference of preview.projectCommons) {
             const common = this.store.get(reference.id, 'common');
-            changes.push({ type: 'common.save', projectId: common.projectId, ruleIds: common.ruleIds.filter(id => id !== input.assetId) });
+            changes.push({ type: 'common.save', projectId: common.projectId, expectedRevision: common.revision, ruleIds: common.ruleIds.filter(id => id !== input.assetId) });
         }
         changes.push({ type: 'asset.delete', id: input.assetId, expectedRevision: input.expectedRevision, expectedBindingRevisions: input.expectedBindingRevisions, expectedProjectCommonRevisions: input.expectedProjectCommonRevisions, confirmed: input.confirmed });
         return this.applyChanges(changes, provenance, undefined, undefined, undefined, undefined, true);
@@ -80,8 +93,54 @@ export class Core {
             throw new Error('担当RoleはWorkflowのStageに指定してください。');
         if (b.purpose === 'stage-model' && (!b.stageId || source.kind !== 'workflow' || target.kind !== 'model'))
             throw new Error('ModelはWorkflowのStageに指定してください。');
+        const selectedChoices = b.selectedChoices ?? {};
+        if (Object.keys(selectedChoices).length && (b.purpose !== 'stage-model' || target.kind !== 'model'))
+            throw new Error('Modelの選択肢はWorkflowのStageに指定してください。');
+        if (b.purpose === 'stage-model' && target.kind === 'model') {
+            const choices = target.choices ?? [], choiceNames = new Set(choices.map(choice => choice.name));
+            for (const [name, value] of Object.entries(selectedChoices)) {
+                const choice = choices.find(candidate => candidate.name === name);
+                if (!choiceNames.has(name) || !choice?.options.includes(value))
+                    throw new Error(`Modelの選択肢「${name}」の値「${value}」は利用できません。`);
+            }
+            const missing = choices.find(choice => !(choice.name in selectedChoices));
+            if (missing)
+                throw new Error(`Modelの選択肢「${missing.name}」を選択してください。`);
+        }
         if (source.id === target.id)
             throw new Error('Skillの循環参照は登録できません。');
+    }
+    validateExpectedRevisions(changes) {
+        const virtual = new Map();
+        const current = (kind, id) => {
+            const value = kind === 'common' ? this.store.list('common').find(c => c.projectId === id) : this.store.maybe(id);
+            if (!value)
+                throw new ConflictError(`${kind}の対象が見つかりません: ${id}`, { kind, id });
+            const key = `${kind}:${value.id}`;
+            const revision = virtual.get(key) ?? value.revision;
+            return { key, revision };
+        };
+        const advance = (kind, id, expected) => {
+            const target = current(kind, id);
+            if (expected === undefined)
+                throw new ConflictError(`${kind} ${id} のexpectedRevisionが必要です。最新revisionを取得して再試行してください。`, { kind, id, actual: target.revision });
+            if (target.revision !== expected)
+                throw new ConflictError(`${kind} ${id} はrev.${expected}ではなくrev.${target.revision}です。`, { kind, id, expected, actual: target.revision });
+            virtual.set(target.key, target.revision + 1);
+        };
+        for (const change of changes) {
+            if (change.type === 'asset.save' && change.id)
+                advance('asset', change.id, change.expectedRevision);
+            if (change.type === 'asset.delete')
+                advance('asset', change.id, change.expectedRevision);
+            if (change.type === 'binding.save' && change.id)
+                advance('binding', change.id, change.expectedRevision);
+            if (change.type === 'binding.remove')
+                advance('binding', change.id, change.expectedRevision);
+            if (change.type === 'common.save') {
+                advance('common', change.projectId, change.expectedRevision);
+            }
+        }
     }
     assertStageRoles(workflow, scope) {
         for (const stage of workflow.stages) {
@@ -93,6 +152,7 @@ export class Core {
     applyChanges(changes, provenance, proposalId, approvalId, restore, restoresChangeSetId, allowAssetDelete = false) {
         if (!allowAssetDelete && changes.some(c => c.type === 'asset.delete'))
             throw new Error('Asset削除は影響一覧を確認した後、専用の削除操作から確定してください。');
+        this.validateExpectedRevisions(changes);
         for (const change of changes.filter((c) => c.type === 'asset.delete')) {
             const preview = this.assetDeletionPreview(change.id);
             const bindingRevisions = preview.bindings.map(({ id, revision }) => ({ id, revision }));
@@ -219,6 +279,26 @@ export class Core {
         const changeSet = this.store.put('changeset', { id: changeSetId, operations: changes, provenanceId: p.id, historyIds: histories.map(h => h.id), proposalId, approvalId, restoresChangeSetId });
         return { changeSet, entities };
     }
+    previewChanges(changes, provenance) {
+        try {
+            this.store.atomic(() => {
+                const result = this.applyChanges(changes, provenance);
+                throw new PreviewAbort(result);
+            });
+        }
+        catch (error) {
+            if (error instanceof PreviewAbort) {
+                return {
+                    valid: true,
+                    changeCount: changes.length,
+                    affected: error.result.entities.map(entity => ({ id: entity.id, revision: entity.revision })),
+                };
+            }
+            if (error instanceof ConflictError)
+                return { valid: false, error: { code: error.code, message: error.message, details: error.details } };
+            return { valid: false, error: { code: 'INVALID_CHANGESET', message: error instanceof Error ? error.message : String(error) } };
+        }
+    }
     initProject(root, name) {
         root = normalizeRoot(root);
         if (this.store.list('project').some(p => p.root === root))
@@ -226,7 +306,7 @@ export class Core {
         const project = this.store.put('project', { name, root });
         const common = this.store.put('common', { projectId: project.id, ruleIds: [] }, project.id);
         const originals = this.bindings('global');
-        const result = this.applyChanges(originals.map(b => ({ type: 'binding.save', binding: { scope: project.id, sourceId: b.sourceId, targetId: b.targetId, stageId: b.stageId, purpose: b.purpose } })), {
+        const result = this.applyChanges(originals.map(b => ({ type: 'binding.save', binding: { scope: project.id, sourceId: b.sourceId, targetId: b.targetId, stageId: b.stageId, purpose: b.purpose, selectedChoices: b.selectedChoices ?? {} } })), {
             origin: 'init', reason: 'Globalの紐づけをProject初期構成へコピー', userRequest: `Project初期導入: ${root}`, proposedBy: '', decision: '',
             sources: originals.map(b => ({ type: 'binding-revision', reference: `${b.id}@${b.revision}` })),
         });
@@ -244,7 +324,9 @@ export class Core {
         const stageModelBindings = bindings.filter(b => b.sourceId === workflow.id && b.stageId === stageId && (b.purpose === 'stage-model' || snapshot.assets.find(a => a.id === b.targetId)?.kind === 'model'));
         if (stageModelBindings.length > 1)
             throw new Error(`このStageにはModelを1件まで指定できます: ${stageId}`);
-        const stageModelId = stageModelBindings[0]?.targetId;
+        const stageModelBinding = stageModelBindings[0];
+        const stageModelId = stageModelBinding?.targetId;
+        const modelSelections = stageModelBinding?.selectedChoices ?? {};
         const assets = new Map(snapshot.assets.map(a => [a.id, a]));
         const chosen = new Map(), resolution = [];
         const seen = new Set();
@@ -280,6 +362,7 @@ export class Core {
         return {
             runId: snapshot.runId, workflow: contextAsset(workflow), stage: contextStage(stage), stageRoleId,
             ...(model ? { model: contextAsset(model) } : {}),
+            ...(model ? { modelSelections } : {}),
             roles: [...chosen.values()].filter(a => a.kind === 'role').map(contextAsset),
             rules: [...chosen.values()].filter(a => a.kind === 'rule').map(contextAsset),
             skillCatalog: [...chosen.values()].filter(a => a.kind === 'skill').map(({ id, name, description }) => ({ id, name, description })),
@@ -575,33 +658,49 @@ export class Core {
         const reviewUpdates = p.insightIds.map(id => this.updateReviewState(id, 'processed', 'approved', decision.note));
         return { ...result, reviewUpdates };
     }
-    restoreAsset(assetId, revision) {
+    restoreAsset(assetId, revision, expectedRevision) {
         const old = this.store.revision(assetId, revision);
-        return this.applyChanges([{ type: 'asset.save', id: assetId, asset: this.assetPayload(old) }], { origin: 'restore', reason: '', userRequest: '', sources: [], proposedBy: '', decision: '' }, undefined, undefined, [{ entityId: assetId, revision }]);
+        return this.applyChanges([{ type: 'asset.save', id: assetId, expectedRevision, asset: this.assetPayload(old) }], { origin: 'restore', reason: '', userRequest: '', sources: [], proposedBy: '', decision: '' }, undefined, undefined, [{ entityId: assetId, revision }]);
     }
     restoreChangeSet(id) {
-        const cs = this.store.get(id, 'changeset'), operations = [], restored = [];
-        for (const historyId of [...cs.historyIds].reverse()) {
-            const h = this.store.get(historyId, 'history');
+        const cs = this.store.get(id, 'changeset'), histories = cs.historyIds.map(historyId => this.store.get(historyId, 'history'));
+        const latest = new Map();
+        for (const history of histories)
+            latest.set(`${history.kind}:${history.entityId}`, history.after);
+        for (const [key, expected] of latest) {
+            const [kind, entityId] = key.split(':', 2), current = this.store.maybe(entityId);
+            if (!current || current.revision !== expected)
+                throw new ConflictError(`${kind} ${entityId} はChange Set適用後のrev.${expected}から変更されています。復元を中止しました。`, { kind, id: entityId, expected, actual: current?.revision });
+        }
+        const current = new Map(latest);
+        const operations = [], restored = [];
+        const expectedRevision = (kind, entityId) => {
+            const key = `${kind}:${entityId}`, revision = current.get(key);
+            if (revision === undefined)
+                throw new ConflictError(`${kind} ${entityId} の現在revisionを確認できません。`, { kind, id: entityId });
+            current.set(key, revision + 1);
+            return revision;
+        };
+        for (const h of [...histories].reverse()) {
             if (h.before === null) {
                 if (h.kind === 'binding')
-                    operations.push({ type: 'binding.remove', id: h.entityId });
+                    operations.push({ type: 'binding.remove', id: h.entityId, expectedRevision: expectedRevision('binding', h.entityId) });
                 if (h.kind === 'asset') {
-                    const a = this.asset(h.entityId);
-                    operations.push({ type: 'asset.save', id: a.id, asset: { ...this.assetPayload(a), body: '処置なし', ...(a.kind === 'role' ? { responsibilities: '処置なし' } : {}) } });
+                    const a = this.asset(h.entityId, true);
+                    operations.push({ type: 'asset.save', id: a.id, expectedRevision: expectedRevision('asset', h.entityId), asset: { ...this.assetPayload(a), body: '処置なし', ...(a.kind === 'role' ? { responsibilities: '処置なし' } : {}) } });
                 }
             }
             else {
                 restored.push({ entityId: h.entityId, revision: h.before });
                 if (h.kind === 'asset')
-                    operations.push({ type: 'asset.save', id: h.entityId, asset: this.assetPayload(this.store.revision(h.entityId, h.before)) });
+                    operations.push({ type: 'asset.save', id: h.entityId, expectedRevision: expectedRevision('asset', h.entityId), asset: this.assetPayload(this.store.revision(h.entityId, h.before)) });
                 if (h.kind === 'binding') {
                     const b = this.store.revision(h.entityId, h.before);
-                    operations.push(b.active ? { type: 'binding.save', id: b.id, binding: { scope: b.scope, sourceId: b.sourceId, targetId: b.targetId, stageId: b.stageId, purpose: b.purpose } } : { type: 'binding.remove', id: b.id });
+                    operations.push(b.active ? { type: 'binding.save', id: b.id, expectedRevision: expectedRevision('binding', b.id), binding: { scope: b.scope, sourceId: b.sourceId, targetId: b.targetId, stageId: b.stageId, purpose: b.purpose, selectedChoices: b.selectedChoices ?? {} } } : { type: 'binding.remove', id: b.id, expectedRevision: expectedRevision('binding', b.id) });
                 }
                 if (h.kind === 'common') {
                     const c = this.store.revision(h.entityId, h.before);
-                    operations.push({ type: 'common.save', projectId: c.projectId, ruleIds: c.ruleIds });
+                    operations.push({ type: 'common.save', projectId: c.projectId, expectedRevision: expectedRevision('common', h.entityId), ruleIds: c.ruleIds });
                 }
             }
         }

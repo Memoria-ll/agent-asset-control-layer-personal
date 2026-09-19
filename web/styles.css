@@ -732,6 +732,38 @@ pre {
 .stage-content .spacer {
   display:none
 }
+.model-choice-fields {
+  display:grid;
+  gap:10px;
+  padding:14px;
+  margin-top:10px;
+  border:1px solid var(--line);
+  border-radius:10px;
+  background:#ffffff70
+}
+.model-choice-fields legend {
+  padding:0 5px;
+  color:#315b72;
+  font-size:12px;
+  font-weight:700
+}
+.model-choice-fields .hint {
+  margin:0
+}
+.model-choice-editor-row {
+  display:grid;
+  gap:10px
+}
+.model-option-rows {
+  display:grid;
+  gap:9px
+}
+.model-option-row {
+  align-items:end
+}
+.model-option-row label {
+  flex:1
+}
 .stage-editor > .stage-transitions {
   grid-column:2;
   grid-row:2;

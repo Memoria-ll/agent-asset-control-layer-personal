@@ -164,6 +164,10 @@ export class RuntimeEntries {
         }
       }
     }
-    return results;
+    return {
+      successCount: results.filter(result => result.ok).length,
+      failureCount: results.filter(result => !result.ok).length,
+      targetIds: [...new Set(results.map(result => result.targetId))],
+    };
   }
 }

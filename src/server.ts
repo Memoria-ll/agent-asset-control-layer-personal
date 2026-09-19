@@ -6,8 +6,8 @@ import { McpServer, createMcpHandler } from '@modelcontextprotocol/server';
 import { localhostHostValidation, toNodeHandler } from '@modelcontextprotocol/node';
 import { ZodError } from 'zod';
 import { Store } from './store.ts';
-import { Core } from './core.ts';
-import { Operations, bootstrap } from './operations.ts';
+import { ConflictError, Core } from './core.ts';
+import { Operations } from './operations.ts';
 import { prepareManagedDirectory } from './managed-directory.ts';
 
 async function body(request: IncomingMessage) {
@@ -31,14 +31,17 @@ export async function serve(directory: string, port = 4318) {
   const dataDirectory = prepareManagedDirectory(directory);
   const store = new Store(join(dataDirectory, 'aacl.sqlite')), core = new Core(store), operations = new Operations(core);
   const mcp = createMcpHandler(() => {
-    const server = new McpServer({ name: 'aacl', version: '0.1.0' }, { instructions: bootstrap });
+    const server = new McpServer({ name: 'aacl', version: '0.1.0' }, { instructions: '共通の利用案内と操作例はaacl_bootstrap_getで取得してください。各ツールのdescriptionには操作条件と入力例だけを記載しています。' });
     for (const [name, op] of operations.entries) {
       server.registerTool(`aacl_${name.replaceAll('.', '_')}`, {
         description: op.description, inputSchema: op.schema,
         annotations: { readOnlyHint: !op.write && !name.startsWith('data.'), destructiveHint: name.endsWith('restore') || name.endsWith('remove'), idempotentHint: op.write, openWorldHint: false },
       }, async args => {
         try { return { content: [{ type: 'text' as const, text: JSON.stringify(await op.execute(args)) }] }; }
-        catch (error) { return { isError: true, content: [{ type: 'text' as const, text: errorMessage(error) }] }; }
+        catch (error) {
+          const message = errorMessage(error), code = error instanceof ConflictError ? error.code : 'INVALID_REQUEST';
+          return { isError: true, structuredContent: { error: { code, message } }, content: [{ type: 'text' as const, text: message }] };
+        }
       });
     }
     return server;
@@ -80,7 +83,12 @@ export async function serve(directory: string, port = 4318) {
         response.writeHead(200, { 'Content-Type': file.type, 'Cache-Control': 'no-cache' }); response.end(content); return;
       }
       json(response, 404, { error: 'ページが見つかりません。' });
-    } catch (error) { if (!response.headersSent) json(response, 400, { error: errorMessage(error) }); else response.end(); }
+    } catch (error) {
+      if (!response.headersSent) {
+        const conflict = error instanceof ConflictError;
+        json(response, conflict ? 409 : 400, { code: conflict ? error.code : 'INVALID_REQUEST', error: errorMessage(error) });
+      } else response.end();
+    }
   });
   const timer = setInterval(() => { try { store.atomic(() => core.expireRuns()); } catch (e) { process.stderr.write(`${errorMessage(e)}\n`); } }, 60000);
   timer.unref();

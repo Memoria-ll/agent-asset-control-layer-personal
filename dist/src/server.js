@@ -6,8 +6,8 @@ import { McpServer, createMcpHandler } from '@modelcontextprotocol/server';
 import { localhostHostValidation, toNodeHandler } from '@modelcontextprotocol/node';
 import { ZodError } from 'zod';
 import { Store } from './store.js';
-import { Core } from './core.js';
-import { Operations, bootstrap } from './operations.js';
+import { ConflictError, Core } from './core.js';
+import { Operations } from './operations.js';
 import { prepareManagedDirectory } from './managed-directory.js';
 async function body(request) {
     let length = 0;
@@ -29,7 +29,7 @@ export async function serve(directory, port = 4318) {
     const dataDirectory = prepareManagedDirectory(directory);
     const store = new Store(join(dataDirectory, 'aacl.sqlite')), core = new Core(store), operations = new Operations(core);
     const mcp = createMcpHandler(() => {
-        const server = new McpServer({ name: 'aacl', version: '0.1.0' }, { instructions: bootstrap });
+        const server = new McpServer({ name: 'aacl', version: '0.1.0' }, { instructions: '共通の利用案内と操作例はaacl_bootstrap_getで取得してください。各ツールのdescriptionには操作条件と入力例だけを記載しています。' });
         for (const [name, op] of operations.entries) {
             server.registerTool(`aacl_${name.replaceAll('.', '_')}`, {
                 description: op.description, inputSchema: op.schema,
@@ -39,7 +39,8 @@ export async function serve(directory, port = 4318) {
                     return { content: [{ type: 'text', text: JSON.stringify(await op.execute(args)) }] };
                 }
                 catch (error) {
-                    return { isError: true, content: [{ type: 'text', text: errorMessage(error) }] };
+                    const message = errorMessage(error), code = error instanceof ConflictError ? error.code : 'INVALID_REQUEST';
+                    return { isError: true, structuredContent: { error: { code, message } }, content: [{ type: 'text', text: message }] };
                 }
             });
         }
@@ -107,8 +108,10 @@ export async function serve(directory, port = 4318) {
             json(response, 404, { error: 'ページが見つかりません。' });
         }
         catch (error) {
-            if (!response.headersSent)
-                json(response, 400, { error: errorMessage(error) });
+            if (!response.headersSent) {
+                const conflict = error instanceof ConflictError;
+                json(response, conflict ? 409 : 400, { code: conflict ? error.code : 'INVALID_REQUEST', error: errorMessage(error) });
+            }
             else
                 response.end();
         }
