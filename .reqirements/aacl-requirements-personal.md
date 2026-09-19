@@ -23,7 +23,7 @@ AACL Core
 
 AACLは次を製品機能として提供する。
 
-- Workflow / Skill / Role / RuleをCanonical Assetとして保存する。
+- Workflow / Skill / Role / Rule / ModelをCanonical Assetとして保存する。
 - グローバルとプロジェクト別のAssetおよび紐づけを管理する。
 - Workflowを明示的に選択してRunを開始する。
 - useCaseが有効なSkillを、Run管理を伴わない直接起動可能なAssetとして提供する。
@@ -92,7 +92,7 @@ Workflowの明示選択には、名前を含む自然言語依頼を含める。
 
 Workflowを選択していない通常利用で、何を行い、どこまで自律実行するかは、ユーザーと接続先AI本来の関係に委ねる。AACLは通常利用へ独自の許可・禁止規則やWorkflow Stateを適用せず、Workflowの選択を催促して割り込まない。
 
-通常利用へWorkflow / Skill / Rule等を暗黙適用しない。Runを伴わないSkillの直接利用も通常のSkill利用として扱い、Run、Snapshot、実行履歴、Journal、比較用の実行統計を自動作成しない。後からそのSkill利用を管理対象Runとして記録する機能も提供しない。
+通常利用へWorkflow / Skill / Rule / Model等を暗黙適用しない。Runを伴わないSkillの直接利用も通常のSkill利用として扱い、Run、Snapshot、実行履歴、Journal、比較用の実行統計を自動作成しない。後からそのSkill利用を管理対象Runとして記録する機能も提供しない。
 
 Assetの検索・編集・資産化など、ユーザーが明示した管理操作はRun外でも扱う。変更・資産化を行った場合は、その依頼と変更理由をProvenanceへ記録する。
 
@@ -100,14 +100,15 @@ Assetの検索・編集・資産化など、ユーザーが明示した管理操
 
 # 4. Canonical Asset
 
-Canonical Assetは次の4種とする。
+Canonical Assetは次の5種とする。
 
 - Workflow
 - Skill
 - Role
 - Rule
+- Model
 
-各Assetは、ID、name、description、revision、管理先、metadata、history、provenanceを持ち、種類ごとの本文・定義を保持する。Skillに必須の内容項目はname、description、bodyとする。
+各Assetは、ID、name、description、revision、管理先、metadata、history、provenanceを持ち、種類ごとの本文・定義を保持する。Skillに必須の内容項目はname、description、bodyとする。Modelはname、description、Model名、呼び出し方を保持する。
 
 Asset削除は対象Assetへの影響を確認してから確定する。確定前に、対象Assetを参照する紐づけ、対象Assetから参照する紐づけ、Project CommonからのRule参照をユーザーへ返す。参照の有無にかかわらず、Asset削除と一覧に含まれる参照解除にはユーザーの明示承認を必須とする。確認後、参照解除とAssetの削除状態への変更を一つの変更として保存する。プレビュー後にAssetまたは参照関係が変更された場合は削除を適用せず、最新の一覧から確認し直す。
 
@@ -115,7 +116,7 @@ Asset削除は対象Assetへの影響を確認してから確定する。確定�
 
 管理先はグローバルまたは特定のプロジェクトとする。グローバルのAssetとプロジェクトのAssetで名前が重複していても、別のAssetとして識別する。利用するAssetは紐づけやProject Commonの明示参照によって決まり、参照先をAsset IDで特定する。
 
-Asset本体と、利用するAssetを示す紐づけを分けて管理する。ModelはCanonical Assetではなく、Modelへの紐づけやModel metadataの管理を行わない。Model名が明示的に渡された場合、Coreは不透明な文字列としてそのまま受け渡す。Asset本体と紐づけはそれぞれrevisionで履歴を保持する。
+Asset本体と、利用するAssetを示す紐づけを分けて管理する。ModelはSkill / Ruleを参照できるCanonical Assetとして管理する。Asset本体と紐づけはそれぞれrevisionで履歴を保持する。
 
 revisionは履歴、Run、Snapshotの再現に用いる。通常のAsset Writeでは古いrevisionを理由に更新を拒否せず、現在状態を基に新しいrevisionを作成する。同じoperation IDによる再送は同一Writeとして扱う。過去revisionの復元は、その内容を新しいrevisionとして保存する。
 
@@ -148,8 +149,12 @@ AACLはグローバルの紐づけと、各Projectの紐づけを別々に保存
 - Workflow / Stage → Role / Skill / Rule
 - Role → Skill / Rule
 - Skill → Skill
+- Model → Skill / Rule
+- Workflow / Stage → Model
+- Model → Skill / Rule
+- Workflow / Stage → Model
 
-Workflowのentry roleとStageごとの担当Roleは紐づけで指定する。各Stageには担当Roleを1件割り当てる。Model名はAsset間の紐づけに含めない。
+Workflowのentry roleとStageごとの担当Roleは紐づけで指定する。各Stageには担当Roleを1件割り当て、必要なStageにはModelを1件指定する。StageへModelを紐づけることは、そのStageを指定Modelのサブエージェントで実行する指示になる。
 
 ProjectのRunでは、そのProjectに保存された紐づけを使う。グローバルとプロジェクトで同名のAssetが存在する場合も、紐づけに記録されたAssetを参照する。
 
@@ -225,9 +230,9 @@ Workflowは次を保持する。
 - retry / reject / return
 - Stageの一覧と、各Stageに必須のcompletion_condition
 
-Workflow / Stageで使うRole・Skill・Ruleは紐づけで指定し、対象Projectの構成から取得する。
+Workflow / Stageで使うRole・Skill・Rule・Modelは紐づけで指定し、対象Projectの構成から取得する。
 
-StageをWorkflowの実行単位とする。各Stageには担当Roleを必ず1件割り当て、Roleのresponsibilitiesを工程の基本としてContextへ含める。Stage固有の追加指示は任意の自由記述としてRoleのresponsibilitiesを補足し、completion_conditionとは別に保存してStage Contextへ含める。Stageが参照するSkillとRuleは任意とする。completion_conditionはAIが完了を判断するための必須自由記述であり、Coreはその意味を判定しない。CoreはWorkflowのStage一覧、担当Role、許可されたtransitionを管理し、完了判断後にAIまたはユーザーが選んだtransitionの構造と現在状態を検証する。
+StageをWorkflowの実行単位とする。各Stageには担当Roleを必ず1件割り当て、Roleのresponsibilitiesを工程の基本としてContextへ含める。Stage固有の追加指示は任意の自由記述としてRoleのresponsibilitiesを補足し、completion_conditionとは別に保存してStage Contextへ含める。Stageが参照するSkill、Rule、Modelは任意とする。Modelを指定したStageはそのModelのサブエージェントで実行する指示としてContextへ含める。連続するStageの担当RoleとModelが同一なら、同じサブエージェントIDを継続して使う。completion_conditionはAIが完了を判断するための必須自由記述であり、Coreはその意味を判定しない。CoreはWorkflowのStage一覧、担当Role、Model、許可されたtransitionを管理し、完了判断後にAIまたはユーザーが選んだtransitionの構造と現在状態を検証する。
 
 ---
 
@@ -256,7 +261,7 @@ Roleは、実行主体が何者として振る舞い、何を担うかを定義�
 
 RoleはID、name、description、revision、responsibilities、task type / classificationを保持する。responsibilitiesは、期待する責務・判断観点・成果責任を表す。
 
-Roleで使うSkill / Ruleは、使用するGlobalまたはProject scopeの紐づけから取得する。Skill / Ruleの本文は独立したCanonical Assetとして管理し、Roleから参照する。Modelとの紐づけは行わない。
+Roleで使うSkill / Ruleは、使用するGlobalまたはProject scopeの紐づけから取得する。Skill / Ruleの本文は独立したCanonical Assetとして管理し、Roleから参照する。ModelはStageから参照し、Model自身からSkill / Ruleを参照できる。
 
 Coreは次をRole Contextとして構成する。
 
@@ -266,7 +271,7 @@ Coreは次をRole Contextとして構成する。
 - Workflow / Stageで使うと明示されたSkill / Rule
 - Project Commonに登録されたRule
 
-Modelとの紐づけやModel metadataは管理しない。Model名が明示的に与えられた場合、CoreはModel固有の情報として解釈せず、値をそのまま受け渡す。モデル選択と利用可否への対応はユーザーとRuntime / AIが担う。
+ModelはModel名と呼び出し方を保持し、Modelから明示参照されたSkill / RuleをContextへ含める。外部Modelの実在性と利用可否、実際のサブエージェント起動はユーザーとRuntime / AIが担う。
 
 ---
 
@@ -307,13 +312,13 @@ Asset自体の削除依頼では、AIはaacl_asset_delete_previewの結果から
 
 ユーザーは「このRuleの確認項目Aを削除して」のように、内容への変更として依頼する。変更箇所や過去の変更IDの調査はAIが担う。
 
-管理操作には、Assetの検索・取得・作成・更新・削除前確認・削除確定、紐づけの検索・取得・作成・変更・解除、Project Commonの取得・編集、Skillの直接起動設定、History・Provenanceの確認を含める。Model metadataの登録・更新は行わない。
+管理操作には、Assetの検索・取得・作成・更新・削除前確認・削除確定、紐づけの検索・取得・作成・変更・解除、Project Commonの取得・編集、Skillの直接起動設定、History・Provenanceの確認を含める。ModelのModel名と呼び出し方もAssetとして登録・更新する。
 
 ---
 
 # 15. 既存情報と通常利用からの資産化
 
-AIは、ユーザーが指定した既存の指示ファイル・設定・会話・成果物・要約・進め方を読み、Workflow / Skill / Role / Ruleへ整理する。
+AIは、ユーザーが指定した既存の指示ファイル・設定・会話・成果物・要約・進め方を読み、Workflow / Skill / Role / Rule / Modelへ整理する。
 
 使う資産と紐づけ、その管理先を具体化し、ユーザーの依頼と判断に基づいて保存する。
 
@@ -451,7 +456,7 @@ Resolutionの入力は、Project、使用する紐づけ、Project Common、Work
 - 利用対象Skillのcatalog
 - 現在Stage、担当Roleとresponsibilities、任意の追加指示、completion_condition
 
-Stageの担当Roleとresponsibilitiesを工程の基本Contextとして含める。Stage固有の追加指示があればRoleへの補足として含める。Model名はRoleやAssetの紐づけとしてContextへ合成しない。
+Stageの担当Roleとresponsibilitiesを工程の基本Contextとして含める。Stage固有の追加指示があればRoleへの補足として含める。StageにModelが紐づく場合はModel名、呼び出し方、Modelから参照したSkill / Rule、およびサブエージェント継続指示をContextへ含める。
 
 Workflow RunではSkill本文とsupporting filesをAIが必要時に取得し、利用対象のSkill集合とrevisionをContextの一部として扱う。直接起動Skillは指定Assetの本文を取得して渡す。
 
@@ -495,7 +500,7 @@ AACLはSkill本文・supporting filesの提供も記録し、Runと対応するC
 
 Journalに記録する気づきには、実際に何をどう使ったかを補足する。AACLは、Skillが利用対象になった状態、本文を取得した状態、実際に使ったという報告を区別して保持する。Runに成果物用workspaceを割り当てたり、成果物をRun間で分離したりしない。
 
-Modelに関する情報はCoreの構造化管理対象に含めない。AIがJournal本文等へ記述した情報は自由記述として保持し、CoreはModel名として抽出・検証しない。
+外部Modelの実在性・利用可否・実際の起動結果はCoreの検証対象に含めない。Model Assetの構造化情報と、Stageへの割当およびサブエージェント継続IDはCoreが管理する。
 
 ---
 
@@ -543,7 +548,7 @@ AIはCoreから新しいJournalと以前のレビューで保留した気づき�
 
 - 繰り返す摩擦・詰まり
 - 再現する価値のある良いパターン
-- 新しいWorkflow / Skill / Role / Ruleや紐づけの候補
+- 新しいWorkflow / Skill / Role / Rule / Modelや紐づけの候補
 - 既存の資産・紐づけの改善候補
 - 資産や提供Contextを減らす・軽くする候補
 
@@ -685,13 +690,14 @@ UIはAsset、Global / Projectの紐づけ、Project Common、Workflow Run、Snap
 
 UIの視覚表現はリキッドグラス風とする。画面構成や個別の操作部品などの詳細は実装に委ね、次の操作性を備える。
 
-- Workflow / StageごとにRole、Skill、Ruleの紐づきを一覧でき、各Assetからも関連するWorkflow / Stageを確認できる。Stageへの直接参照と担当Role経由の参照を区別して示す。
+- Workflow / StageごとにRole、Skill、Rule、Modelの紐づきを一覧でき、各Assetからも関連するWorkflow / Stageを確認できる。Stageへの直接参照と担当Role経由の参照を区別して示す。
 - UIから紐づけを追加・解除・付け替えでき、SkillのuseCase設定を有効・無効に簡単に切り替えられる。現在の設定状態を見分けられる。
 - Workflow編集画面でStageごとに既存Roleを必ず1件選ぶか、新しいRoleをGlobal Assetとして作成して割り当てられる。担当Roleの責務がStageの基本となり、追加指示は任意で記入できる。作成したRoleは他のWorkflow / Stageでも再利用できる。
+- Workflow編集画面でStageごとにModelを任意に指定できる。Modelを指定したStageはサブエージェント実行の指示になり、連続する同じRole・ModelのStageでは同じサブエージェントへ依頼する。
 - WorkflowのStage間の許可された遷移を図で表示する。次工程への遷移、差し戻し、retry等の自己ループを含む遷移元・遷移先・種別が分かる。
 - UIの対応保証はviewport幅880 CSS px以上とする。
 
-Runtime差は、Runtime identifierとRuntime固有Bootstrapとして扱う。ModelとCapabilityの存在・利用可否・metadataはCoreが管理する情報ではない。
+Runtime差は、Runtime identifierとRuntime固有Bootstrapとして扱う。外部Modelの実在性・利用可否はRuntimeが扱い、Model Assetの名前、Model名、呼び出し方、Skill / Rule参照、Stageへの割当はCoreが管理する。
 
 ---
 
@@ -717,7 +723,7 @@ issue-developmentを定義する場合の工程例を示す。
 完了    実装へ戻る
 ```
 
-実際のWorkflow工程とRole、Skill、Ruleの紐づけは、ユーザーの開発方法に合わせて定義する。利用するModelはRuntime側で選択する。
+実際のWorkflow工程とRole、Skill、Rule、Modelの紐づけは、ユーザーの開発方法に合わせて定義する。Modelの実行自体はRuntimeへ委ねる。
 
 ---
 

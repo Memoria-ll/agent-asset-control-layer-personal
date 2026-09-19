@@ -446,6 +446,10 @@ pre {
   color:#a08757;
   background:#f1ebde
 }
+.type-icon.model {
+  color:#9b658a;
+  background:#f1e3ee
+}
 .badge {
   display:inline-flex;
   align-items:center;

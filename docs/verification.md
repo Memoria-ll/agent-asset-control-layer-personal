@@ -10,7 +10,7 @@
 | C05、C07 | `project.init`、`project.resolve`、`common.*` | path正規化、root完全一致、重複登録拒否、Global紐づけだけの複製、空のCommon、scopeに一致するProject入口とGlobal入口の非重複 |
 | C06 | `binding.*` | コピー後の独立性、IDでの参照、Role→Skill→Skill、循環拒否 |
 | C09、C19 | `asset.save`、`run.transition` | Stage完了条件必須、遷移元・先・種別、許可されていない遷移の拒否、完了報告 |
-| C11、C12、C13 | `context.get`、`context.handoff` | Role責務と明示Rule、分類、Model文字列の不透明な受け渡し、Capabilityを入力契約へ追加しない |
+| C11、C12、C13 | `context.get`、`context.handoff` | Role責務と明示Rule、指定Modelの固定情報とサブエージェント継続、分類、Capabilityを入力契約へ追加しない |
 | C14、C15、C28 | `asset.save`、`changeset.apply`、`history.get` | 依頼・理由の保存、UI／MCPの共通処理、通常利用をRunにしない |
 | C16、C34 | `runtime.*`、`setup.skills` | IDだけの入口、名称変更、useCase解除、衝突検出、設定先管理解除後のファイル保持、ユーザー所有の定義 |
 | C17 | `run.start`とRun単位の各操作 | 異なるHandle、並行HTTP／MCP要求のContextと状態の分離 |
@@ -31,6 +31,6 @@
 2. Claude CodeとCodexのそれぞれからMCP接続し、Bootstrapを取得できる。protocol 2026-07-28と旧protocolのstateless fallbackは自動試験で確認する。
 3. 各Runtimeで2つのチャットを同時に開き、別々にRunを開始する。各チャットが自身のHandleを後続操作へ渡し、Context・Journal・遷移が混線しない。
 4. Global／Projectの生成入口をRuntimeが認識し、Windows側ではWSL経由でServiceの起動を確認できる。Skill入口は本文だけを取得し、Workflow入口はRunを開始する。
-5. Stage側とAsset側の参照表示・編集、直接参照とRole経由の表示、SkillのuseCase切り替え、次工程・差し戻し・自己ループの図、リキッドグラス風の見た目を利用者が確認する。
+5. Stage側とAsset側の参照表示・編集、直接参照とRole経由の表示、Stage Modelの指定、SkillのuseCase切り替え、次工程・差し戻し・自己ループの図、リキッドグラス風の見た目を利用者が確認する。
 
 実Runtimeとの会話とWindowsホスト接続は自動試験では代替しない。MCP試験のRuntime識別子は入力データであり、Claude Code／Codexプロセスを実行した証明ではない。

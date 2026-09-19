@@ -93,8 +93,9 @@ Assetは再利用する指示や知識を保持します。各AssetはID、種�
 | Role | Workflowの工程で担う責務と期待する成果を定義します。 |
 | Skill | 再利用する手順や知識を保持し、補助ファイルを持てます。 |
 | Rule | 紐づけたAssetや工程へ適用する指示を保持します。 |
+| Model | Model名と呼び出し方を保持し、SkillやRuleを紐づけられます。 |
 
-Workflowの各工程には1つのRoleを割り当てます。必要な場所にSkillとRuleを紐づけます。SkillはRuntimeから直接起動する設定もできます。Asset作成後に種類や管理先は変更できません。異なる種類・管理先にする場合は、正しい値でAssetを作成して関係を付け替えます。
+Workflowの各工程には1つのRoleを割り当て、必要な工程にはModelを指定できます。Modelを指定した工程はそのサブエージェントで実行する指示になり、連続する同じRole・Modelの工程では同じサブエージェントを使います。必要な場所にSkillとRuleを紐づけます。SkillはRuntimeから直接起動する設定もできます。Asset作成後に種類や管理先は変更できません。異なる種類・管理先にする場合は、正しい値でAssetを作成して関係を付け替えます。
 
 ```mermaid
 flowchart TD
@@ -102,6 +103,7 @@ flowchart TD
     W --> S2[工程: Review]
     S1 --> R1[Role: 実装担当]
     S2 --> R2[Role: Review担当]
+    S1 -. サブエージェント .-> M1[Model: 指定Model]
     S1 -. 使用 .-> K1[Skill: 実装手順]
     S2 -. 使用 .-> K2[Skill: Review手順]
     W -. 共通指示 .-> Rule[Rule]
@@ -109,7 +111,7 @@ flowchart TD
 
 ## 既存の指示をAACLへ移す
 
-現在のアプリでは、UIまたはMCPからAssetを登録して整理できます。フォルダー全体を取り込む機能はありません。移行時は同名の指示を一律統合せず、実際の責務や手順を比べてWorkflow、Role、Skill、Ruleに分類します。元の方法にある関係だけを再構成し、登録内容とRuntime入口を確認するまで元ファイルを保持します。
+現在のアプリでは、UIまたはMCPからAssetを登録して整理できます。フォルダー全体を取り込む機能はありません。移行時は同名の指示を一律統合せず、実際の責務や手順を比べてWorkflow、Role、Skill、Rule、Modelに分類します。元の方法にある関係だけを再構成し、登録内容とRuntime入口を確認するまで元ファイルを保持します。
 
 分類、登録、Runtime入口、移行後の照合手順は[既存Skill・指示の移行ガイド](docs/skill-migration.md)を参照してください。
 
@@ -165,7 +167,7 @@ sequenceDiagram
 
 ## Contextと必要時のSkill取得
 
-Run開始時に、選択したWorkflow、関連Asset、Binding、Project Common設定を不変Snapshotへ固定します。初期Contextには現在の工程、担当Role、適用するRule本文、候補Skillの説明を含めます。Skill本文と補助ファイルは必要時にSnapshotの固定revisionから取得します。
+Run開始時に、選択したWorkflow、関連Asset、Binding、Project Common設定を不変Snapshotへ固定します。初期Contextには現在の工程、担当Role、指定ModelのModel名・呼び出し方、適用するRule本文、候補Skillの説明、サブエージェント継続指示を含めます。Skill本文と補助ファイルは必要時にSnapshotの固定revisionから取得します。
 
 Contextの提供記録と、Skillを利用したという報告は別々に保存します。Skillを確認のため取得しただけでは実利用として報告されません。Run画面には現在StageのContextとSkill候補が表示され、診断ではContext提供量をUTF-8バイト数で確認できます。
 

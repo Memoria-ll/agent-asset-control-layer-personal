@@ -57,6 +57,33 @@ test('C09 C11 C17: optional Stage instructions accompany its responsible Role in
   await assert.rejects(f.call('binding.remove', { id: f.core.bindings().find(b => b.sourceId === workflowId && b.purpose === 'stage-role')!.id, provenance }), /担当Role/);
 });
 
+test('Model assets bind Skills and Rules, and consecutive matching Stage assignments reuse one subagent', async t => {
+  const f = fixture(t), model = await f.asset('model', { name: '実装Model', modelName: 'provider/implementer', invocationMethod: 'Runtimeのsubagent呼び出し' }), skill = await f.asset('skill', { name: 'Model Skill' }), rule = await f.asset('rule', { name: 'Model Rule' });
+  await f.bind(model, skill); await f.bind(model, rule);
+  const workflow = await f.workflow();
+  await f.bind(workflow, model, { stageId: 'build', purpose: 'stage-model' });
+  await f.bind(workflow, model, { stageId: 'review', purpose: 'stage-model' });
+
+  const first = await f.start(workflow);
+  assert.equal(first.context.model?.id, model.id);
+  assert.equal(first.context.model?.modelName, 'provider/implementer');
+  assert.equal(first.context.model?.invocationMethod, 'Runtimeのsubagent呼び出し');
+  assert.equal(first.context.subagent?.continuity, 'new');
+  assert.ok(first.context.subagent?.id);
+  assert.equal(first.context.skillCatalog.some(skillAsset => skillAsset.id === skill.id), true);
+  assert.equal(first.context.rules.some(ruleAsset => ruleAsset.id === rule.id), true);
+  assert.equal((await f.call<{ body: string }>('run.skill.get', { contextHandle: first.contextHandle, assetId: skill.id })).body, '本文');
+
+  const moved = await f.call<{ run: Run }>('run.transition', { contextHandle: first.contextHandle, version: 1, transitionId: 'next', report: '実装完了' });
+  assert.equal(moved.run.subagentId, first.run.subagentId);
+  assert.equal(moved.run.subagentContinuity, 'same');
+  const next = await f.call<Context & { subagent: { id: string; continuity: string } }>('context.get', { contextHandle: first.contextHandle });
+  assert.equal(next.model?.id, model.id);
+  assert.equal(next.subagent.id, first.context.subagent?.id);
+  assert.equal(next.subagent.continuity, 'same');
+  assert.equal(next.subagent.instruction.includes('同じサブエージェント'), true);
+});
+
 test('C02 C04 C13 C14 C15 C28 C29: schema / stable identity / idempotent writes / provenance / restoration', async t => {
   const f = fixture(t), a = await f.asset('skill');
   const operationId = randomUUID(), input = { id: a.id, revision: 0, asset: { ...f.core.assetPayload(a), name: '改名', body: '更新' }, provenance };

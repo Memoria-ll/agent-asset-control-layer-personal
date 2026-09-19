@@ -34,6 +34,23 @@ export function stageRoleBindingChanges(workflowId, scope, assignments, bindings
         changes.push({ type: 'binding.save', binding: { scope, sourceId: workflowId, stageId, targetId: roleId, purpose: 'stage-role' } });
     return changes;
 }
+export function stageModelBindingChanges(workflowId, scope, assignments, bindings) {
+    const desired = new Map(assignments.filter(a => a.modelId).map(a => [a.stageId, a.modelId]));
+    const current = bindings.filter(b => b.active && b.scope === scope && b.sourceId === workflowId && b.purpose === 'stage-model');
+    const changes = [];
+    for (const binding of current) {
+        const stageId = binding.stageId ?? '';
+        const modelId = desired.get(stageId);
+        if (!modelId)
+            changes.push({ type: 'binding.remove', id: binding.id });
+        else if (modelId !== binding.targetId)
+            changes.push({ type: 'binding.save', id: binding.id, binding: { scope, sourceId: workflowId, stageId, targetId: modelId, purpose: 'stage-model' } });
+        desired.delete(stageId);
+    }
+    for (const [stageId, modelId] of desired)
+        changes.push({ type: 'binding.save', binding: { scope, sourceId: workflowId, stageId, targetId: modelId, purpose: 'stage-model' } });
+    return changes;
+}
 export function workflowDiagram(asset) {
     const nodes = [...asset.stages.map(s => ({ id: s.id, name: s.name })), { id: 'completed', name: '完了' }].map((s, i) => ({ ...s, x: 35 + i * 210, y: 125 }));
     const edges = asset.transitions.map((t, i) => {

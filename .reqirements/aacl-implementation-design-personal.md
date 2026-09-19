@@ -78,7 +78,7 @@ Claude Code / Codex (Windows または同一WSL内のLinux)
 
 ### 5.1 Asset共通
 
-- Canonical AssetはWorkflow、Skill、Role、Ruleの4種とする。
+- Canonical AssetはWorkflow、Skill、Role、Rule、Modelの5種とする。
 - Coreが生成するUUIDをAsset IDとし、名前変更後も同じIDを使う。
 - Asset revisionは単調増加整数とし、現在値と不変の過去revisionを分離して保存する。
 - Revision recordにはAsset ID、revision、本文、更新時刻を含め、Run開始時の参照を再現できるindexを用意する。
@@ -92,7 +92,7 @@ Claude Code / Codex (Windows または同一WSL内のLinux)
 ### 5.2 Schema境界
 
 - SchemaはCore内部の保存・受け渡し契約として実装し、独立したAsset recordを作らない。
-- 内容schemaを持つ対象はSkill、Journal、Workflow、Stageとする。Role、Rule等は保存・参照に必要な共通recordとする。
+- 内容schemaを持つ対象はSkill、Journal、Workflow、Stage、Modelとする。Role、Ruleは保存・参照に必要な共通recordとする。
 - Schemaの具体的な表現、DB正規化、version、migrationは実装事項とする。
 - Validatorは要求書で指定された構造条件だけを検査し、自由記述の値に意味解釈を加えない。
 
@@ -100,7 +100,8 @@ Claude Code / Codex (Windows または同一WSL内のLinux)
 
 - Skill recordの必須本文fieldはname、description、bodyとし、useCase設定をRuntime target生成処理へ渡す。
 - Workflow recordはStage listとtransition定義を保持し、StageはWorkflow内の子recordとして保存する。
-- Stage recordのcompletion_conditionを必須fieldとして検証し、Workflow内の各Stageに`stage-role` purposeとstageIdで指定したRoleを1件割り当てる。担当Roleの責務をStageの基本とし、Stageの`additionalInstructions`は任意の追加指示として保存する。
+- Model recordはModel名と呼び出し方を保持する。ModelからSkill / Ruleを参照でき、WorkflowのStageから`stage-model` purposeとstageIdでModelを1件まで指定できる。
+- Stage recordのcompletion_conditionを必須fieldとして検証し、Workflow内の各Stageに`stage-role` purposeとstageIdで指定したRoleを1件割り当てる。担当Roleの責務をStageの基本とし、Stageの`additionalInstructions`は任意の追加指示として保存する。Modelを指定したStageはサブエージェント実行の指示とし、連続する同じRole・Modelでは同じsubagent IDをRunへ保持する。
 - Workflow編集UIではStageごとにRoleを割り当て、任意の追加指示を設定できる。新規RoleとWorkflowは`asset.create`でIDを確定してからbindingと同じChange Setで作成し、Roleを複数Workflow / Stageから再利用する。重複IDは拒否する。
 - Task相当のfieldはStageに格納し、Task用の独立tableを設けない。
 
@@ -113,7 +114,7 @@ Claude Code / Codex (Windows または同一WSL内のLinux)
 - Run単位のMCP operationはContext Handleを必須入力として受け取り、その値から対象Runを解決する。AIは`run.start`から受け取ったHandleを同じAI実行Contextの後続operationへ渡す。
 - Run開始transactionでWorkflowと参照revisionの境界を固定し、変更不能なExecution Snapshotを作成する。Snapshotにはrun id、Workflowとrevision、resolution revision boundary、Project、使用した紐づけとrevision、Project CommonのrevisionとRule参照、該当するStage、Role、Runtime、利用対象Assetとrevision、提供したRuleとSkill catalog、timestampを保持する。
 - Resolution recordには、利用対象になった各Assetの参照経路と解決理由を保持する。取得できなかったContextと理由も記録し、初期Contextに渡した情報と区別する。
-- Initial ContextはWorkflow Definition、現在Stageとcompletion_condition、`stageRoleId`、担当Roleのresponsibilities、Stageの`additionalInstructions`、明示参照されたRule、利用対象Skill catalogで構成する。Model名をContextへ合成しない。
+- Initial ContextはWorkflow Definition、現在Stageとcompletion_condition、`stageRoleId`、担当Roleのresponsibilities、Stageの`additionalInstructions`、明示参照されたRule、利用対象Skill catalog、指定Modelの固定revision、呼び出し方、サブエージェント継続指示で構成する。
 - Context、Skill本文、supporting fileをRunへ返すRead operationは、RunとSnapshotに対応するappend-only delivery recordを残す。recordには取得対象とrevision、参照経路、提供結果、提供した内容または同一内容を再現できる不変参照を含める。取得できない場合は対象と理由を記録する。
 - 利用対象になった状態、実際に提供した状態、Journal等で報告された実利用を別々に保持する。取得記録だけから実利用を推定しない。Context Costは提供recordを集計し、未取得のSkill本文を含めない。
 - ResolverはAsset ID relationを再帰的にたどり、visited setで重複排除と循環検出を行う。必須参照不在時の開始失敗と、任意supporting fileの取得失敗理由を別結果として扱う。
@@ -205,14 +206,14 @@ Claude Code / Codex (Windows または同一WSL内のLinux)
 | C01 | §1 目的と利用形態 | Asset管理、Run、Context、Journal、Review、UI・CLI・Export各domain operation | Assetを管理し、Workflow実行からReviewによる改善までの機能境界が一貫して利用できる。 |
 | C02 | §2 基本原則と責務分担 | Core validation、MCP / UI application API | 構造不正はCoreが拒否し、本文の意味判断はCoreが行わない。UIとMCPの変更が同じCore経路を通る。 |
 | C03 | §3 管理対象の実行と通常利用 | Workflow選択・Run API、Skill取得API | 明示したWorkflowだけがRunを作り、通常利用と直接Skill利用ではRun等の管理記録を自動作成しない。 |
-| C04 | §4 Canonical Asset | Asset CRUD、revision、History API | 4種のAsset IDが名前変更後も維持され、Writeでrevisionが増え、古いrevision入力を理由に拒否せず再送は冪等となる。参照一覧をユーザーへ示して明示確認を得た後にだけ削除し、参照解除と削除状態を同じChange Setへ保存する。 |
+| C04 | §4 Canonical Asset | Asset CRUD、revision、History API | 5種のAsset IDが名前変更後も維持され、Writeでrevisionが増え、古いrevision入力を理由に拒否せず再送は冪等となる。参照一覧をユーザーへ示して明示確認を得た後にだけ削除し、参照解除と削除状態を同じChange Setへ保存する。 |
 | C05 | §5 Project Identity | Project registry、path adapter、Project Common API | Windows / Linux pathが定義どおり照合され、未登録rootや親・alias・symlinkから別Projectを推定しない。Project Commonの変更revisionとRule参照を確認できる。 |
 | C06 | §6 グローバルとプロジェクト別の紐づけ | Binding CRUD、Asset reference API | Global / Projectの紐づけが独立し、明示したAsset IDを参照する。Skillの再帰参照を解決し、同名Assetへ勝手に切り替わらない。 |
 | C07 | §7 プロジェクト初期導入 | `aacl init`、binding copy、Runtime entry生成 | Global紐づけのみがコピーされ、Asset本文は複製されず、Project Commonは空で始まる。失敗時に登録とコピーが部分状態にならない。 |
 | C08 | §8 Use Case | Use Case search、Run start、direct Skill retrieval | 検索はWorkflowと`useCase=true` Skillを扱い、Run startはWorkflowだけを受け付ける。Skill取得はRunを作らない。 |
-| C09 | §9 Workflow | Workflow / Stage schema、transition API | 各Stageの担当Role 1件、必須completion_condition、許可transitionが検証され、Workflow定義にない遷移を受理しない。追加指示は任意で保存される。 |
+| C09 | §9 Workflow | Workflow / Stage schema、transition API | 各Stageの担当Role 1件、任意のStage Model 1件、必須completion_condition、許可transitionが検証され、Workflow定義にない遷移を受理しない。追加指示は任意で保存される。 |
 | C10 | §10 Skill | Skill CRUD、body / supporting file retrieval | 本文とsupporting filesを固定revisionで取得でき、対象・取得・実利用報告を別状態として参照できる。 |
-| C11 | §11 RoleとModel名の受け渡し | Role API、Context builder、Runtime report | Stageの担当Roleと責務をContextの基本とし、追加指示を任意で含める。Role responsibilitiesと明示参照をContextへ含め、Model文字列をそのまま渡し、Model Assetや照合記録を作らない。 |
+| C11 | §11 RoleとModel名の受け渡し | Role / Model API、Context builder、Runtime report | Stageの担当Roleと責務をContextの基本とし、追加指示を任意で含める。指定Modelの固定revision、Model名、呼び出し方、明示参照Skill / Rule、サブエージェント継続指示をContextへ含める。外部Modelの実在性は検証しない。 |
 | C12 | §12 Ruleと作業分類 | Rule CRUD、Task Type metadata、Context builder | Ruleは明示参照でのみContextに入り、Task Typeは管理対象の分類・Run metadataとして保持される。 |
 | C13 | §13 Capability | Core schema / validation境界 | Capability情報がCoreの保存・検証やRun開始・遷移条件に使われない。 |
 | C14 | §14 自然言語によるAsset管理 | MCP Asset / Binding / Project Common API、UI編集API、Provenance | 検索・取得・作成・更新・解除・削除の変更が明示操作で保存され、依頼と変更理由へ関連づく。削除は影響一覧と明示確認を経て確定する。 |
@@ -232,7 +233,7 @@ Claude Code / Codex (Windows または同一WSL内のLinux)
 | C28 | §28 Provenanceと変更履歴 | History、Provenance、Change Set API | 変更内容と理由が別に追跡でき、Change Setから対象、operations、依頼、判断、履歴を確認できる。 |
 | C29 | §29 過去の状態の復元 | UI revision / Change Set restore API | 選択した過去内容を新revisionとして復元し、復元元revisionを履歴へ記録する。理由入力を要求しない。 |
 | C30 | §30 Diagnostics | Diagnostics API、evidence link | 欠落参照、取得不能revision、不整合、反復遷移、Context量を対象と根拠付きで提示し、意味的修正を自動適用しない。 |
-| C31 | §31 Context Costと改善の比較軸 | Delivery record aggregation、comparison API | 実際に渡した情報だけをWorkflow / Stage / Role等で比較し、未取得本文と直接Skill実行を統計へ含めない。Modelを比較軸にしない。 |
+| C31 | §31 Context Costと改善の比較軸 | Delivery record aggregation、comparison API | 実際に渡した情報だけをWorkflow / Stage / Role等で比較し、未取得本文と直接Skill実行を統計へ含めない。ModelはContextの構成要素として記録する。 |
 | C32 | §32 MCP Interface | Typed domain operations、idempotent Write、Run-scoped Read | 要求書のdomain operation群を提供し、ReadはCanonical stateを変えず、Run向け提供記録と活動時刻のみを更新する。Write再送は冪等となる。 |
 | C33 | §33 保存、CLI、閲覧UI | Core service、SQLite、CLI、UI、Export / Backup | WSL上のCoreへWindows / Linux clientから接続できる。Windowsログオン時のtaskでWSLとServiceを起動し、taskを解除・削除できる。loopback境界、削除範囲、credential除外、明示的なExport / Backupを確認する。UIではStage / Assetの双方から紐づきを確認・変更でき、各Stageの必須Roleと任意の追加指示を編集できる。useCase切替とStage別の許可遷移図示を備え、リキッドグラス風の視覚表現を満たす。 |
 | C34 | §34 ユーザーが育てるUse Case | Workflow / Skill CRUD、Runtime entry | ユーザー定義のWorkflowと直接Skillを作成・変更して起動できる。例示された工程やAssetを組み込み必須データにしない。 |

@@ -93,8 +93,9 @@ An Asset holds reusable instructions or knowledge. Each Asset has an ID, kind, r
 | Role | Defines the responsibility and expected output for a Workflow stage. |
 | Skill | Holds reusable procedures or knowledge, with optional supporting files. |
 | Rule | Holds instructions shared by the Assets or stages to which it is bound. |
+| Model | Holds a model name and invocation method, and can reference Skills and Rules. |
 
-Each Workflow stage has one assigned Role. Skills and Rules are bound where they are needed. A Skill can also be enabled for direct Runtime invocation. Asset kind and scope are fixed when it is created; to change either, create an Asset with the desired values and update its relationships.
+Each Workflow stage has one assigned Role and can optionally bind one Model. A Model-bound stage is an instruction to execute through that subagent; consecutive stages with the same Role and Model reuse the same subagent. Skills and Rules are bound where they are needed. A Skill can also be enabled for direct Runtime invocation. Asset kind and scope are fixed when it is created; to change either, create an Asset with the desired values and update its relationships.
 
 ```mermaid
 flowchart TD
@@ -102,6 +103,7 @@ flowchart TD
     W --> S2[Stage: review]
     S1 --> R1[Role: implementer]
     S2 --> R2[Role: reviewer]
+    S1 -. subagent .-> M1[Model: configured model]
     S1 -. uses .-> K1[Skill: implementation procedure]
     S2 -. uses .-> K2[Skill: review procedure]
     W -. shared instruction .-> Rule[Rule]
@@ -109,7 +111,7 @@ flowchart TD
 
 ## Move existing instructions into AACL
 
-The current application supports registering and organizing Assets in the UI or through MCP. It does not provide a folder-wide import wizard. During migration, compare same-named instructions by their actual responsibilities and procedures, classify each as a Workflow, Role, Skill, or Rule, and recreate only relationships present in the source method. Keep the originals until the registered Assets and generated Runtime entries have been checked.
+The current application supports registering and organizing Assets in the UI or through MCP. It does not provide a folder-wide import wizard. During migration, compare same-named instructions by their actual responsibilities and procedures, classify each as a Workflow, Role, Skill, Rule, or Model, and recreate only relationships present in the source method. Keep the originals until the registered Assets and generated Runtime entries have been checked.
 
 The [migration guide](docs/skill-migration.md) (Japanese) covers classification, registration, Runtime entries, and post-migration checks.
 

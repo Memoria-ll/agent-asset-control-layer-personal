@@ -6,12 +6,13 @@ import { backupData, exportData } from './maintenance.ts';
 import { assetSchema, bindingSchema, changeSchema, id, journalTemplate, provenanceSchema, scope, text } from './schema.ts';
 import type { Asset, Binding, ChangeSet, Decision, History, Insight, Journal, Project, Proposal, Run, RuntimeTarget, Snapshot } from './schema.ts';
 
-export const bootstrap = `AACLはWorkflow・Skill・Role・Ruleと、明示的なWorkflow実行・Journalによる改善を管理します。
+export const bootstrap = `AACLはWorkflow・Skill・Role・Rule・Modelと、明示的なWorkflow実行・Journalによる改善を管理します。
 通常の会話にWorkflow選択を催促せず、未選択の資産を適用しません。ユーザーが選択したWorkflowだけをaacl_run_startで開始します。
 aacl_project_resolveへ開いているProject rootを渡して完全一致で確認します。未登録の場合はaacl initで登録します。
 aacl_usecase_searchでWorkflowと直接起動Skillを探します。Skillの直接利用はaacl_skill_getだけを使い、Runや実行記録を作成しません。
 aacl_run_startから返るcontextHandleを、同じAI実行Contextの後続Run操作に必ず渡してください。別の会話のHandleを使わず、ユーザーへHandleの入力を求めません。
 ContextのSkill catalogから必要な本文・補助ファイルをaacl_run_skill_getで取得します。意味判断と開発操作はAI・Runtimeが行います。
+StageにModelが紐づいている場合、ContextのModel情報とsubagent指示に従ってそのStageを実行します。連続する同じRole・ModelのStageでは同じsubagentを継続します。
 Stageのcompletion_conditionを評価し、完了報告とaacl_run_getのversionを付けて許可された遷移を要求します。retry・returnとRun全体のfailedは別です。
 資産管理は検索・取得で対象を確かめ、Asset ID・scope・内容・理由・userRequestを明示して型付き操作を実行します。Assetを削除する前にaacl_asset_delete_previewの参照一覧をユーザーへ示し、削除と参照解除の明示承認を得てからaacl_asset_deleteを実行します。方針が曖昧なら具体案を示してユーザーへ確認します。認証情報は保存しません。
 書き込みのoperationIdにはUUIDを使用し、同じ操作の再送だけで再利用します。
@@ -36,7 +37,7 @@ export class Operations {
     const evidence = z.array(z.object({ type: text, reference: text }).strict()).default([]);
 
     read('bootstrap.get', 'AACLの利用案内とRuntimeに応じた入口を取得', { runtime: z.enum(['claude', 'codex']).optional() }, p => ({ instructions: bootstrap, runtime: p.runtime, entry: p.runtime === 'claude' ? 'Command' : 'Skill' }));
-    read('asset.list', 'Assetを種類・管理先・検索語で検索', { scope: scope.optional(), kind: z.enum(['workflow', 'skill', 'role', 'rule']).optional(), query: z.string().default(''), includeDeleted: z.boolean().default(false) }, p => ({ assets: store.list<Asset>('asset', p.scope).filter(a => (p.includeDeleted || !a.deletedAt) && (!p.kind || a.kind === p.kind) && `${a.name} ${a.description}`.toLowerCase().includes(p.query.toLowerCase())) }));
+    read('asset.list', 'Assetを種類・管理先・検索語で検索', { scope: scope.optional(), kind: z.enum(['workflow', 'skill', 'role', 'rule', 'model']).optional(), query: z.string().default(''), includeDeleted: z.boolean().default(false) }, p => ({ assets: store.list<Asset>('asset', p.scope).filter(a => (p.includeDeleted || !a.deletedAt) && (!p.kind || a.kind === p.kind) && `${a.name} ${a.description} ${a.kind === 'model' ? `${a.modelName} ${a.invocationMethod}` : ''}`.toLowerCase().includes(p.query.toLowerCase())) }));
     write('setup.skills', 'Journal・Journal Reviewの標準Skillを導入。導入済みの編集内容を保持', {}, () => installJournalSkills(core), true);
     read('asset.get', 'Assetの現在または過去revisionを取得', { assetId: id, revision: z.int().positive().optional() }, p => { const current = core.asset(p.assetId, true); return { asset: p.revision ? store.revision<Asset>(p.assetId, p.revision) : current }; });
     write('asset.save', 'Assetを作成・更新し履歴と由来を保存', { id: id.optional(), asset: assetSchema, provenance, revision: z.int().optional() }, p => core.applyChanges([{ type: 'asset.save', id: p.id, asset: p.asset }], p.provenance), true);

@@ -11,10 +11,11 @@ export const transitionSchema = z.object({
     type: z.enum(['next', 'return', 'retry', 'reject', 'complete']), label: text,
 }).strict();
 export const assetSchema = z.object({
-    kind: z.enum(['workflow', 'skill', 'role', 'rule']),
+    kind: z.enum(['workflow', 'skill', 'role', 'rule', 'model']),
     name: text, description: text, body: z.string().default(''),
     responsibilities: z.string().default(''), scope: scope.default('global'),
     useCase: z.boolean().default(false), taskType: z.string().default(''),
+    modelName: z.string().default(''), invocationMethod: z.string().default(''),
     metadata: z.record(z.string(), z.unknown()).default({}),
     supportingFiles: z.record(z.string(), z.string()).default({}),
     stages: z.array(stageSchema).default([]),
@@ -24,6 +25,10 @@ export const assetSchema = z.object({
     const fail = (message) => ctx.addIssue({ code: 'custom', message });
     if (a.kind === 'skill' && !a.body.trim())
         fail('Skillの本文は必須です。');
+    if (a.kind === 'model' && !a.modelName.trim())
+        fail('Model名は必須です。');
+    if (a.kind === 'model' && !a.invocationMethod.trim())
+        fail('呼び出し方は必須です。');
     if (a.kind !== 'skill' && a.useCase)
         fail('直接起動を設定できるのはSkillです。');
     if (a.kind === 'workflow') {
@@ -55,7 +60,7 @@ export const assetSchema = z.object({
 });
 export const bindingSchema = z.object({
     scope: scope.default('global'), sourceId: id, stageId: text.optional(), targetId: id,
-    purpose: z.enum(['reference', 'entry-role', 'stage-role']).default('reference'),
+    purpose: z.enum(['reference', 'entry-role', 'stage-role', 'stage-model']).default('reference'),
 }).strict();
 export const provenanceSchema = z.object({
     origin: z.enum(['ui', 'ai', 'cli', 'restore', 'proposal', 'init']),

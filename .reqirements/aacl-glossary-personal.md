@@ -9,11 +9,11 @@
 
 ### AACL
 
-Agent Asset Control Layerの略称。ユーザーがClaude Code / Codexで使う開発方法、知識、規則、役割をAssetとして管理し、Workflow Runと直接起動Skillの本文提供、Journal、改善を支援する個人向けシステム。
+Agent Asset Control Layerの略称。ユーザーがClaude Code / Codexで使う開発方法、知識、規則、役割、Model設定をAssetとして管理し、Workflow Runと直接起動Skillの本文提供、Journal、改善を支援する個人向けシステム。
 
 ### Asset
 
-AACLが管理する再利用可能なCanonical Asset。Workflow、Skill、Role、Ruleの4種がある。内容を実質的に取り下げる場合もAsset IDと紐づけを残し、本文に`処置なし`等の空内容を示す記述を保存する。
+AACLが管理する再利用可能なCanonical Asset。Workflow、Skill、Role、Rule、Modelの5種がある。内容を実質的に取り下げる場合もAsset IDと紐づけを残し、本文に`処置なし`等の空内容を示す記述を保存する。
 
 ### Asset ID
 
@@ -33,7 +33,7 @@ MCP接続時にAIへ渡すAACLの利用案内。AACLの責務、通常利用と�
 
 ### Canonical Asset
 
-AACLが正本として管理するWorkflow、Skill、Role、Rule。Runtime固有のCommandやSkillはCanonical Assetではなく、Canonical Assetを起動するための生成物である。
+AACLが正本として管理するWorkflow、Skill、Role、Rule、Model。Runtime固有のCommandやSkillはCanonical Assetではなく、Canonical Assetを起動するための生成物である。
 
 ### Capability
 
@@ -41,7 +41,7 @@ filesystem、shell、GitHub、browser、external API等、Runtimeが提供する
 
 ### Context
 
-Workflow RunでAIへ渡す実行情報。Workflow Definition、現在Stageとcompletion_condition、担当Role IDと責務、Stageの追加指示、明示参照されたRuleとSkill等を含む。Model名や成果物要件をAssetから自動的に合成しない。直接起動Skillの取得は指定Assetの本文を返す。
+Workflow RunでAIへ渡す実行情報。Workflow Definition、現在Stageとcompletion_condition、担当Role IDと責務、Stageの追加指示、明示参照されたRuleとSkill、指定Modelの固定情報、サブエージェント継続指示等を含む。直接起動Skillの取得は指定Assetの本文を返す。
 
 ### Context Handle
 
@@ -65,7 +65,7 @@ AIが完了判断や実行報告に添える根拠。Artifact、Snapshot、Repor
 
 ### Execution Snapshot
 
-Workflow Runの実行試行時に提供したContextと、その構成を保持する不変記録。Workflow revision、resolution revision boundary、Project、Role、利用対象Asset、提供情報、参照経路、未取得情報等を含む。Model情報は構造化して保持しない。
+Workflow Runの実行試行時に提供したContextと、その構成を保持する不変記録。Workflow revision、resolution revision boundary、Project、Role、利用対象Asset、提供情報、参照経路、未取得情報、指定Model、サブエージェント継続情報等を含む。
 
 ## G
 
@@ -101,7 +101,7 @@ Claude Code / CodexとAACL Coreを接続する主要なIntegration Interface。B
 
 ### Model
 
-ユーザーまたはAIが指定・報告するモデル名の文字列。Coreへ値が渡された場合はそのまま受け渡し、Model用recordやmetadataを作成しない。モデルの存在、利用可能性、provider、指定値と実使用値の一致は判断せず、モデルの選択と利用可否はユーザーとRuntime / AI側の責務とする。
+Workflow Stageから参照するCanonical Asset。`name`、`description`、`modelName`、`invocationMethod`を持ち、SkillまたはRuleを参照できる。外部Modelの存在、利用可能性、provider、指定値と実使用値の一致、実際の起動はRuntime / AI側の責務とする。
 
 ## O
 
@@ -135,7 +135,7 @@ Projectで共通して使うRuleの明示参照一覧。Rule本文は独立し�
 
 ### Role
 
-実行主体が何者として振る舞い、何を担うかを定義するCanonical Asset。責務、判断観点、成果責任を保持し、SkillとRuleを参照できる。モデル名が明示された場合は不透明な文字列として受け渡す。
+実行主体が何者として振る舞い、何を担うかを定義するCanonical Asset。責務、判断観点、成果責任を保持し、SkillとRuleを参照できる。Modelの選択はWorkflow StageのModel参照で定義する。
 
 ### Run
 
@@ -161,11 +161,11 @@ Run中に提供したContext、Asset、revision、参照経路、実行情報を
 
 ### schema
 
-Coreが受け付けるデータの構造と、保存時に確認する項目の定義。本実装ではSkill、Journal、Workflow、Stageをschema検証の対象とする。本文、completion_condition、コメント、根拠説明等の意味はschemaで判定しない。
+Coreが受け付けるデータの構造と、保存時に確認する項目の定義。本実装ではModelを含むAsset、Journal、Workflow、Stageをschema検証の対象とする。本文、completion_condition、コメント、根拠説明等の意味はschemaで判定しない。
 
 ### Stage
 
-Workflow内の工程であり、Workflowの実行単位。Stage固有の必須`completion_condition`を持ち、Runの現在位置として管理される。各Stageには担当Roleを1件割り当て、そのRoleの責務を基本とする。`additionalInstructions`は必要に応じて加える自由記述であり、Roleの責務と完了条件を補う。WorkflowがStage一覧と許可するtransitionを定義する。
+Workflow内の工程であり、Workflowの実行単位。Stage固有の必須`completion_condition`を持ち、Runの現在位置として管理される。各Stageには担当Roleを1件割り当て、そのRoleの責務を基本とする。任意でModelを1件割り当てると、そのModelをサブエージェントとして実行する。連続するStageで担当RoleとModelが同じ場合は同じサブエージェントへ依頼する。`additionalInstructions`は必要に応じて加える自由記述であり、Roleの責務と完了条件を補う。WorkflowがStage一覧と許可するtransitionを定義する。
 
 ## T
 
@@ -195,7 +195,7 @@ Skillが直接起動可能なUse Caseであることを示す設定値。trueへ
 
 ### Workflow
 
-複数のStageとtransitionからなる再利用可能な開発方法を定義するCanonical Asset。各Stageは担当Roleを1件、必須の`completion_condition`を持ち、任意の`additionalInstructions`でそのStageの作業を補足できる。
+複数のStageとtransitionからなる再利用可能な開発方法を定義するCanonical Asset。各Stageは担当Roleを1件、任意のModelを1件、必須の`completion_condition`を持ち、任意の`additionalInstructions`でそのStageの作業を補足できる。
 
 ### Workspace
 
@@ -229,4 +229,4 @@ Run開始時に固定する、Workflow、Asset、紐づけ、Project Commonの�
 
 ### 紐づけ
 
-Workflow / StageとRole / Skill / Rule、RoleとSkill / Rule、SkillとSkill等の明示的な参照関係。Coreは本文の意味から参照を追加・削除しない。モデル名はAsset間の紐づけではなく、不透明な文字列として扱う。
+Workflow / StageとRole / Skill / Rule / Model、RoleとSkill / Rule、ModelとSkill / Rule、SkillとSkill等の明示的な参照関係。Coreは本文の意味から参照を追加・削除しない。StageのModel参照はサブエージェント実行と、Role・Modelが連続して一致する場合の同一サブエージェント継続を表す。

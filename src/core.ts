@@ -65,13 +65,13 @@ export class Core {
   validateBinding(b: Omit<Binding, keyof Stamp | 'active'>) {
     this.assertScope(b.scope);
     const source = this.asset(b.sourceId), target = this.asset(b.targetId);
-    const allowed: Record<Asset['kind'], string[]> = { workflow: ['role', 'skill', 'rule'], role: ['skill', 'rule'], skill: ['skill'], rule: [] };
+    const allowed: Record<Asset['kind'], string[]> = { workflow: ['role', 'skill', 'rule', 'model'], role: ['skill', 'rule'], skill: ['skill'], rule: [], model: ['skill', 'rule'] };
     if (!allowed[source.kind].includes(target.kind)) throw new Error('このAssetの組み合わせは紐づけられません。');
     if ([source, target].some(a => a.scope !== 'global' && a.scope !== b.scope)) throw new Error('別ProjectのAssetは参照できません。');
     if (b.stageId && (source.kind !== 'workflow' || !source.stages.some(s => s.id === b.stageId))) throw new Error('指定されたStageがありません。');
-    if (b.purpose !== 'reference' && (source.kind !== 'workflow' || target.kind !== 'role')) throw new Error('担当RoleはWorkflowまたはStageに指定してください。');
-    if (b.purpose === 'entry-role' && b.stageId) throw new Error('entry roleはWorkflowに指定してください。');
-    if (b.purpose === 'stage-role' && !b.stageId) throw new Error('担当Stageを指定してください。');
+    if (b.purpose === 'entry-role' && (b.stageId || source.kind !== 'workflow' || target.kind !== 'role')) throw new Error('入口のRoleはWorkflowに指定してください。');
+    if (b.purpose === 'stage-role' && (!b.stageId || source.kind !== 'workflow' || target.kind !== 'role')) throw new Error('担当RoleはWorkflowのStageに指定してください。');
+    if (b.purpose === 'stage-model' && (!b.stageId || source.kind !== 'workflow' || target.kind !== 'model')) throw new Error('ModelはWorkflowのStageに指定してください。');
     if (source.id === target.id) throw new Error('Skillの循環参照は登録できません。');
   }
   assertStageRoles(workflow: Asset, scope: string) {
@@ -139,11 +139,13 @@ export class Core {
       } else if (change.type === 'binding.save') {
         const b = bindingSchema.parse(change.binding);
         const previous = change.id ? this.store.get<Binding>(change.id, 'binding') : undefined;
+        const target = this.asset(b.targetId);
         if (change.id && this.store.get<Binding>(change.id, 'binding').scope !== b.scope) throw new Error('紐づけの管理先は変更できません。');
         this.validateBinding(b);
         const peers = this.bindings(b.scope).filter(v => v.id !== change.id && v.sourceId === b.sourceId && v.stageId === b.stageId);
         if (peers.some(v => v.targetId === b.targetId && v.purpose === b.purpose)) throw new Error('同じ紐づけが存在します。');
         if (b.purpose !== 'reference' && peers.some(v => v.purpose === b.purpose)) throw new Error('担当Roleは1件です。既存の紐づけを付け替えてください。');
+        if (b.stageId && target.kind === 'model' && peers.some(v => this.asset(v.targetId).kind === 'model')) throw new Error('StageのModelは1件です。既存のModelを付け替えてください。');
         const graph = this.bindings(b.scope).filter(v => v.id !== change.id).concat({ ...b, id: '', active: true } as Binding);
         const visit = (id: string, trail: Set<string>) => {
           if (trail.has(id)) throw new Error('Skillの循環参照は登録できません。');
@@ -190,13 +192,16 @@ export class Core {
     });
     return { project, common, ...result };
   }
-  resolve(snapshot: Snapshot, stageId: string, roleId?: string): Context {
+  resolve(snapshot: Snapshot, stageId: string, roleId?: string, subagent?: { id: string; continuity: 'new' | 'same' }): Context {
     const { workflow, bindings, common } = snapshot;
     const stage = workflow.stages.find(s => s.id === stageId);
     if (!stage) throw new Error('SnapshotにStageが存在しません。');
     const stageRoleBindings = bindings.filter(b => b.sourceId === workflow.id && b.stageId === stageId && b.purpose === 'stage-role');
     if (stageRoleBindings.length !== 1) throw new Error(`このStageには担当Roleを1件指定してください: ${stageId}`);
     const stageRoleId = stageRoleBindings[0].targetId;
+    const stageModelBindings = bindings.filter(b => b.sourceId === workflow.id && b.stageId === stageId && (b.purpose === 'stage-model' || snapshot.assets.find(a => a.id === b.targetId)?.kind === 'model'));
+    if (stageModelBindings.length > 1) throw new Error(`このStageにはModelを1件まで指定できます: ${stageId}`);
+    const stageModelId = stageModelBindings[0]?.targetId;
     const assets = new Map(snapshot.assets.map(a => [a.id, a]));
     const chosen = new Map<string, Asset>(), resolution: Context['resolution'] = [];
     const seen = new Set<string>();
@@ -217,11 +222,15 @@ export class Core {
     for (const id of common?.ruleIds ?? []) walk(id, [`Project Common@${common!.revision}`], new Set(), 'Project Common');
     if (chosen.get(stageRoleId)?.kind !== 'role') throw new Error(`このStageの担当Roleを取得できません: ${stageId}`);
     if (roleId && (!chosen.has(roleId) || chosen.get(roleId)?.kind !== 'role')) throw new Error('このStageで利用対象になっているRoleを指定してください。');
+    const model = stageModelId ? chosen.get(stageModelId) : undefined;
+    if (stageModelId && model?.kind !== 'model') throw new Error(`このStageのModelを取得できません: ${stageId}`);
     return {
       runId: snapshot.runId, workflow, stage, stageRoleId,
+      ...(model ? { model } : {}),
       roles: [...chosen.values()].filter(a => a.kind === 'role'),
       rules: [...chosen.values()].filter(a => a.kind === 'rule'),
       skillCatalog: [...chosen.values()].filter(a => a.kind === 'skill').map(({ id, name, description, revision }) => ({ id, name, description, revision })),
+      ...(model && subagent ? { subagent: { id: subagent.id, roleId: stageRoleId, modelId: model.id, continuity: subagent.continuity, instruction: 'このStageは指定Modelをサブエージェントとして呼び出して実行する。直前のStageと担当Role・Modelが同じ場合は同じサブエージェントへ依頼する。' } } : {}),
       resolution, unavailable: [],
     };
   }
@@ -259,13 +268,16 @@ export class Core {
     const runId = randomUUID(), snapshotId = randomUUID(), contextHandle = randomUUID();
     const draft = { id: snapshotId, runId, boundary: this.store.boundary(), workflow, assets, bindings, common, project, runtime: input.runtime } as Snapshot;
     for (const stage of workflow.stages) this.resolve(draft, stage.id);
-    const initialContext = this.resolve(draft, workflow.entryStage);
+    const initialBaseContext = this.resolve(draft, workflow.entryStage);
+    const initialSubagentId = initialBaseContext.model ? randomUUID() : undefined;
+    const initialContext = this.resolve(draft, workflow.entryStage, undefined, initialSubagentId ? { id: initialSubagentId, continuity: 'new' } : undefined);
     const snapshot = this.store.put('snapshot', { ...draft, initialContext });
     const run = this.store.put('run', { id: runId, contextHandle, workflowId: workflow.id, workflowRevision: workflow.revision, projectId: project?.id, snapshotId,
       stageId: workflow.entryStage, status: 'active' as const, version: 1, runtime: input.runtime, instruction: input.instruction, target: input.target,
       taskType: workflow.taskType, lastActivity: new Date().toISOString(),
+      ...(initialBaseContext.model ? { subagentId: initialSubagentId, subagentRoleId: initialBaseContext.stageRoleId, subagentModelId: initialBaseContext.model.id, subagentContinuity: 'new' as const } : {}),
     }, scope);
-    this.event(run, 'started', { snapshotId });
+    this.event(run, 'started', { snapshotId, ...(initialBaseContext.model ? { subagentId: initialSubagentId, modelId: initialBaseContext.model.id } : {}) });
     this.deliver(run, 'context', initialContext, true, [workflow.id], workflow.revision, initialContext.roles.map(a => a.id));
     return { run, contextHandle, context: initialContext, snapshotId: snapshot.id };
   }
@@ -288,7 +300,7 @@ export class Core {
   }
   context(handle: string, roleId?: string, model?: string) {
     const run = this.run(handle), snapshot = this.store.get<Snapshot>(run.snapshotId, 'snapshot');
-    const context = this.resolve(snapshot, run.stageId, roleId);
+    const context = this.resolve(snapshot, run.stageId, roleId, run.subagentId && run.subagentContinuity ? { id: run.subagentId, continuity: run.subagentContinuity } : undefined);
     const payload = { ...context, ...(roleId ? { handoffRoleId: roleId } : {}), ...(model !== undefined ? { model } : {}) };
     this.deliver(run, roleId ? `role:${roleId}` : 'context', context, true, [snapshot.workflow.id, run.stageId], snapshot.workflow.revision, context.roles.map(a => a.id));
     return payload;
@@ -321,10 +333,16 @@ export class Core {
     const snapshot = this.store.get<Snapshot>(run.snapshotId, 'snapshot');
     const transition = snapshot.workflow.transitions.find(t => t.id === input.transitionId && t.from === run.stageId);
     if (!transition) throw new Error('現在のStageから許可されていない遷移です。');
+    const nextStageId = transition.to === 'completed' ? undefined : transition.to;
+    const nextContext = nextStageId ? this.resolve(snapshot, nextStageId) : undefined;
+    const sameSubagent = Boolean(nextContext?.model && run.subagentId && run.subagentRoleId === nextContext.stageRoleId && run.subagentModelId === nextContext.model.id);
+    const nextSubagentId = nextContext?.model ? (sameSubagent ? run.subagentId : randomUUID()) : undefined;
     const result = this.store.put('run', { ...run, status: transition.to === 'completed' ? 'completed' as const : 'active' as const,
       stageId: transition.to === 'completed' ? run.stageId : transition.to, version: run.version + 1,
+      ...(nextContext?.model ? { subagentId: nextSubagentId, subagentRoleId: nextContext.stageRoleId, subagentModelId: nextContext.model.id, subagentContinuity: sameSubagent ? 'same' as const : 'new' as const } : nextStageId ? { subagentId: undefined, subagentRoleId: undefined, subagentModelId: undefined, subagentContinuity: undefined } : { subagentId: run.subagentId, subagentRoleId: run.subagentRoleId, subagentModelId: run.subagentModelId, subagentContinuity: run.subagentContinuity }),
     }, run.projectId ?? 'global');
-    this.event(result, 'transition', { transition, report: input.report, evidence: input.evidence, comment: input.comment });
+    this.event(result, 'transition', { transition, report: input.report, evidence: input.evidence, comment: input.comment,
+      ...(nextContext?.model ? { subagentId: nextSubagentId, modelId: nextContext.model.id, continuity: sameSubagent ? 'same' : 'new' } : {}) });
     return { outcome: 'applied', run: result };
   }
   endRun(handle: string, status: 'cancelled' | 'failed', reason: string) {

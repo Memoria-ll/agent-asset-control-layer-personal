@@ -12,10 +12,11 @@ export const transitionSchema = z.object({
   type: z.enum(['next', 'return', 'retry', 'reject', 'complete']), label: text,
 }).strict();
 export const assetSchema = z.object({
-  kind: z.enum(['workflow', 'skill', 'role', 'rule']),
+  kind: z.enum(['workflow', 'skill', 'role', 'rule', 'model']),
   name: text, description: text, body: z.string().default(''),
   responsibilities: z.string().default(''), scope: scope.default('global'),
   useCase: z.boolean().default(false), taskType: z.string().default(''),
+  modelName: z.string().default(''), invocationMethod: z.string().default(''),
   metadata: z.record(z.string(), z.unknown()).default({}),
   supportingFiles: z.record(z.string(), z.string()).default({}),
   stages: z.array(stageSchema).default([]),
@@ -24,6 +25,8 @@ export const assetSchema = z.object({
 }).strict().superRefine((a, ctx) => {
   const fail = (message: string) => ctx.addIssue({ code: 'custom', message });
   if (a.kind === 'skill' && !a.body.trim()) fail('Skillの本文は必須です。');
+  if (a.kind === 'model' && !a.modelName.trim()) fail('Model名は必須です。');
+  if (a.kind === 'model' && !a.invocationMethod.trim()) fail('呼び出し方は必須です。');
   if (a.kind !== 'skill' && a.useCase) fail('直接起動を設定できるのはSkillです。');
   if (a.kind === 'workflow') {
     const stages = new Set(a.stages.map(s => s.id));
@@ -45,7 +48,7 @@ export const assetSchema = z.object({
 });
 export const bindingSchema = z.object({
   scope: scope.default('global'), sourceId: id, stageId: text.optional(), targetId: id,
-  purpose: z.enum(['reference', 'entry-role', 'stage-role']).default('reference'),
+  purpose: z.enum(['reference', 'entry-role', 'stage-role', 'stage-model']).default('reference'),
 }).strict();
 export const provenanceSchema = z.object({
   origin: z.enum(['ui', 'ai', 'cli', 'restore', 'proposal', 'init']),
@@ -103,11 +106,13 @@ export interface Run extends Stamp {
   contextHandle: string; workflowId: string; workflowRevision: number; projectId?: string;
   snapshotId: string; stageId: string; status: 'active' | 'completed' | 'cancelled' | 'failed';
   version: number; runtime: string; instruction: string; target: string; taskType: string; lastActivity: string;
+  subagentId?: string; subagentRoleId?: string; subagentModelId?: string; subagentContinuity?: 'new' | 'same';
 }
 export interface Resolution { assetId: string; revision: number; path: string[]; reason: string }
 export interface Context {
   runId: string; workflow: Asset; stage: z.infer<typeof stageSchema>; stageRoleId: string;
-  roles: Asset[]; rules: Asset[]; skillCatalog: { id: string; name: string; description: string; revision: number }[];
+  model?: Asset; roles: Asset[]; rules: Asset[]; skillCatalog: { id: string; name: string; description: string; revision: number }[];
+  subagent?: { id: string; roleId: string; modelId: string; continuity: 'new' | 'same'; instruction: string };
   resolution: Resolution[]; unavailable: { target: string; reason: string }[];
 }
 export interface Snapshot extends Stamp {
