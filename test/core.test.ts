@@ -10,7 +10,7 @@ import { Operations } from '../src/operations.ts';
 import { assetSchema, parseJournal } from '../src/schema.ts';
 import { backupData, exportData, restoreBackup } from '../src/maintenance.ts';
 import { relatedWorkflows, stageRoleBindingChanges, workflowDiagram } from '../web/view-model.ts';
-import type { Asset, Binding, ChangeSet, Context, Delivery, Insight, Journal, Project, Run, RuntimeTarget, Snapshot } from '../src/schema.ts';
+import type { Asset, Binding, ChangeSet, Context, Delivery, Insight, Journal, Project, ReviewItem, Run, RuntimeTarget, Snapshot } from '../src/schema.ts';
 
 const provenance = { origin: 'ai', userRequest: 'テスト用の明示依頼', reason: '挙動の確認' };
 function fixture(t: { after: (fn: () => void) => void }) {
@@ -295,6 +295,26 @@ test('C25: Markdown raw, duplicate headings, unknown fragments, fences, independ
   await assert.rejects(f.call('journal.write', { body: '関連づけなし' }), /Task/);
 });
 
+test('Review items keep direct Journal task links and independent decisions', async t => {
+  const f = fixture(t), result = await f.call<{ journal: Journal; insights: Insight[] }>('journal.write', { body: '## Task\n独立Review\n\n## 良かった点\n残す方法\n\n## 困った点\n直す詰まり' });
+  const compact = await f.call<{ reviewItems: (ReviewItem & { body?: string })[]; journals: Journal[]; insights: Insight[]; nextCursor: string | null }>('review.pending', { includeBodies: false, limit: 1 });
+  assert.equal(compact.reviewItems.length, 1); assert.equal(compact.reviewItems[0].body, undefined); assert.equal(compact.journals.length, 1); assert.equal(compact.insights[0].body, ''); assert.ok(compact.nextCursor);
+  const detailed = await f.call<{ reviewItem: ReviewItem; journalTask: Journal; insight: Insight }>('review.item.get', { reviewItemId: compact.reviewItems[0].id });
+  assert.equal(detailed.reviewItem.journalTaskId, result.journal.id); assert.equal(detailed.journalTask.id, result.journal.id); assert.equal(detailed.insight.id, compact.reviewItems[0].insightId);
+
+  await f.call('review.decide', { reviewItemId: compact.reviewItems[0].id, decision: 'deferred', note: '後で再確認' });
+  const second = (await f.call<{ reviewItems: ReviewItem[] }>('review.pending', { includeBodies: true })).reviewItems.find(item => item.insightId !== compact.reviewItems[0].insightId)!;
+  await f.call('review.decide', { reviewItemId: second.id, decision: 'approved', note: '採用' });
+  assert.equal(f.store.get<Insight>(second.insightId).status, 'processed');
+  assert.equal(f.store.get<ReviewItem>(compact.reviewItems[0].id).status, 'pending');
+  assert.equal(f.store.get<Journal>(result.journal.id).reviewStatus, 'pending');
+
+  await f.call('review.decide', { reviewItemId: compact.reviewItems[0].id, decision: 'rejected', note: '今回は見送る' });
+  assert.equal(f.store.get<Insight>(second.insightId).status, 'processed');
+  assert.equal(f.store.get<Insight>(compact.reviewItems[0].insightId).status, 'rejected');
+  assert.equal(f.store.get<Journal>(result.journal.id).reviewStatus, 'processed');
+});
+
 test('C01 C26 C27 C28 C35: review approval applies changes and selected insights atomically; next Run adopts revision', async t => {
   const f = fixture(t), w = await f.workflow(), skill = await f.asset('skill');
   await f.bind(w, skill);
@@ -302,6 +322,10 @@ test('C01 C26 C27 C28 C35: review approval applies changes and selected insights
   const journal = await f.call<{ journal: Journal; insights: Insight[] }>('journal.write', { contextHandle: r.contextHandle, body: '## 困った点\n改善する部分\n\n保留する部分' });
   assert.equal(journal.journal.snapshotId, r.snapshotId); assert.equal(journal.journal.assetRevisions?.find(a => a.id === skill.id)?.revision, 1);
   const proposal = await f.call<{ proposal: { id: string } }>('proposal.save', { title: '改善', observedContext: '実際の観測', proposedChange: '本文を更新', reason: '気づきに対応', evidenceJournalIds: [journal.journal.id], reviewedJournalIds: [journal.journal.id], affectedAssetIds: [skill.id], affectedBindingIds: [], affectedProjectIds: [], changes: [{ type: 'asset.save', id: skill.id, asset: { ...f.core.assetPayload(skill), body: '改善後' } }], insightIds: [journal.insights[0].id] });
+  const linked = await f.call<{ reviewItem: ReviewItem }>('review.item.get', { reviewItemId: f.store.list<ReviewItem>('review-item').find(item => item.insightId === journal.insights[0].id)!.id });
+  assert.deepEqual(linked.reviewItem.proposalIds, [proposal.proposal.id]);
+  const proposalSummary = await f.call<{ proposal: { changes?: unknown[] } }>('proposal.get', { proposalId: proposal.proposal.id });
+  assert.equal('changes' in proposalSummary.proposal, false);
   await assert.rejects(f.call('proposal.apply', { proposalId: proposal.proposal.id }), /承認/);
   await f.call('proposal.decide', { proposalId: proposal.proposal.id, choice: 'approved', note: '変更を承認' });
   assert.equal(f.core.asset(skill.id).revision, 1);

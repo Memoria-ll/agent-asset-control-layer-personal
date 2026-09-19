@@ -15,7 +15,7 @@ Stageのcompletion_conditionを評価し、完了報告とaacl_run_getのversion
 資産管理は検索・取得で対象を確かめ、Asset ID・scope・内容・理由・userRequestを明示して型付き操作を実行します。Assetを削除する前にaacl_asset_delete_previewの参照一覧をユーザーへ示し、削除と参照解除の明示承認を得てからaacl_asset_deleteを実行します。方針が曖昧なら具体案を示してユーザーへ確認します。認証情報は保存しません。
 書き込みのoperationIdにはUUIDを使用し、同じ操作の再送だけで再利用します。
 気づきがあればaacl_journal_templateのMarkdownでaacl_journal_writeへ送ります。Core IDは本文に書かず、contextHandleまたは終了後のpostRunIdを操作入力に指定します。Run外のJournalにはTaskを指定します。
-Journal Reviewはユーザーが明示的に開始します。Review自体のRunを作らず、aacl_review_pendingと関連するSnapshot・History・Provenanceを参照します。
+Journal Reviewはユーザーが明示的に開始します。Review自体のRunを作らず、aacl_review_pendingで要約と関連IDを取得し、必要な対象だけaacl_review_item_get・aacl_proposal_getと関連するSnapshot・History・Provenanceを参照します。提案を伴わない判断はaacl_review_decideまたはaacl_review_decide_bulkで直接記録します。
 提案には対象変更・理由・根拠Journal・レビューしたJournal一覧・処理する気づきを明示します。aacl_proposal_decideでユーザー判断を記録し、承認後aacl_proposal_applyを実行します。保留の気づきは残します。`;
 export class Operations {
     core;
@@ -87,19 +87,27 @@ export class Operations {
         read('journal.list', 'Journalを一覧', {}, () => ({ journals: store.list('journal'), insights: store.list('insight') }));
         read('journal.get', 'Journalと関連する気づきを取得', { journalId: id }, p => ({ journal: store.get(p.journalId, 'journal'), insights: store.list('insight').filter(i => i.journalId === p.journalId) }));
         write('journal.write', 'Markdown原文を保持しRunまたはTaskへ関連づけ', { body: z.string().min(1).refine(s => s.trim().length > 0), contextHandle: id.optional(), postRunId: id.optional(), task: text.optional() }, p => core.writeJournal(p));
-        read('review.pending', '新規Journalと保留中の気づきを取得', {}, () => core.review());
-        write('insight.status', '気づき単位の保留・処理済み・却下を指定', { insightId: id, status: z.enum(['pending', 'processed', 'rejected']) }, p => ({ insight: store.put('insight', { ...store.get(p.insightId, 'insight'), status: p.status }) }));
-        read('proposal.list', '改善提案・ユーザー判断・適用結果を一覧', {}, () => ({ proposals: store.list('proposal'), decisions: store.list('decision'), changeSets: store.list('changeset').filter(c => c.proposalId) }));
+        read('review.pending', 'Review項目を関連ID中心で取得。必要に応じて本文・変更内容を含める', {
+            status: z.enum(['pending', 'processed', 'rejected']).default('pending'), projectId: id.optional(),
+            include: z.array(z.enum(['journalTask', 'insights', 'proposalRefs'])).default(['journalTask', 'insights', 'proposalRefs']),
+            includeBodies: z.boolean().default(false), includeChanges: z.boolean().default(false), limit: z.int().positive().max(100).default(100), cursor: z.string().nullable().optional(),
+        }, p => core.review(p));
+        read('review.item.get', 'Review項目と直接紐づくJournal task・Insight・提案を取得', { reviewItemId: id, includeChanges: z.boolean().default(false) }, p => core.reviewItemGet(p.reviewItemId, p.includeChanges));
+        write('review.decide', 'Review項目、Insight、直接紐づくJournal taskを同時に判断', { reviewItemId: id, decision: z.enum(['approved', 'deferred', 'rejected']), note: z.string().default('') }, p => core.decideReview(p));
+        write('review.decide.bulk', '複数のReview項目を一つの判断として一括更新', { updates: z.array(z.object({ reviewItemId: id, decision: z.enum(['approved', 'deferred', 'rejected']), note: z.string().default('') }).strict()).min(1).max(100) }, p => core.decideReviewBulk(p.updates));
+        write('insight.status', '気づき単位の保留・処理済み・却下を指定', { insightId: id, status: z.enum(['pending', 'processed', 'rejected']) }, p => core.updateInsightStatus(p.insightId, p.status));
+        read('proposal.list', '改善提案・ユーザー判断・適用結果を一覧', { includeChanges: z.boolean().default(false) }, p => ({ proposals: store.list('proposal').map(proposal => {
+                if (p.includeChanges)
+                    return proposal;
+                const { changes: _changes, ...summary } = proposal;
+                return summary;
+            }), decisions: store.list('decision'), changeSets: store.list('changeset').filter(c => c.proposalId) }));
+        read('proposal.get', '改善提案を関連判断・適用結果とともに取得', { proposalId: id, includeChanges: z.boolean().default(false) }, p => core.proposalGet(p.proposalId, p.includeChanges));
         write('proposal.save', '具体的な変更と根拠を含む改善提案を保存', {
             id: id.optional(), title: text, observedContext: text, proposedChange: text, reason: text,
             evidenceJournalIds: z.array(id).min(1), reviewedJournalIds: z.array(id).min(1), affectedAssetIds: z.array(id), affectedBindingIds: z.array(id), affectedProjectIds: z.array(id), changes: z.array(changeSchema).min(1), insightIds: z.array(id),
         }, p => { const { id, ...proposal } = p; return core.saveProposal(proposal, id); });
-        write('proposal.decide', '提案へのユーザー判断を記録。適用と気づきの処理は別操作', { proposalId: id, choice: z.enum(['approved', 'deferred', 'rejected']), note: text }, p => {
-            store.get(p.proposalId, 'proposal');
-            if (store.list('changeset').some(c => c.proposalId === p.proposalId))
-                throw new Error('適用済みの提案です。');
-            return { decision: store.put('decision', p) };
-        });
+        write('proposal.decide', '提案へのユーザー判断と対象Review項目の状態を同時に記録', { proposalId: id, choice: z.enum(['approved', 'deferred', 'rejected']), note: text }, p => core.decideProposal(p.proposalId, p.choice, p.note));
         write('proposal.apply', '承認済み変更の適用と対象の気づき処理を一括実行', { proposalId: id }, p => core.applyProposal(p.proposalId), true);
         write('changeset.apply', '一つの意思決定による複数変更を一括保存', { changes: z.array(changeSchema).min(1), provenance }, p => core.applyChanges(p.changes, p.provenance), true);
         write('changeset.restore', 'Change Set適用前の内容を新revisionとして復元', { changeSetId: id }, p => core.restoreChangeSet(p.changeSetId), true);

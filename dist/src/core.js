@@ -442,18 +442,85 @@ export class Core {
         if (!run && !task)
             throw new Error('Runを指定しないJournalにはTaskが必要です。');
         const snapshot = run ? this.store.get(run.snapshotId, 'snapshot') : undefined;
-        const journal = this.store.put('journal', { raw: input.body, parsed, task, runId: run?.id, snapshotId: snapshot?.id, projectId: run?.projectId,
+        const journal = this.store.put('journal', { raw: input.body, parsed, task, reviewStatus: 'pending', runId: run?.id, snapshotId: snapshot?.id, projectId: run?.projectId,
             stageId: run?.stageId, workflowRevision: snapshot?.workflow.revision, assetRevisions: snapshot?.assets.map(a => ({ id: a.id, revision: a.revision })),
-            bindingRevisions: snapshot?.bindings.map(b => ({ id: b.id, revision: b.revision })),
-        }, run?.projectId ?? 'global');
+            bindingRevisions: snapshot?.bindings.map(b => ({ id: b.id, revision: b.revision })), }, run?.projectId ?? 'global');
         const insights = parsed.insights.map(i => this.store.put('insight', { journalId: journal.id, ...i, status: 'pending' }));
+        for (const insight of insights)
+            this.store.put('review-item', { journalId: journal.id, journalTaskId: journal.id, insightId: insight.id, projectId: journal.projectId, heading: insight.heading, body: insight.body, status: 'pending', lastDecision: 'none', proposalIds: [] }, journal.projectId ?? 'global');
         return { journal, insights };
     }
-    review() {
-        const insights = this.store.list('insight').filter(i => i.status === 'pending');
-        const reviewed = new Set(this.store.list('proposal').flatMap(p => p.reviewedJournalIds));
-        const journals = this.store.list('journal').filter(j => !reviewed.has(j.id) || insights.some(i => i.journalId === j.id));
-        return { journals, insights };
+    reviewItemForInsight(insightId, create = false) {
+        const existing = this.store.list('review-item').find(item => item.insightId === insightId);
+        if (existing || !create)
+            return existing;
+        const insight = this.store.get(insightId, 'insight'), journal = this.store.get(insight.journalId, 'journal');
+        return this.store.put('review-item', { journalId: journal.id, journalTaskId: journal.id, insightId: insight.id, projectId: journal.projectId, heading: insight.heading, body: insight.body, status: insight.status, lastDecision: insight.status === 'processed' ? 'approved' : insight.status === 'rejected' ? 'rejected' : 'none', proposalIds: [] }, journal.projectId ?? 'global');
+    }
+    updateJournalReviewStatus(journalId) {
+        const journal = this.store.get(journalId, 'journal'), items = this.store.list('review-item').filter(item => item.journalId === journalId);
+        const reviewStatus = items.some(item => item.status === 'pending') || !items.length ? 'pending' : items.some(item => item.status === 'processed') ? 'processed' : 'rejected';
+        if (journal.reviewStatus === reviewStatus)
+            return journal;
+        return this.store.put('journal', { ...journal, reviewStatus }, journal.projectId ?? 'global');
+    }
+    proposalSummary(proposal) {
+        const { changes: _changes, ...summary } = proposal;
+        return summary;
+    }
+    updateReviewState(insightId, status, lastDecision, note = '') {
+        const insight = this.store.get(insightId, 'insight'), item = this.reviewItemForInsight(insightId, true);
+        const updatedInsight = this.store.put('insight', { ...insight, status });
+        const updatedItem = this.store.put('review-item', { ...item, status, lastDecision, lastNote: note }, item.projectId ?? 'global');
+        const journalTask = this.updateJournalReviewStatus(item.journalId);
+        return { reviewItem: updatedItem, insight: updatedInsight, journalTask };
+    }
+    updateInsightStatus(insightId, status) {
+        const decision = status === 'processed' ? 'approved' : status === 'rejected' ? 'rejected' : 'none';
+        return this.updateReviewState(insightId, status, decision);
+    }
+    decideReview(input) {
+        const stored = this.store.maybe(input.reviewItemId), item = stored?.insightId ? stored : this.reviewItemForInsight(input.reviewItemId, true);
+        if (!item)
+            throw new Error(`Review項目が見つかりません: ${input.reviewItemId}`);
+        const status = input.decision === 'approved' ? 'processed' : input.decision === 'rejected' ? 'rejected' : 'pending';
+        return this.updateReviewState(item.insightId, status, input.decision, input.note);
+    }
+    decideReviewBulk(updates) {
+        const ids = new Set();
+        const results = [];
+        for (const update of updates) {
+            if (ids.has(update.reviewItemId))
+                throw new Error('一括判断に同じReview項目を重複指定できません。');
+            ids.add(update.reviewItemId);
+            results.push(this.decideReview(update));
+        }
+        return { updates: results };
+    }
+    review(input = {}) {
+        const include = input.include ?? ['journalTask', 'insights', 'proposalRefs'], includeBodies = input.includeBodies ?? false;
+        const allInsights = this.store.list('insight'), journalsById = new Map(this.store.list('journal').map(journal => [journal.id, journal])), insightItems = new Map(this.store.list('review-item').map(item => [item.insightId, item]));
+        const items = allInsights.map(insight => insightItems.get(insight.id) ?? this.reviewItemForInsight(insight.id, false) ?? { id: insight.id, revision: insight.revision, createdAt: insight.createdAt, updatedAt: insight.updatedAt, journalId: insight.journalId, journalTaskId: insight.journalId, insightId: insight.id, projectId: journalsById.get(insight.journalId)?.projectId, heading: insight.heading, body: insight.body, status: insight.status, lastDecision: insight.status === 'processed' ? 'approved' : insight.status === 'rejected' ? 'rejected' : 'none', proposalIds: [] }).filter(item => !input.status || item.status === input.status).filter(item => !input.projectId || item.projectId === input.projectId);
+        const cursorIndex = input.cursor ? items.findIndex(item => item.id === input.cursor) : -1;
+        const start = cursorIndex < 0 ? 0 : cursorIndex + 1, page = items.slice(start, start + (input.limit ?? 100));
+        const journals = include.includes('journalTask') ? this.store.list('journal').filter(journal => page.some(item => item.journalTaskId === journal.id)) : [];
+        const insights = include.includes('insights') ? allInsights.filter(insight => page.some(item => item.insightId === insight.id)).map(insight => includeBodies ? insight : { ...insight, body: '' }) : [];
+        const proposalIds = [...new Set(page.flatMap(item => item.proposalIds ?? []))];
+        const proposalRefs = include.includes('proposalRefs') ? this.store.list('proposal').filter(proposal => proposalIds.includes(proposal.id)).map(proposal => input.includeChanges ? proposal : this.proposalSummary(proposal)) : [];
+        const reviewItems = page.map(({ body, ...item }) => includeBodies ? { ...item, body } : item);
+        return { reviewItems, journals, insights, proposalRefs, nextCursor: start + page.length < items.length ? page.at(-1)?.id ?? null : null };
+    }
+    reviewItemGet(reviewItemId, includeChanges = false) {
+        const stored = this.store.maybe(reviewItemId), item = stored?.insightId ? stored : this.reviewItemForInsight(reviewItemId, true);
+        if (!item)
+            throw new Error(`Review項目が見つかりません: ${reviewItemId}`);
+        const journal = this.store.get(item.journalTaskId, 'journal'), insight = this.store.get(item.insightId, 'insight'), proposalIds = item.proposalIds ?? [];
+        const proposals = this.store.list('proposal').filter(proposal => proposalIds.includes(proposal.id)).map(proposal => includeChanges ? proposal : this.proposalSummary(proposal));
+        return { reviewItem: item, journalTask: journal, insight, proposals };
+    }
+    proposalGet(proposalId, includeChanges = false) {
+        const proposal = this.store.get(proposalId, 'proposal'), decision = this.store.list('decision').find(item => item.proposalId === proposalId);
+        return { proposal: includeChanges ? proposal : this.proposalSummary(proposal), decision, changeSets: this.store.list('changeset').filter(changeSet => changeSet.proposalId === proposalId) };
     }
     saveProposal(input, proposalId) {
         if (proposalId) {
@@ -474,7 +541,23 @@ export class Core {
             if (!input.evidenceJournalIds.includes(insight.journalId))
                 throw new Error('処理対象の気づきには根拠Journalを指定してください。');
         }
-        return { proposal: this.store.put('proposal', { ...input, id: proposalId }) };
+        const proposal = this.store.put('proposal', { ...input, id: proposalId });
+        for (const id of input.insightIds) {
+            const item = this.reviewItemForInsight(id, true);
+            this.store.put('review-item', { ...item, proposalIds: [...new Set([...(item.proposalIds ?? []), proposal.id])] }, item.projectId ?? 'global');
+        }
+        return { proposal };
+    }
+    decideProposal(proposalId, choice, note) {
+        const proposal = this.store.get(proposalId, 'proposal');
+        if (this.store.list('changeset').some(c => c.proposalId === proposalId))
+            throw new Error('適用済みの提案です。');
+        for (const id of proposal.insightIds)
+            if (this.store.get(id, 'insight').status !== 'pending')
+                throw new Error('処理対象の気づきの状態が変更されています。');
+        const decision = this.store.put('decision', { proposalId, choice, note });
+        const updates = proposal.insightIds.map(id => this.updateReviewState(id, choice === 'rejected' ? 'rejected' : 'pending', choice === 'approved' ? 'approved' : choice === 'deferred' ? 'deferred' : 'rejected', note));
+        return { decision, updates };
     }
     applyProposal(proposalId) {
         const p = this.store.get(proposalId, 'proposal');
@@ -487,9 +570,8 @@ export class Core {
             if (this.store.get(id, 'insight').status !== 'pending')
                 throw new Error('処理対象の気づきの状態が変更されています。');
         const result = this.applyChanges(p.changes, { origin: 'proposal', reason: p.reason, userRequest: decision.note, sources: p.evidenceJournalIds.map(reference => ({ type: 'journal', reference })), proposedBy: 'Journal Review', decision: decision.id }, p.id, decision.id);
-        for (const id of p.insightIds)
-            this.store.put('insight', { ...this.store.get(id, 'insight'), status: 'processed' });
-        return result;
+        const reviewUpdates = p.insightIds.map(id => this.updateReviewState(id, 'processed', 'approved', decision.note));
+        return { ...result, reviewUpdates };
     }
     restoreAsset(assetId, revision) {
         const old = this.store.revision(assetId, revision);

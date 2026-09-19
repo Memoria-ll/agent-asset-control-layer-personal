@@ -121,8 +121,9 @@ export interface Snapshot extends Stamp {
 }
 export interface Delivery extends Stamp { runId: string; snapshotId: string; stageId: string; roleIds: string[]; target: string; assetRevision?: number; path: string[]; success: boolean; content: unknown; reason?: string; bytes: number }
 export interface RunEvent extends Stamp { runId: string; type: string; data: unknown }
-export interface Journal extends Stamp { raw: string; parsed: ReturnType<typeof parseJournal>; task: string; runId?: string; snapshotId?: string; projectId?: string; stageId?: string; workflowRevision?: number; assetRevisions?: { id: string; revision: number }[]; bindingRevisions?: { id: string; revision: number }[] }
+export interface Journal extends Stamp { raw: string; parsed: ReturnType<typeof parseJournal>; task: string; reviewStatus: 'pending' | 'processed' | 'rejected'; runId?: string; snapshotId?: string; projectId?: string; stageId?: string; workflowRevision?: number; assetRevisions?: { id: string; revision: number }[]; bindingRevisions?: { id: string; revision: number }[] }
 export interface Insight extends Stamp { journalId: string; heading: string; body: string; status: 'pending' | 'processed' | 'rejected' }
+export interface ReviewItem extends Stamp { journalId: string; journalTaskId: string; insightId: string; projectId?: string; heading: string; body: string; status: 'pending' | 'processed' | 'rejected'; lastDecision: 'none' | 'approved' | 'deferred' | 'rejected'; lastNote?: string; proposalIds: string[] }
 export interface Proposal extends Stamp { title: string; observedContext: string; proposedChange: string; reason: string; evidenceJournalIds: string[]; reviewedJournalIds: string[]; affectedAssetIds: string[]; affectedBindingIds: string[]; affectedProjectIds: string[]; changes: Change[]; insightIds: string[] }
 export interface Decision extends Stamp { proposalId: string; choice: 'approved' | 'deferred' | 'rejected'; note: string }
 export interface History extends Stamp { entityId: string; kind: string; before: number | null; after: number; changeSetId: string; restoredFrom?: number }

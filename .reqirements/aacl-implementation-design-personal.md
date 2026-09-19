@@ -147,14 +147,14 @@ Claude Code / Codex (Windows または同一WSL内のLinux)
 - AIが報告した実利用はJournal内の該当気づきとして記録し、Context Handleから解決したRunに対応するSnapshotと関連Asset revisionへ結び付ける。Resolutionの対象または提供記録だけから実利用を判定しない。
 - Parserは固定見出しを文字列として照合する。見出し対応、重複見出しの順序連結、未知見出しの自由記述格納、原文保存をunit testで固定する。
 - Parseに失敗した断片を破棄・推測分類しない。raw bodyと構造化部分を同一Journal revisionへ保存する。
-- Review対象の気づきはJournal全体と別の識別単位で保持し、それぞれを`pending`、`processed`、`rejected`の状態で管理する。同じJournal内の各気づきは独立して状態更新できる。
+- Review対象の気づきはJournal全体と別の`ReviewItem`識別単位で保持し、`journalTaskId`、`journalId`、`insightId`を直接関連づける。各ReviewItemは`pending`、`processed`、`rejected`と`lastDecision`を持ち、Journal taskにはReviewItem全体の集約`reviewStatus`を保存する。同じJournal内の各気づきは独立して状態更新できる。
 
 ### 7.2 Journal ReviewとProposal
 
-- Journal Review用のRead operationは新しいJournalと`pending`の気づきを返し、関連するSnapshot、Run進行記録、Asset・紐づけの履歴、Provenanceを参照可能にする。保留中の気づきは次回のReadにも含める。
+- Journal Review用のRead operationは`status`、Project、`limit`、`cursor`、関連データの`include`、本文・変更内容のinclude指定で一覧を絞り、ReviewItemの要約と`journalTaskId`・`insightId`・Proposal IDを返す。変更内容や履歴は`review.item.get`と`proposal.get`で対象を指定して取得し、関連するSnapshot、Run進行記録、Asset・紐づけの履歴、Provenanceを参照可能にする。保留中の気づきは次回のReadにも含める。
 - Journal ReviewそのもののRun、Snapshot、実行履歴recordは作らない。Reviewで扱ったJournal一覧はProposal作成時に渡して保存する。
 - Proposalはobserved context、proposed change、reason、evidence Journal、affected assets、影響する紐づけとProjectを保持する。Proposalの対象変更、根拠、Reviewで扱ったJournal一覧を明示する。
-- Proposal、Proposalへのユーザー判断、insight status、Change Set relationは別recordとして保存する。提案の判断だけで気づきの状態やCanonical Stateを暗黙に変更しない。
+- Proposal、Proposalへのユーザー判断、ReviewItem、insight status、Journal task、Change Set relationは別recordとして保存する。提案の承認時は適用完了までReviewItemとInsightを`pending`のまま保ち、`proposal.apply`で変更適用と対象ReviewItem・Insight・Journal taskの更新を同じtransactionで行う。提案を伴わないReview判断はReviewItem単位の操作で3対象を同じtransactionで更新する。
 - 気づき単位で保留・処理済み・却下を更新できる。一部だけを処理した場合、未処理の気づきは`pending`のまま次回Reviewへ引き継ぐ。
 - 合意した変更の適用と、その変更に対応する気づきの`processed`更新は同一DB transactionとする。対象Journalと気づきを限定し、同じJournal内の保留分を処理済みにしない。重複操作はoperation IDで冪等に扱う。
 

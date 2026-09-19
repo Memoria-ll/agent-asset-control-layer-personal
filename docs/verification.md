@@ -17,7 +17,7 @@
 | C18 | `run.get`、`run.transition`、`run.cancel`、`run.fail` | duplicate／stale、自己ループ、終端状態、読み取りによる活動時刻、timeout |
 | C20〜C24 | `context.*`、`run.skill.get`、`run.inspect`、`run.report` | 不変Snapshot、更新後も固定revision、明示参照のみ、取得失敗の理由、提供と使用報告の区別 |
 | C25 | `journal.template`、`journal.write`、`insight.status` | TaskまたはRun必須、原文、未知・重複見出し、コードフェンス、個別の気づき状態 |
-| C26、C27 | `review.pending`、`proposal.*` | 承認前の適用拒否、判断と適用の分離、保留の持ち越し、Review用Runを作らない |
+| C26、C27 | `review.pending`、`review.item.get`、`review.decide*`、`proposal.*` | ReviewItemの絞り込み・詳細分離、直接紐づくJournal task / Insightの同一transaction更新、承認前の適用拒否、判断と適用の分離、保留の持ち越し、Review用Runを作らない |
 | C29 | `asset.restore`、`changeset.restore` | 過去内容を新revisionとして復元、復元元の記録 |
 | C30、C31 | `diagnostics.get`、`costs.get` | 繰り返すretry、提供した内容だけのUTF-8バイト量、未取得本文・直接Skill利用の除外 |
 | C32 | MCP `tools/list`・`tools/call` | 用途別typed tool、Handle必須schema、protocol metadata、Readで資産revisionを変更しない |
