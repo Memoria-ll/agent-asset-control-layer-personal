@@ -89,7 +89,7 @@ An Asset holds reusable instructions or knowledge. Each Asset has an ID, kind, r
 
 | Kind | Purpose |
 | --- | --- |
-| Workflow | Defines stages, allowed transitions, assigned Roles, and completion conditions. |
+| Workflow | Defines stages, allowed transitions and conditions, and assigned Roles. |
 | Role | Defines the responsibility and expected output for a Workflow stage. |
 | Skill | Holds reusable procedures or knowledge, with optional supporting files. |
 | Rule | Holds instructions shared by the Assets or stages to which it is bound. |
