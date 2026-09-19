@@ -12,11 +12,11 @@
 | C09、C19 | `asset.save`、`run.transition` | Stage完了条件必須、遷移元・先・種別、許可されていない遷移の拒否、完了報告 |
 | C11、C12、C13 | `context.get`、`context.handoff` | Role責務と明示Rule、指定Modelの固定情報とサブエージェント継続、分類、Capabilityを入力契約へ追加しない |
 | C14、C15、C28 | `asset.save`、`changeset.preview`、`changeset.apply`、`history.get` | 依頼・理由の保存、完全Assetの全置換、expectedRevisionによる一括Conflict、UI／MCPの共通処理、通常利用をRunにしない |
-| C16、C34 | `runtime.*`、`setup.skills` | Skillのname・description・IDだけを持つ入口、名称変更、useCase解除、衝突検出、設定先管理解除後のファイル保持、ユーザー所有の定義 |
+| C16、C34 | `runtime.*`、`setup.skills` | Skillのname・description・IDだけを持つ入口、通常Skillの名称変更、標準Journal Skillの名称変更・削除拒否、journalの直接起動除外、useCase解除、衝突検出、設定先管理解除後のファイル保持、ユーザー所有の定義 |
 | C17 | `run.start`とRun単位の各操作 | 異なるHandle、並行HTTP／MCP要求のContextと状態の分離 |
 | C18 | `run.get`、`run.transition`、`run.cancel`、`run.fail` | duplicate／stale、自己ループ、終端状態、読み取りによる活動時刻、timeout |
 | C20〜C24 | `context.*`、`run.skill.get`、`run.inspect`、`run.report` | 不変Snapshot、更新後も固定revision、明示参照のみ、取得失敗の理由、提供と使用報告の区別 |
-| C25 | `journal.template`、`journal.write`、`insight.status` | TaskまたはRun必須、原文、未知・重複見出し、コードフェンス、個別の気づき状態 |
+| C25 | `journal.template`、`journal.write`、`insight.status`、`settings.save` | Journal記録ON/OFF、TaskまたはRun必須、原文、未知・重複見出し、コードフェンス、個別の気づき状態 |
 | C26、C27 | `review.pending`、`review.item.get`、`review.decide*`、`proposal.*` | ReviewItemの絞り込み・詳細分離、直接紐づくJournal task / Insightの同一transaction更新、承認前の適用拒否、判断と適用の分離、保留の持ち越し、Review用Runを作らない |
 | C29 | `asset.restore`、`changeset.restore` | 過去内容を新revisionとして復元、復元元の記録 |
 | C30、C31 | `diagnostics.get`、`costs.get` | 繰り返すretry、提供した内容だけのUTF-8バイト量、未取得本文・直接Skill利用の除外 |

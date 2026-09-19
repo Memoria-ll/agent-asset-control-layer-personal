@@ -341,9 +341,13 @@ Bootstrapは繰り返し取得しても同じ案内として扱う。通常会�
 
 接続先で使う起動用表現は、Claude CodeではCommand、CodexではSkillとし、Canonical Assetを参照する入口として扱う。これらのRuntime固有の起動用表現と、Canonical AssetとしてのSkillを区別する。
 
+初期導入する`journal`と`journal-review`は標準Skillとして扱い、どちらも名称変更と削除を禁止する。本文、description、explanationは利用者が編集できる。`journal`は`useCase=false`としてRuntimeの直接起動入口を作らず、`journal-review`だけをユーザーが明示的に起動する入口とする。
+
 Runtime設定先には、そのscopeに属する各Workflowと`useCase=true`のSkillだけを入口として配置する。Claude Codeでは`.claude/commands/`配下に起動用Commandを、Codexでは`.codex/skills/`配下に起動用Skillを生成する。Global scopeの入口はGlobal設定先に、Project scopeの入口は該当Project内に配置する。入口名は対象Asset名をRuntimeで使える形式に整えて生成し、同一設定先で名前が衝突する場合だけAsset IDを末尾に付ける。CodexのCanonical Skill入口の`SKILL.md`には`name`と`description`を、Workflow入口には`name`を記載し、いずれもAsset IDとMCP operationを記載する。暗黙起動の制御は`agents/openai.yaml`の`policy.allow_implicit_invocation: false`で行う。配置単位はWorkflow全体または直接起動Skillとし、StageやWorkflow内で参照する通常SkillはWorkflowの構成要素として扱う。初期導入時に作成し、対象の追加・解除・名称変更等で入口との対応関係が変わる場合は、Canonical Stateと一致するよう更新する。
 
 Runtime入口にはSkillの`name`、`description`、AACL Asset IDと対応するMCP operationの呼び出し方法だけを記載し、Canonical本文やsupporting files、Service起動用のshell commandを含めない。発火後はAACLのSkill取得operationから本文を取得する。WSL上のServiceはWindowsログオン時にタスクスケジューラから起動する。自動起動はCLIで有効・無効・状態確認でき、アンインストール時に登録を解除する。
+
+`journal`はJournal記録の設定対象であり、Runtimeの直接起動入口ではない。`journal-review`はユーザーが明示的に開始する直接起動Skillである。標準Skillの名称変更・削除・`journal`の直接起動化はCoreで拒否する。
 
 Global設定先はRuntimeの標準位置から検出し、UIから追加できる。Windows側とWSL側のGlobal設定先は別々に扱う。各設定先にはscopeが一致するUse Case入口を配置する。設定先を管理対象から外す場合は既存ファイルを残し、以後Coreの管理対象から外す。SkillのuseCaseをfalseに変更した場合は、そのSkillのRuntime入口を解除する。
 
@@ -506,7 +510,9 @@ Journalに記録する気づきには、実際に何をどう使ったかを補�
 
 Journalは、開発方法や道具の使い方に関する一次観測とする。Journal本文と、TaskまたはRunのいずれかへの関連づけを必須とする。
 
-既存journalの気づき中心の運用を保ち、明確な設計・実装タスクの区切りで、記録する気づきがある場合に残す。定番として確立した良さを毎回繰り返さず、書くことのない項目は省略する。
+既存journalの気づき中心の運用を保ち、タスク完了時に記録する気づきがある場合だけ残す。定番として確立した良さを毎回繰り返さず、書くことのない項目は省略する。
+
+Journal記録はGlobal設定のON/OFFで制御する。ONの場合だけJournal Skillを使ってタスク完了時の気づきを記録し、OFFの場合は新しいJournal記録を受け付けない。既存のJournalとJournal ReviewはOFFでも閲覧できる。
 
 Journalには現行の情報を保持する。
 
@@ -530,7 +536,7 @@ Journalには現行の情報を保持する。
 
 Run Context Handleを伴うJournal作成操作では、CoreがHandleから対象Runを特定し、Project、Workflow revision、Stage、Snapshot、関連Assetと紐づけのrevisionを自動で関連づける。Journal本文にCore IDやModel情報を記述させず、Run Context HandleはMCP操作の入力として渡す。Run Context Handleもpost-run targetも指定しないJournalはTaskへ関連づける。
 
-Journal Skillは固定見出しMarkdownの記載テンプレートをAIへ渡す。AIはJournal本文をMarkdownで送信し、Journal内容を構造化JSONやCore IDへ変換しない。Run Context HandleはJournal本文と分離したMCP操作入力として渡す。Coreは既知見出しを機械的に構造化し、重複した既知見出しは出現順に連結する。未知見出しや構造化できない内容は自由記述へ保持し、入力原文も保存する。意味の推測による項目割り当ては行わない。
+Journal Skillは固定見出しMarkdownの記載テンプレートをAIへ渡す。タスク完了時に、実際に役立った方法、困ったこと、改善の種など後で活かせる気づきがある場合だけ短いJournalを作成する。AIはJournal本文をMarkdownで送信し、Journal内容を構造化JSONやCore IDへ変換しない。Run Context HandleはJournal本文と分離したMCP操作入力として渡す。Coreは既知見出しを機械的に構造化し、重複した既知見出しは出現順に連結する。未知見出しや構造化できない内容は自由記述へ保持し、入力原文も保存する。意味の推測による項目割り当ては行わない。
 
 記録の中心は、どう進め、道具や指示がどう働いたかとする。気づきのない実行に成功報告を求めず、Journalへの記載がないことだけを未使用・不要の根拠として扱わない。Run終了後のJournal追加では、MCP入力で対象Run IDを明示する。
 

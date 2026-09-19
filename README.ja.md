@@ -58,7 +58,7 @@ aacl health
 
 [http://127.0.0.1:4319](http://127.0.0.1:4319)を開きます。`aacl connect`はCodexとClaude Code向けのMCP登録コマンドを表示します。利用するクライアント用のコマンドを実行してください。接続先は`http://127.0.0.1:4319/mcp`です。
 
-`setup`は編集可能な`journal`と`journal-review`のSkill Assetも導入します。管理するProjectのルートで`aacl init`を実行すると、Project登録とProject scopeのRuntime設定先を準備します。
+`setup`は編集可能な`journal`と`journal-review`のSkill Assetも導入します。2件の名称と削除状態は固定され、`journal`はRuntimeの直接起動入口ではなくJournal記録設定で制御し、`journal-review`は明示起動するSkillとして残ります。管理するProjectのルートで`aacl init`を実行すると、Project登録とProject scopeのRuntime設定先を準備します。
 
 WSL上で`setup`を実行すると、Windowsログオン時に対象WSLとAACL Serviceを起動するタスクも登録します。配置するSkillのRuntime入口には`name`、`description`、Asset IDと、発火後にAACLから本文を取得するMCP operationだけを記載します。自動起動は`aacl autostart enable`、`aacl autostart disable`、`aacl autostart status`で管理します。
 
@@ -95,7 +95,7 @@ Assetは再利用する指示や知識を保持します。各AssetはID、種�
 | Rule | 紐づけたAssetや工程へ適用する指示を保持します。 |
 | Model | Model名と呼び出し方、選択肢を保持し、SkillやRuleを条件付きで紐づけられます。 |
 
-Workflowの各工程には1つのRoleを割り当て、必要な工程にはModelを指定できます。Modelを指定した工程はそのサブエージェントで実行する指示になり、連続する同じRole・Modelの工程では同じサブエージェントを使います。Model名と呼び出し方には`{{choice.<選択肢名>}}`を記載でき、Stageで選んだ値へ展開されます。ModelからSkillやRuleを参照するときは、Stageで選んだ選択肢の組み合わせごとに適用条件を設定できます。必要な場所にSkillとRuleを紐づけます。SkillはRuntimeから直接起動する設定もできます。Asset作成後に種類や管理先は変更できません。異なる種類・管理先にする場合は、正しい値でAssetを作成して関係を付け替えます。
+Workflowの各工程には1つのRoleを割り当て、必要な工程にはModelを指定できます。Modelを指定した工程はそのサブエージェントで実行する指示になり、連続する同じRole・Modelの工程では同じサブエージェントを使います。Model名と呼び出し方には`{{choice.<選択肢名>}}`を記載でき、Stageで選んだ値へ展開されます。ModelからSkillやRuleを参照するときは、Stageで選んだ選択肢の組み合わせごとに適用条件を設定できます。必要な場所にSkillとRuleを紐づけます。SkillはRuntimeから直接起動する設定もできますが、標準の`journal`はJournal記録のON/OFFで制御します。Asset作成後に種類や管理先は変更できません。異なる種類・管理先にする場合は、正しい値でAssetを作成して関係を付け替えます。
 
 ```mermaid
 flowchart TD
@@ -117,7 +117,7 @@ flowchart TD
 
 ## Runtime入口を生成する
 
-Assetの管理先に対応するGlobalまたはProject scopeへ、Claude CodeまたはCodexのRuntime設定先を登録します。Workflowと直接起動が有効なSkillの入口が生成されます。
+Assetの管理先に対応するGlobalまたはProject scopeへ、Claude CodeまたはCodexのRuntime設定先を登録します。Workflowと直接起動が有効なSkill（標準では`journal-review`など）の入口が生成されます。`journal`の入口は生成されません。
 
 | Runtime | 生成される入口 |
 | --- | --- |
@@ -137,7 +137,7 @@ Run開始でAACLに準備状態とSnapshotが作られます。AIは自動起動
 
 ## MCPからWorkflowを使う
 
-クライアント接続後、まず`aacl_bootstrap_get`でAACLの共通案内を読み、登録済みAsset IDを使います。`aacl_asset_list`は既定で概要だけを返すため、必要な本文は`includeBody`または`aacl_asset_get_many`で取得します。`aacl_usecase_search`でWorkflowと直接起動Skillを検索できます。Workflowは明示的に選んで開始します。
+クライアント接続後、まず`aacl_bootstrap_get`でAACLの共通案内を読み、登録済みAsset IDを使います。`aacl_asset_list`は既定で概要だけを返すため、必要な本文は`includeBody`または`aacl_asset_get_many`で取得します。`aacl_usecase_search`ではWorkflowと直接起動Skill（`journal-review`など）を検索できます。`journal`は直接起動の選択肢ではありません。Workflowは明示的に選んで開始します。
 
 ```json
 {
@@ -173,7 +173,7 @@ Contextの提供記録と、Skillを利用したという報告は別々に保�
 
 ## Journalと改善提案
 
-JournalにはタスクやRunで得た気づきを記録します。元のMarkdownと解析した気づきを保持し、Runまたは単独のTaskに関連づけられます。Journal Skillを使って、実際に役立ったこと、困ったこと、改善の種を記録できます。
+Journal記録がONの場合、タスク完了時に実際に役立ったこと、困ったこと、改善の種などの気づきがある場合だけ短いJournalを記録します。元のMarkdownと解析した気づきを保持し、Runまたは単独のTaskに関連づけられます。定番の成功報告は記録しません。設定がOFFでも既存JournalとJournal Reviewは閲覧できます。
 
 Journal Reviewでは、関連RunのSnapshot・History・Provenanceも参照しながら保留中の気づきを検討します。利用者が明示的に開始したときだけ実行し、Review用のWorkflow Runは作成しません。変更内容、理由、根拠Journal、対象AssetやProject、処理する気づきを含む提案を保存できます。
 

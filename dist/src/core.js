@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { posix } from 'node:path';
 import { renderModelChoiceTemplate } from './model-template.js';
 import { assetSchema, bindingSchema, parseJournal } from './schema.js';
+import { journalSkillKey, journalSkillNames, journalSkillUseCases } from './canonical-assets.js';
 export class ConflictError extends Error {
     code = 'CONFLICT';
     details;
@@ -64,6 +65,9 @@ export class Core {
         return { asset: { id: asset.id, name: asset.name, kind: asset.kind, scope: asset.scope, revision: asset.revision }, bindings, projectCommons };
     }
     deleteAsset(input, provenance) {
+        const asset = this.asset(input.assetId);
+        if (journalSkillKey(asset))
+            throw new Error('JournalとJournal Reviewの標準Skillは削除できません。');
         const preview = this.assetDeletionPreview(input.assetId);
         const bindingRevisions = preview.bindings.map(({ id, revision }) => ({ id, revision }));
         const projectCommonRevisions = preview.projectCommons.map(({ id, revision }) => ({ id, revision }));
@@ -171,9 +175,13 @@ export class Core {
                 throw new Error(`各Stageには担当Roleを1件割り当ててください: ${stage.id}`);
         }
     }
-    applyChanges(changes, provenance, proposalId, approvalId, restore, restoresChangeSetId, allowAssetDelete = false) {
+    applyChanges(changes, provenance, proposalId, approvalId, restore, restoresChangeSetId, allowAssetDelete = false, allowJournalSkillSetup = false) {
         if (!allowAssetDelete && changes.some(c => c.type === 'asset.delete'))
             throw new Error('Asset削除は影響一覧を確認した後、専用の削除操作から確定してください。');
+        for (const change of changes) {
+            if (change.type === 'asset.delete' && journalSkillKey(this.asset(change.id)))
+                throw new Error('JournalとJournal Reviewの標準Skillは削除できません。');
+        }
         this.validateExpectedRevisions(changes);
         for (const change of changes.filter((c) => c.type === 'asset.delete')) {
             const preview = this.assetDeletionPreview(change.id);
@@ -224,11 +232,23 @@ export class Core {
                     const old = this.asset(change.id, restoring);
                     if (old.kind !== a.kind || old.scope !== a.scope)
                         throw new Error('Assetの種類と管理先は変更できません。');
+                    const utility = journalSkillKey(old);
+                    if (utility) {
+                        if (a.name !== journalSkillNames[utility])
+                            throw new Error(`標準Skill「${journalSkillNames[utility]}」の名前は変更できません。`);
+                        if (a.metadata.aaclUtility !== utility)
+                            throw new Error(`標準Skill「${journalSkillNames[utility]}」の識別情報は変更できません。`);
+                        if (!allowJournalSkillSetup && utility === 'journal' && a.useCase !== journalSkillUseCases[utility])
+                            throw new Error(`標準Skill「${journalSkillNames[utility]}」の直接起動設定は変更できません。`);
+                    }
                     if (a.kind === 'workflow')
                         for (const b of this.bindings().filter(b => b.sourceId === change.id && b.stageId)) {
                             if (!a.stages.some(s => s.id === b.stageId))
                                 throw new Error('削除するStageの紐づけを先に解除してください。');
                         }
+                }
+                else if (journalSkillKey(a) && !allowJournalSkillSetup) {
+                    throw new Error('JournalとJournal Reviewの標準Skill識別情報は予約されています。');
                 }
                 const saved = save('asset', { ...a, id: change.id }, a.scope);
                 entities.push(saved);
@@ -548,7 +568,10 @@ export class Core {
         this.event(result, status, { reason });
         return { run: result };
     }
-    settings() { return this.store.maybe('settings') ?? { id: 'settings', timeoutHours: 24 }; }
+    settings() {
+        const current = this.store.maybe('settings');
+        return { id: 'settings', timeoutHours: current?.timeoutHours ?? 24, journalEnabled: current?.journalEnabled ?? true };
+    }
     expireRuns(now = Date.now()) {
         for (const run of this.store.list('run')) {
             if (run.status === 'active' && now - Date.parse(run.lastActivity) > this.settings().timeoutHours * 3600000) {
@@ -562,6 +585,8 @@ export class Core {
             deliveries: this.store.list('delivery').filter(d => d.runId === run.id), journals: this.store.list('journal').filter(j => j.runId === run.id) };
     }
     writeJournal(input) {
+        if (!this.settings().journalEnabled)
+            throw new Error('Journal記録が無効です。設定でJournal記録を有効にしてください。');
         if (input.contextHandle && input.postRunId)
             throw new Error('Handleと終了後Run IDはどちらか一方を指定してください。');
         const run = input.contextHandle ? this.run(input.contextHandle) : input.postRunId ? this.store.get(input.postRunId, 'run') : undefined;

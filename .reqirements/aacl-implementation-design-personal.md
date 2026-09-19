@@ -146,6 +146,7 @@ Claude Code / Codex (Windows または同一WSL内のLinux)
 ### 7.1 Journal入力
 
 - Journal write APIはMarkdown bodyを受け、Run Context Handleまたは明示されたpost-run Run IDからRun associationを決定する。Run Context HandleはMCP入力として受け取り、Journal bodyからCore IDを解析しない。Handleもpost-run Run IDも伴わないJournalにはTask associationを必須とする。
+- Journal write APIはGlobal設定の`journalEnabled=true`の場合だけ新しいJournalを受け付ける。`false`の場合は既存JournalのReadとJournal Reviewを許可したまま、Journal writeを拒否する。
 - Journal recordにはRunまたはTaskのassociationを保持する。Context Handleを伴う場合はCoreが対象Runを特定し、Project、Workflow revision、Stage、Snapshot、関連Assetと紐づけのrevisionも付与する。
 - AIが報告した実利用はJournal内の該当気づきとして記録し、Context Handleから解決したRunに対応するSnapshotと関連Asset revisionへ結び付ける。Resolutionの対象または提供記録だけから実利用を判定しない。
 - Parserは固定見出しを文字列として照合する。見出し対応、重複見出しの順序連結、未知見出しの自由記述格納、原文保存をunit testで固定する。
@@ -156,6 +157,7 @@ Claude Code / Codex (Windows または同一WSL内のLinux)
 
 - Journal Review用のRead operationは`status`、Project、`limit`、`cursor`、関連データの`include`、本文・変更内容のinclude指定で一覧を絞り、ReviewItemの要約と`journalTaskId`・`insightId`・Proposal IDを返す。変更内容や履歴は`review.item.get`と`proposal.get`で対象を指定して取得し、関連するSnapshot、Run進行記録、Asset・紐づけの履歴、Provenanceを参照可能にする。保留中の気づきは次回のReadにも含める。
 - Journal ReviewそのもののRun、Snapshot、実行履歴recordは作らない。Reviewで扱ったJournal一覧はProposal作成時に渡して保存する。
+- 標準Skillの`journal`と`journal-review`はmetadataの識別子で管理し、名称変更と削除をCoreで拒否する。`journal`のuseCaseは常にfalse、`journal-review`は初期状態をtrueとして利用者がuseCaseを切り替えられる。`setup.skills`の既存Asset更新では本文・description・explanationを保持したまま`journal`を直接起動不可へ移行する。
 - Proposalはobserved context、proposed change、reason、evidence Journal、affected assets、影響する紐づけとProjectを保持する。Proposalの対象変更、根拠、Reviewで扱ったJournal一覧を明示する。
 - Proposal、Proposalへのユーザー判断、ReviewItem、insight status、Journal task、Change Set relationは別recordとして保存する。提案の承認時は適用完了までReviewItemとInsightを`pending`のまま保ち、`proposal.apply`で変更適用と対象ReviewItem・Insight・Journal taskの更新を同じtransactionで行う。提案を伴わないReview判断はReviewItem単位の操作で3対象を同じtransactionで更新する。
 - 気づき単位で保留・処理済み・却下を更新できる。一部だけを処理した場合、未処理の気づきは`pending`のまま次回Reviewへ引き継ぐ。
@@ -164,7 +166,7 @@ Claude Code / Codex (Windows または同一WSL内のLinux)
 ## 8. UI、CLI、MCP
 
 - UI、CLI、MCPはCore Serviceのapplication APIだけを利用する。UIからの変更も同じvalidation・transaction pathへ送る。
-- UIは開発要求§33の視覚・操作要件を満たし、Workflow / Stage視点とAsset視点の紐づき確認・編集、SkillのuseCase切替、許可遷移の図示を実装する。
+- UIは開発要求§33の視覚・操作要件を満たし、Workflow / Stage視点とAsset視点の紐づき確認・編集、通常Skillと`journal-review`のuseCase切替、Journal記録のON/OFF、許可遷移の図示を実装する。標準Skillの名称・削除と`journal`の固定された直接起動設定は編集対象にしない。
 - MCP adapterはpurpose-specific typed operationを登録し、generic action dispatchやSQL passthroughを実装しない。`changeset.preview`、`asset.get_many`を提供し、Asset一覧は概要を既定にする。Change Setの`changes`はasset.save / asset.create / binding.save / binding.remove / common.save等の具体的な判別unionとして公開する。共通Bootstrapは`bootstrap.get`へ分離し、個別tool説明へ長文案内を重複させない。
 - Request / Responseの型と内容schemaは内部契約として管理し、Skill、Journal、Workflow、Stageのpayloadを検証する。
 - CLI bootstrapはService起動、Project登録、health確認、診断、export / Backup commandを提供する。

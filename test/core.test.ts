@@ -57,6 +57,40 @@ test('Skill metadata separates the human explanation from Runtime description an
   assert.equal('taskType' in run.run, false);
 });
 
+test('Journal Skills are protected, journal is not a direct entry, and recording can be disabled', async t => {
+  const f = fixture(t);
+  await f.call('setup.skills');
+  const assets = (await f.call<{ assets: Asset[] }>('asset.list', { kind: 'skill', includeBody: true })).assets;
+  const journal = assets.find(asset => asset.metadata.aaclUtility === 'journal')!;
+  const review = assets.find(asset => asset.metadata.aaclUtility === 'journal-review')!;
+  assert.equal(journal.name, 'journal');
+  assert.equal(journal.useCase, false);
+  assert.equal(review.name, 'journal-review');
+  assert.equal(review.useCase, true);
+  assert.match(journal.description, /^タスク完了時に/);
+  assert.ok(!journal.body.includes('明確な設計・実装タスクの区切りで、'));
+  const useCases = await f.call<{ assets: Asset[] }>('usecase.search');
+  assert.ok(useCases.assets.some(asset => asset.id === review.id));
+  assert.ok(!useCases.assets.some(asset => asset.id === journal.id));
+
+  for (const asset of [journal, review]) {
+    await assert.rejects(f.call('asset.save', { id: asset.id, expectedRevision: asset.revision, asset: { ...f.core.assetPayload(asset), name: `${asset.name}-renamed` }, provenance }), /名前は変更できません/);
+    const preview = await f.call<{ asset: Asset; bindings: { id: string; revision: number }[]; projectCommons: { id: string; revision: number }[] }>('asset.delete.preview', { assetId: asset.id });
+    await assert.rejects(f.call('asset.delete', { assetId: asset.id, expectedRevision: preview.asset.revision, expectedBindingRevisions: preview.bindings, expectedProjectCommonRevisions: preview.projectCommons, confirmed: true, provenance }), /削除できません/);
+  }
+  await assert.rejects(f.call('skill.usecase', { assetId: journal.id, enabled: true, provenance }), /直接起動設定は変更できません/);
+  await f.call('skill.usecase', { assetId: review.id, enabled: false, provenance });
+  assert.equal(f.core.asset(review.id).useCase, false);
+  await f.call('skill.usecase', { assetId: review.id, enabled: true, provenance });
+
+  await f.call('settings.save', { journalEnabled: false });
+  assert.equal((await f.call<{ journalEnabled: boolean }>('settings.get')).journalEnabled, false);
+  await assert.rejects(f.call('journal.write', { task: '記録停止の確認', body: '## 困った点\n停止中は記録しない' }), /Journal記録が無効/);
+  await f.call('settings.save', { journalEnabled: true });
+  const written = await f.call<{ journal: Journal }>('journal.write', { task: '記録再開の確認', body: '## 良かった点\n設定を切り替えられる' });
+  assert.equal(written.journal.task, '記録再開の確認');
+});
+
 test('Legacy Workflow completion fields are normalized into transition conditions', () => {
   const workflow = assetSchema.parse({
     kind: 'workflow', name: '旧Workflow', description: '旧形式', entryStage: 'work',

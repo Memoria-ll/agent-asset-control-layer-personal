@@ -58,7 +58,7 @@ aacl health
 
 Open [http://127.0.0.1:4319](http://127.0.0.1:4319). Run `aacl connect` to print MCP registration commands for Codex and Claude Code. The command prints the setup steps; run the command for the client you use. Its endpoint is `http://127.0.0.1:4319/mcp`.
 
-`setup` also installs the editable `journal` and `journal-review` Skill assets. To manage a project, run `aacl init` from its root. It registers that Project and prepares Project-scoped Runtime targets.
+`setup` also installs the editable `journal` and `journal-review` Skill assets. Their names and deletion state are fixed; `journal` is controlled by the Journal recording setting rather than a direct Runtime entry, while `journal-review` remains an explicitly launched Skill. To manage a project, run `aacl init` from its root. It registers that Project and prepares Project-scoped Runtime targets.
 
 On WSL, `setup` also registers a Windows logon task that starts the matching WSL distribution and AACL service. Runtime entries contain only the MCP operation and Asset ID. Use `aacl autostart enable`, `aacl autostart disable`, and `aacl autostart status` to manage the task.
 
@@ -95,7 +95,7 @@ An Asset holds reusable instructions or knowledge. Each Asset has an ID, kind, r
 | Rule | Holds instructions shared by the Assets or stages to which it is bound. |
 | Model | Holds a model name, invocation method, and choices, and can conditionally reference Skills and Rules. |
 
-Each Workflow stage has one assigned Role and can optionally bind one Model. A Model-bound stage is an instruction to execute through that subagent; consecutive stages with the same Role and Model reuse the same subagent. Model names and invocation methods can contain `{{choice.<choice name>}}`, which resolves to the value selected for the stage. Model-to-Skill and Model-to-Rule references can be conditioned on the selected choice combination for that stage. Skills and Rules are bound where they are needed. A Skill can also be enabled for direct Runtime invocation. Asset kind and scope are fixed when it is created; to change either, create an Asset with the desired values and update its relationships.
+Each Workflow stage has one assigned Role and can optionally bind one Model. A Model-bound stage is an instruction to execute through that subagent; consecutive stages with the same Role and Model reuse the same subagent. Model names and invocation methods can contain `{{choice.<choice name>}}`, which resolves to the value selected for the stage. Model-to-Skill and Model-to-Rule references can be conditioned on the selected choice combination for that stage. Skills and Rules are bound where they are needed. A Skill can also be enabled for direct Runtime invocation; the built-in `journal` Skill is controlled by Journal recording ON/OFF instead. Asset kind and scope are fixed when it is created; to change either, create an Asset with the desired values and update its relationships.
 
 ```mermaid
 flowchart TD
@@ -137,7 +137,7 @@ Starting a Run creates its prepared state and Snapshot in AACL. It does not laun
 
 ## Use a Workflow through MCP
 
-After connecting a client, read the AACL bootstrap instructions and use the registered Asset IDs. For example, `aacl_usecase_search` finds Workflows and directly invocable Skills. Starting a Workflow requires an explicit selection:
+After connecting a client, read the AACL bootstrap instructions and use the registered Asset IDs. For example, `aacl_usecase_search` finds Workflows and directly invocable Skills such as `journal-review`; the built-in `journal` Skill is not a direct Runtime entry. Starting a Workflow requires an explicit selection:
 
 ```json
 {
@@ -173,7 +173,7 @@ Context delivery and reported Skill use are stored separately. Retrieving a Skil
 
 ## Journals and improvement proposals
 
-A Journal records observations from a task or Run. It preserves the original Markdown and parsed insights, and can be linked to a Run or recorded as a standalone task. Use the Journal Skill to record a useful result, difficulty, or improvement idea.
+A Journal records observations from a task or Run. When Journal recording is enabled, record a short Journal at task completion only when there is a useful result, difficulty, or improvement idea. It preserves the original Markdown and parsed insights, and can be linked to a Run or recorded as a standalone task.
 
 Journal Review examines pending insights with related Run Snapshots, History, and Provenance. It starts only when requested and does not create a separate Workflow Run. A review can save concrete proposals that identify changes, reasons, supporting Journals, affected Assets or Projects, and insights to process.
 

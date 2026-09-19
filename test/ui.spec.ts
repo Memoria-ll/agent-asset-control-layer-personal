@@ -299,6 +299,14 @@ test('C33: Chromium UI assigns existing and new Roles from Workflow editor, runs
     await page.getByRole('link', { name: nav, exact: true }).click();
     await expect(page.getByRole('heading', { name: nav, exact: true })).toBeVisible();
   }
+  const journalEnabled = page.getByLabel('タスク完了時のJournal記録を有効にする');
+  await expect(journalEnabled).toBeChecked();
+  await journalEnabled.uncheck();
+  await page.getByRole('button', { name: '設定を保存', exact: true }).click();
+  await expect(journalEnabled).not.toBeChecked();
+  await journalEnabled.check();
+  await page.getByRole('button', { name: '設定を保存', exact: true }).click();
+  await expect(journalEnabled).toBeChecked();
   expect(errors).toEqual([]);
   const invalid = await page.request.post(`http://127.0.0.1:${app.port}/api/asset.save`, { data: { operationId: randomUUID(), asset: {}, provenance: { origin: 'ui' } } });
   expect(invalid.status()).toBe(400);

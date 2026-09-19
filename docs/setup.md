@@ -48,7 +48,7 @@ export PATH="$HOME/.local/share/aacl/bin:$PATH"
 aacl health
 ```
 
-`setup`はJournal記録用の`journal`、横断レビュー用の`journal-review`をCanonical Skillとして導入します。この2件も利用者が編集できます。UIの「設定・接続 → Journal用Skillを導入」から追加することもでき、導入済みの内容は上書きしません。
+`setup`はJournal記録用の`journal`、横断レビュー用の`journal-review`をCanonical Skillとして導入します。本文・description・explanationは編集できますが、2件の名称と削除状態は固定です。`journal`は直接起動入口を持たず、設定・接続のJournal記録ON/OFFで制御します。`journal-review`はユーザーが明示的に起動します。UIの「設定・接続 → Journal用Skillを導入」から追加することもでき、導入済みの本文は上書きしません。
 
 | コマンド | 動作 |
 | --- | --- |
@@ -93,10 +93,10 @@ Asset、紐づけ、Project Commonの書き込みでは、新しい`operationId`
 
 - **資産ライブラリ**: 作成・編集、Skillの直接起動切り替え、Workflowの工程・遷移図、直接参照とRole経由の参照、Stage側／Asset側の紐づけ編集。
 - **Workflow Run**: 明示的な開始、許可遷移の選択、完了報告、中止、Snapshot・提供内容・実行記録。
-- **Journal / Journal Review**: Markdown記録、気づきごとの保留・処理済み・却下、提案、ユーザー判断、承認済み変更の適用。
+- **Journal / Journal Review**: タスク完了時の気づき記録ON/OFF、Markdown記録、気づきごとの保留・処理済み・却下、提案、ユーザー判断、承認済み変更の適用。
 - **変更履歴**: Assetの過去版と現在版の比較、revision復元、Change Set適用前への復元、変更理由。
 - **診断**: 明示参照の不整合、固定revisionの取得可否、反復遷移、提供ContextのUTF-8バイト量。
-- **設定・接続**: Project、Project Common、Runtime設定先、非活動timeout、Export・Backup。
+- **設定・接続**: Project、Project Common、Runtime設定先、非活動timeout、Journal記録ON/OFF、Export・Backup。
 
 UIの提案作成フォームは、1つのAssetの本文・責務の変更を扱います。工程・遷移・複数資産・紐づけ・Project Commonをまとめた提案は、接続中AIから`aacl_proposal_save`で登録できます。UIで変更内容を確認し、判断・適用できます。
 

@@ -8,6 +8,7 @@ export const bootstrap = `AACLはWorkflow・Skill・Role・Rule・Modelと、明
 通常の会話にWorkflow選択を催促せず、未選択の資産を適用しません。ユーザーが選択したWorkflowだけをaacl_run_startで開始します。
 aacl_project_resolveへ開いているProject rootを渡して完全一致で確認します。未登録の場合はaacl initで登録します。
 aacl_usecase_searchでWorkflowと直接起動Skillを探します。Skillの直接利用はaacl_skill_getだけを使い、Runや実行記録を作成しません。
+Journal Skillは直接起動せず、Journal記録設定が有効な場合にタスク完了時の気づきをaacl_journal_writeへ記録します。気づきがなければ記録しません。設定状態はaacl_settings_getで確認できます。
 aacl_run_startとaacl_run_transitionは、Context本文ではなく次の実行計画（nextExecution）とcontextHandleを返します。実際に次のStageを実施するオーケストレーターまたはサブエージェントが、そのHandleでaacl_context_getを呼び出してください。別の会話のHandleを使わず、ユーザーへHandleの入力を求めません。
 ContextのSkill catalogから必要な本文・補助ファイルを、実際にStageを実施するAIがaacl_run_skill_getで取得します。Ruleを含むContextの取得と意味判断、開発操作は実施者側が行い、オーケストレーターへ本文を転送しません。
 nextExecutionのexecutorがsubagentなら、返されたModel情報とsubagent継続指示に従ってRuntimeでサブエージェントを起動します。executorがorchestratorなら、オーケストレーター自身が実施者としてContextを取得します。連続する同じRole・ModelのStageでは同じsubagentを継続します。
@@ -43,7 +44,7 @@ export class Operations {
                 delete result.supportingFiles;
             return result;
         };
-        read('bootstrap.get', 'AACLの利用案内とRuntimeに応じた入口を取得', { runtime: z.enum(['claude', 'codex']).optional() }, p => ({ instructions: bootstrap, runtime: p.runtime, entry: p.runtime === 'claude' ? 'Command' : 'Skill' }));
+        read('bootstrap.get', 'AACLの利用案内とRuntimeに応じた入口を取得', { runtime: z.enum(['claude', 'codex']).optional() }, p => ({ instructions: bootstrap, runtime: p.runtime, entry: p.runtime === 'claude' ? 'Command' : 'Skill', journalEnabled: core.settings().journalEnabled }));
         read('asset.list', 'Assetを概要（本文・補助ファイルなし）で検索。本文が必要ならincludeBodyまたはfieldsを指定する。例: { kind: "skill", query: "review" }', { scope: scope.optional(), kind: z.enum(['workflow', 'skill', 'role', 'rule', 'model']).optional(), query: z.string().default(''), includeDeleted: z.boolean().default(false), includeBody: z.boolean().default(false), fields: assetListFields }, p => ({ assets: store.list('asset', p.scope).filter(a => (p.includeDeleted || !a.deletedAt) && (!p.kind || a.kind === p.kind) && `${a.name} ${a.description} ${a.kind === 'skill' ? a.explanation : ''} ${a.kind === 'model' ? `${a.modelName} ${a.invocationMethod}` : ''}`.toLowerCase().includes(p.query.toLowerCase())).map(a => assetView(a, p.includeBody, p.fields)) }));
         write('setup.skills', 'Journal・Journal Reviewの標準Skillを導入。導入済みの編集内容を保持', {}, () => installJournalSkills(core), true);
         read('asset.get', 'Assetの現在または過去revisionを取得', { assetId: id, revision: z.int().positive().optional() }, p => { const current = core.asset(p.assetId, true); return { asset: p.revision ? store.revision(p.assetId, p.revision) : current }; });
@@ -100,7 +101,7 @@ export class Operations {
         read('journal.template', '固定見出しMarkdownテンプレートを取得', {}, () => ({ template: journalTemplate }));
         read('journal.list', 'Journalを一覧', {}, () => ({ journals: store.list('journal'), insights: store.list('insight') }));
         read('journal.get', 'Journalと関連する気づきを取得', { journalId: id }, p => ({ journal: store.get(p.journalId, 'journal'), insights: store.list('insight').filter(i => i.journalId === p.journalId) }));
-        write('journal.write', 'Markdown原文を保持しRunまたはTaskへ関連づけ', { body: z.string().min(1).refine(s => s.trim().length > 0), contextHandle: id.optional(), postRunId: id.optional(), task: text.optional() }, p => core.writeJournal(p));
+        write('journal.write', '有効なJournal記録設定のもとでMarkdown原文をRunまたはTaskへ関連づけ', { body: z.string().min(1).refine(s => s.trim().length > 0), contextHandle: id.optional(), postRunId: id.optional(), task: text.optional() }, p => core.writeJournal(p));
         read('review.pending', 'Review項目を関連ID中心で取得。必要に応じて本文・変更内容を含める', {
             status: z.enum(['pending', 'processed', 'rejected']).default('pending'), projectId: id.optional(),
             include: z.array(z.enum(['journalTask', 'insights', 'proposalRefs'])).default(['journalTask', 'insights', 'proposalRefs']),
@@ -135,7 +136,11 @@ export class Operations {
         write('runtime.unregister', '設定先の管理を解除。生成済み入口は残す', { targetId: id }, p => ({ target: store.put('runtime-target', { ...store.get(p.targetId, 'runtime-target'), enabled: false }) }));
         write('runtime.sync', '生成入口をCanonical Stateへ同期', {}, () => ({}), true);
         read('settings.get', 'Global設定を取得', {}, () => core.settings());
-        write('settings.save', '非活動timeout時間を設定', { timeoutHours: z.number().positive().max(8760) }, p => store.put('settings', { id: 'settings', ...p }));
+        write('settings.save', 'Runの非活動timeoutとJournal記録の有効・無効を設定', { timeoutHours: z.number().positive().max(8760).optional(), journalEnabled: z.boolean().optional() }, p => {
+            if (p.timeoutHours === undefined && p.journalEnabled === undefined)
+                throw new Error('変更する設定を1件以上指定してください。');
+            return store.put('settings', { ...core.settings(), ...p, id: 'settings' });
+        });
         read('data.export', '明示された新規directoryへ人間可読データを出力', { directory: text }, p => exportData(core, p.directory));
         read('data.backup', 'SQLite整合性を保つBackupを新規fileへ出力', { path: text }, p => backupData(core, p.path));
     }
