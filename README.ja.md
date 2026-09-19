@@ -122,7 +122,7 @@ Assetの管理先に対応するGlobalまたはProject scopeへ、Claude Codeま
 | Runtime | 生成される入口 |
 | --- | --- |
 | Claude Code | `<target>/commands/<slug>.md` |
-| Codex | `<target>/skills/<slug>/SKILL.md` |
+| Codex | `<target>/skills/<slug>/SKILL.md` と `<target>/skills/<slug>/agents/openai.yaml` |
 
 入口はAsset IDを参照し、指示本文はAACLから取得します。本文の正本はSQLiteにあります。Windowsの設定先では生成入口から`wsl.exe`を呼び出します。生成後に管理対象の入口が編集された場合、同期はその内容を上書きせず診断へ記録します。Runtime設定先の管理を解除しても、生成済み入口は残ります。
 

@@ -83,7 +83,7 @@ MCP endpointはStreamable HTTP、protocol revisionは`2026-07-28`です。Runの
 
 配置するWorkflow CommandとCodex Skillには、Asset IDを渡すMCP operationだけを記載します。入口は`aacl ensure`やshell commandを実行しません。Windowsログオン後は同じWSLのServiceへlocalhostで接続できます。Serviceを手動停止した場合は、WSLで`aacl ensure`を実行して再開します。
 
-Projectで`aacl init`を実行すると、Globalの紐づけをProject用にコピーし、Project scopeのAsset用Runtime設定先を登録します。Project内にはProject専用の入口だけを配置し、Global入口はGlobal設定先に置きます。Global設定先はUIで標準候補を確認して登録できます。生成入口にはAsset IDと取得手順を記載し、Canonical本文はSQLiteから取得します。生成後に利用者が編集した入口は自動上書きせず、診断へ記録します。
+Projectで`aacl init`を実行すると、Globalの紐づけをProject用にコピーし、Project scopeのAsset用Runtime設定先を登録します。Project内にはProject専用の入口だけを配置し、Global入口はGlobal設定先に置きます。Global設定先はUIで標準候補を確認して登録できます。生成入口にはAsset IDと取得手順を記載し、Canonical本文はSQLiteから取得します。Codex入口では暗黙起動の制御を`agents/openai.yaml`の`policy.allow_implicit_invocation: false`へ記載します。生成後に利用者が編集した入口は自動上書きせず、診断へ記録します。
 
 Asset、紐づけ、Project Commonの書き込みでは、新しい`operationId`を使用してください。同じ操作の再送時だけ、同じIDと同じ入力を再利用します。AI経由の資産変更には`provenance.origin: "ai"`と`userRequest`・`reason`が必要です。用途別のtool一覧と入力schemaはMCPの`tools/list`から取得できます。
 

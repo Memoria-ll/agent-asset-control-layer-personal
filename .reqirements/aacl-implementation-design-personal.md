@@ -54,7 +54,7 @@ Claude Code / Codex (Windows または同一WSL内のLinux)
 - Runtime adapterはGlobal設定先を標準位置から列挙し、ユーザー登録先を同じ形式で保持する。Windows側とWSL側の設定先は個別のtargetとして扱う。
 - Runtime同期はAssetとRuntime targetのscopeが一致する入口だけを配置する。Project targetにはそのProjectのAssetだけを置き、Global targetにはGlobal Assetだけを置く。
 - Runtime entryは対象Canonical Assetの安定IDのみを格納する薄い生成物とし、Canonical本文や処理定義を含めない。
-- 配置名はAsset名をRuntimeで有効なslugへ整え、同一target内で衝突する場合だけAsset IDを末尾に付ける。Codex Skillではfrontmatterの`name`と親folder名を一致させる。
+- 配置名はAsset名をRuntimeで有効なslugへ整え、同一target内で衝突する場合だけAsset IDを末尾に付ける。Codex Skillではfrontmatterの`name`と親folder名を一致させ、同じSkill directoryの`agents/openai.yaml`に`policy.allow_implicit_invocation: false`を生成する。暗黙起動の制御を`SKILL.md`のfrontmatterへ記載しない。
 - File writerは対象Runtime・scopeに応じた配置先へentryを生成し、部分失敗を個別に検出できる単位で処理する。
 - 生成状態とCanonical Stateの整合確認に失敗した場合、DB transactionを巻き戻さずDiagnosticsへ失敗結果を記録する。
 
