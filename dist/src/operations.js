@@ -13,6 +13,8 @@ ContextのSkill catalogから必要な本文・補助ファイルをaacl_run_ski
 StageにModelが紐づいている場合、ContextのModel情報とsubagent指示に従ってそのStageを実行します。連続する同じRole・ModelのStageでは同じsubagentを継続します。
 Modelには自由な名前の選択肢グループを複数定義できます。WorkflowのStageへModelを紐づけるときは、各選択肢の値をselectedChoicesで指定し、ContextのmodelSelectionsで確認します。
 現在Stageから進む遷移のconditionを評価し、遷移判断の報告とaacl_run_getのversionを付けて許可された遷移を要求します。自己ループや差し戻しとRun全体のfailedは別です。
+ModelからSkill / Ruleへの参照にはchoiceConditionsを指定でき、同じ組み合わせ内はAND、複数の組み合わせはORとして、一致する参照だけをContextへ含めます。
+Stageの完了条件と現在Stageから進む遷移のconditionを評価し、完了・遷移判断の報告とaacl_run_getのversionを付けて許可された遷移を要求します。retry・returnと自己ループ・差し戻し、Run全体のfailedは別です。
 資産管理はまずaacl_asset_list（既定は概要のみ）またはaacl_asset_get_manyで対象を確かめ、Asset ID・scope・完全なAsset内容・理由・userRequestを明示して型付き操作を実行します。既存Asset・紐づけ・Project Commonの更新／解除とChange Set内の各変更には取得時点のexpectedRevisionを必ず付け、Conflictなら最新状態を再取得して変更全体を組み直します。asset.saveは差分更新ではなく全置換なのでbodyやsupportingFilesを省略しません。複数変更はまずaacl_changeset_previewでDry Runし、問題がなければaacl_changeset_applyを実行します。Assetを削除する前にaacl_asset_delete_previewの参照一覧をユーザーへ示し、削除と参照解除の明示承認を得てからaacl_asset_deleteを実行します。方針が曖昧なら具体案を示してユーザーへ確認します。認証情報は保存しません。
 書き込みのoperationIdにはUUIDを使用し、同じ操作の再送だけで再利用します。
 気づきがあればaacl_journal_templateのMarkdownでaacl_journal_writeへ送ります。Core IDは本文に書かず、contextHandleまたは終了後のpostRunIdを操作入力に指定します。Run外のJournalにはTaskを指定します。
@@ -68,7 +70,7 @@ export class Operations {
         write('common.save', 'Project CommonのRule参照を更新する。取得時点のexpectedRevisionを指定する', { projectId: id, expectedRevision: revision, ruleIds: z.array(id), provenance }, p => core.applyChanges([{ type: 'common.save', projectId: p.projectId, expectedRevision: p.expectedRevision, ruleIds: p.ruleIds }], p.provenance));
         read('binding.list', '管理先ごとの紐づけを一覧', { scope: scope.optional(), assetId: id.optional() }, p => ({ bindings: core.bindings(p.scope).filter(b => !p.assetId || b.sourceId === p.assetId || b.targetId === p.assetId) }));
         read('binding.get', '紐づけの現在または過去revisionを取得', { bindingId: id, revision: z.int().positive().optional() }, p => { const binding = store.get(p.bindingId, 'binding'); return { binding: p.revision ? store.revision(p.bindingId, p.revision) : binding }; });
-        write('binding.save', '明示参照を追加・付け替え。既存紐づけの更新は取得時点のexpectedRevisionを指定する', { id: id.optional(), expectedRevision: revision.optional(), binding: bindingSchema, provenance }, p => core.applyChanges([{ type: 'binding.save', id: p.id, expectedRevision: p.expectedRevision, binding: p.binding }], p.provenance));
+        write('binding.save', '明示参照を追加・付け替え。ModelからSkill / Ruleへの参照ではchoiceConditionsで選択肢の組み合わせを指定できる。既存紐づけの更新は取得時点のexpectedRevisionを指定する', { id: id.optional(), expectedRevision: revision.optional(), binding: bindingSchema, provenance }, p => core.applyChanges([{ type: 'binding.save', id: p.id, expectedRevision: p.expectedRevision, binding: p.binding }], p.provenance));
         write('binding.remove', '紐づけを解除する。取得時点のexpectedRevisionを指定する', { id, expectedRevision: revision, provenance }, p => core.applyChanges([{ type: 'binding.remove', id: p.id, expectedRevision: p.expectedRevision }], p.provenance));
         write('run.start', '明示選択したWorkflowのRunを開始しContext Handleを返す', { workflowId: id, projectId: id.optional(), root: text.optional(), runtime: text, instruction: text, target: z.string().default('') }, p => core.startRun(p));
         read('run.list', 'Workflow Runを一覧', { projectId: id.optional() }, p => { core.expireRuns(); return { runs: store.list('run', p.projectId) }; });

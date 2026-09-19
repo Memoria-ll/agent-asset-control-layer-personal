@@ -60,7 +60,11 @@ function diagram(asset: Asset) {
 function bindingRows(asset: Asset, stageId?: string) {
   const direct = bindings.filter(b => b.sourceId === asset.id && b.stageId === stageId);
   const indirect = direct.flatMap(b => assets.find(a => a.id === b.targetId)?.kind === 'role' ? bindings.filter(v => v.sourceId === b.targetId).map(v => ({ binding: v, role: name(b.targetId) })) : []);
-  return direct.map(b => `<div class="relation"><div><a href="#assets/${b.targetId}">${esc(name(b.targetId))}</a><small>${b.purpose === 'stage-role' ? '担当Role' : b.purpose === 'stage-model' ? 'StageのModel（サブエージェント）' : b.purpose === 'entry-role' ? '入口のRole' : '直接参照'}</small></div><div class="row">${button(`binding-edit:${b.id}`, '付け替え', 'small ghost')}${b.purpose === 'stage-role' || b.purpose === 'stage-model' ? '' : button(`binding-remove:${b.id}`, '解除', 'small ghost')}</div></div>`).join('') + indirect.map(({ binding: b, role }) => `<div class="relation"><div><a href="#assets/${b.targetId}">${esc(name(b.targetId))}</a><small>${esc(role)} 経由</small></div>${badge('Role経由')}</div>`).join('') + (direct.length ? '' : '<p class="hint">紐づけはありません。</p>');
+  return direct.map(b => {
+    const target = assets.find(a => a.id === b.targetId);
+    const condition = asset.kind === 'model' && b.purpose === 'reference' && target ? `<small>適用条件: ${esc(choiceConditionSummary(asset, b.choiceConditions ?? []))}</small>` : '';
+    return `<div class="relation"><div><a href="#assets/${b.targetId}">${esc(name(b.targetId))}</a><small>${b.purpose === 'stage-role' ? '担当Role' : b.purpose === 'stage-model' ? 'StageのModel（サブエージェント）' : b.purpose === 'entry-role' ? '入口のRole' : '直接参照'}</small>${condition}</div><div class="row">${button(`binding-edit:${b.id}`, '付け替え', 'small ghost')}${b.purpose === 'stage-role' || b.purpose === 'stage-model' ? '' : button(`binding-remove:${b.id}`, '解除', 'small ghost')}</div></div>`;
+  }).join('') + indirect.map(({ binding: b, role }) => `<div class="relation"><div><a href="#assets/${b.targetId}">${esc(name(b.targetId))}</a><small>${esc(role)} 経由</small></div>${badge('Role経由')}</div>`).join('') + (direct.length ? '' : '<p class="hint">紐づけはありません。</p>');
 }
 function assetDetail(a: Asset) {
   const relationships = relatedWorkflows(a.id, assets, bindings);
@@ -155,6 +159,31 @@ function modelChoiceFields(modelId: string, selected: Record<string, string> = {
 function readModelSelections(row: Element) {
   return Object.fromEntries([...row.querySelectorAll<HTMLSelectElement>('[name=modelChoice]')].map(input => [input.dataset.choiceName ?? '', input.value]).filter(([name, value]) => name && value));
 }
+function choiceConditionSummary(model: Asset | undefined, conditions: Record<string, string>[] = []) {
+  if (!model || !conditions.length) return 'すべての選択状態';
+  return conditions.map(condition => {
+    const values = Object.entries(condition).map(([name, value]) => `${name}=${value}`);
+    return values.length ? values.join(' AND ') : 'すべての選択状態';
+  }).join(' OR ');
+}
+function modelChoiceConditionRow(model: Asset, condition: Record<string, string> = {}, index = 0) {
+  return `<fieldset class="choice-condition-row" data-condition-index="${index}"><legend>組み合わせ ${index + 1}</legend><div class="grid-two">${(model.choices ?? []).map(choice => select(`${choice.name}の条件`, 'choiceCondition', opt('', '指定しない', condition[choice.name]) + choice.options.map(value => opt(value, value, condition[choice.name])).join('')).replace('<select ', `<select data-condition-name="${esc(choice.name)}" `)).join('')}</div>${button('choice-condition-remove', '削除', 'small ghost')}</fieldset>`;
+}
+function modelChoiceConditionFields(modelId: string, conditions: Record<string, string>[] = []) {
+  const model = assets.find(a => a.id === modelId && a.kind === 'model');
+  if (!model?.choices?.length) return '';
+  const rows = conditions.length ? conditions : [{}];
+  return `<fieldset class="model-choice-condition-fields"><legend>参照条件</legend><p class="hint">この参照を有効にする選択状態を指定します。空欄は任意、組み合わせ同士はORです。</p><div id="choice-condition-rows">${rows.map((condition, index) => modelChoiceConditionRow(model, condition, index)).join('')}</div>${button('choice-condition-add', '＋ 組み合わせを追加', 'small ghost')}</fieldset>`;
+}
+function readModelChoiceConditions(form: Element) {
+  return [...form.querySelectorAll<HTMLElement>('.choice-condition-row')].map(row => Object.fromEntries([...row.querySelectorAll<HTMLSelectElement>('[name=choiceCondition]')].map(input => [input.dataset.conditionName ?? '', input.value]).filter(([name, value]) => name && value))).filter(condition => Object.keys(condition).length);
+}
+function updateChoiceConditionNumbers(form: Element) {
+  form.querySelectorAll<HTMLElement>('.choice-condition-row').forEach((row, index) => {
+    row.dataset.conditionIndex = String(index);
+    row.querySelector('legend')!.textContent = `組み合わせ ${index + 1}`;
+  });
+}
 function stageRow(s: { id: string; name: string; additionalInstructions?: string }, index: number, roleId = '', modelId = '', selectedChoices: Record<string, string> = {}, transitions: Asset['transitions'] = [], stages: { id: string; name: string }[] = []) {
   return `<section class="editor-row stage-editor" data-id="${esc(s.id)}" aria-labelledby="stage-heading-${esc(s.id)}"><div class="row-head"><h3 class="stage-title" id="stage-heading-${esc(s.id)}">工程 ${index + 1}</h3>${button('row-remove', '削除', 'small ghost')}</div><div class="stage-content"><div>${field('工程名', 'stageName', s.name)}</div><div class="stage-role-row">${select('担当Role', 'stageRole', roleOptions(roleId), true)}${button(`role-create:${s.id}`, '＋ 新しいRole', 'small ghost')}</div><p class="hint">担当Roleの責務を工程の基本とし、必要なら追加指示で補います。</p><div>${select('Model', 'stageModel', modelOptions(modelId))}<p class="hint">Modelを指定すると、この工程をそのModelのサブエージェントで実行します。連続する同じRole・Modelの工程では同じサブエージェントを使います。</p><div class="model-choice-container">${modelChoiceFields(modelId, selectedChoices)}</div></div><div class="new-role-fields" hidden><p class="hint">新しいRoleをGlobalで共有し、このStageの担当に設定します。</p>${field('新しいRole名', 'newRoleName', '', false)}${area('Roleの説明', 'newRoleDescription', '', false)}${area('Roleの責務', 'newRoleResponsibilities', '', false)}</div><div class="spacer"></div>${area('追加指示（任意）', 'additionalInstructions', s.additionalInstructions ?? '', false)}</div><section class="stage-transitions" aria-labelledby="transition-heading-${esc(s.id)}"><div class="stage-transitions-head"><div><h4 id="transition-heading-${esc(s.id)}">この工程からの遷移</h4><p>各行で行き先・条件・表示名を設定します。</p></div>${button('transition-add', '＋ 行き先を追加', 'small ghost')}</div><div class="stage-transition-list">${transitions.map((t, transitionIndex) => transitionRow(t, stages, transitionIndex)).join('') || '<p class="hint stage-transition-empty">行き先はまだありません。</p>'}</div></section></section>`;
 }
@@ -199,7 +228,8 @@ function bindingEditor(sourceId: string, stageId?: string, existing?: Binding) {
   const targets = assets.filter(v => v.id !== sourceId && (v.scope === 'global' || v.scope === selectedScope) && allowed[a.kind].includes(v.kind));
   const purpose = existing?.purpose === 'stage-role' || existing?.purpose === 'stage-model' ? `<input type="hidden" name="purpose" value="${existing.purpose}"><p class="hint">${existing.purpose === 'stage-role' ? '担当RoleはStageごとに必須です。' : 'Modelを指定したStageはサブエージェントで実行します。'}</p>` : select('使い方', 'purpose', opt('reference', '資産の参照', existing?.purpose) + (a.kind === 'workflow' ? opt(stageId ? 'stage-role' : 'entry-role', stageId ? '工程の担当Role' : '入口のRole', existing?.purpose) + (stageId ? opt('stage-model', '工程のModel', existing?.purpose) : '') : ''));
   const target = assets.find(asset => asset.id === existing?.targetId);
-  modal(existing ? '紐づけを付け替え' : '資産を紐づける', `<form data-form="binding" data-id="${existing?.id ?? ''}" data-source="${sourceId}" data-stage="${esc(stageId ?? '')}" class="form-stack"><p>${esc(a.name)}${stageId ? ` / ${esc(a.stages.find(s => s.id === stageId)?.name)}` : ''} → 参照先</p>${select('参照する資産', 'targetId', targets.map(t => opt(t.id, `${kinds[t.kind]} / ${t.name}${t.kind === 'model' && modelChoiceSummary(t) ? ` · ${modelChoiceSummary(t)}` : ''}`, existing?.targetId)).join(''))}${purpose}<div class="binding-model-choice-fields">${target?.kind === 'model' && existing?.purpose === 'stage-model' ? modelChoiceFields(target.id, existing.selectedChoices ?? {}) : ''}</div><p class="hint">管理先: ${esc(labelScope(selectedScope))}</p>${formEnd('紐づけを保存')}</form>`);
+  const conditionFields = a.kind === 'model' && (existing?.purpose ?? 'reference') === 'reference' ? modelChoiceConditionFields(a.id, existing?.choiceConditions ?? []) : '';
+  modal(existing ? '紐づけを付け替え' : '資産を紐づける', `<form data-form="binding" data-id="${existing?.id ?? ''}" data-source="${sourceId}" data-stage="${esc(stageId ?? '')}" class="form-stack"><p>${esc(a.name)}${stageId ? ` / ${esc(a.stages.find(s => s.id === stageId)?.name)}` : ''} → 参照先</p>${select('参照する資産', 'targetId', targets.map(t => opt(t.id, `${kinds[t.kind]} / ${t.name}${t.kind === 'model' && modelChoiceSummary(t) ? ` · ${modelChoiceSummary(t)}` : ''}`, existing?.targetId)).join(''))}${purpose}<div class="binding-model-choice-fields">${target?.kind === 'model' && existing?.purpose === 'stage-model' ? modelChoiceFields(target.id, existing.selectedChoices ?? {}) : ''}</div>${conditionFields}<p class="hint">管理先: ${esc(labelScope(selectedScope))}</p>${formEnd('紐づけを保存')}</form>`);
 }
 function journalEditor(run?: Run) {
   modal('Journalを記録', `<form data-form="journal" data-run="${run?.id ?? ''}" class="form-stack">${field('Task（作業名）', 'task', '', !run)}${area('Journal（Markdown）', 'body', '## Task\n\n## 実際に使ったもの\n\n## 良かった点\n\n## 困った点\n\n## 改善の種\n\n## 根拠・確かさ\n', true, true)}<p class="hint">書くことのない項目は省略できます。気づきは空行で区切ると個別に扱えます。</p>${formEnd('Journalを保存')}</form>`);
@@ -235,6 +265,17 @@ async function action(value: string, target: HTMLElement) {
   }
   if (key === 'choice-add') { dialog.querySelector('#model-choice-rows')!.insertAdjacentHTML('beforeend', modelChoiceEditorRow()); return; }
   if (key === 'choice-remove') { target.closest('.model-choice-editor-row')?.remove(); return; }
+  if (key === 'choice-condition-add') {
+    const model = assets.find(asset => asset.id === target.closest<HTMLFormElement>('form')?.dataset.source && asset.kind === 'model');
+    const rows = dialog.querySelectorAll('.choice-condition-row').length;
+    if (model) dialog.querySelector('#choice-condition-rows')!.insertAdjacentHTML('beforeend', modelChoiceConditionRow(model, {}, rows));
+    return;
+  }
+  if (key === 'choice-condition-remove') {
+    target.closest('.choice-condition-row')?.remove();
+    updateChoiceConditionNumbers(dialog);
+    return;
+  }
   if (key === 'choice-option-add') { target.closest<HTMLElement>('.model-choice-editor-row')!.querySelector('.model-option-rows')!.insertAdjacentHTML('beforeend', `<div class="row model-option-row">${field('選択値', 'choiceOption')}${button('choice-option-remove', '×', 'small ghost')}</div>`); return; }
   if (key === 'choice-option-remove') {
     const row = target.closest<HTMLElement>('.model-choice-editor-row')!;
@@ -356,7 +397,7 @@ async function submit(form: HTMLFormElement) {
       const result = await api<{ entities: Asset[] }>('asset.save', { id: old?.id, ...(old ? { expectedRevision: old.revision } : {}), asset, provenance: provenance(old ? '資産を編集' : '資産を作成') }, true);
       location.hash = `assets/${result.entities[0].id}`;
     }
-  } else if (key === 'binding') { const existing = bindings.find(binding => binding.id === form.dataset.id); await api('binding.save', { id: form.dataset.id || undefined, ...(existing ? { expectedRevision: existing.revision } : {}), binding: { scope: selectedScope, sourceId: form.dataset.source, stageId: form.dataset.stage || undefined, targetId: get('targetId'), purpose: get('purpose'), selectedChoices: readModelSelections(form) }, provenance: provenance('資産の紐づけを編集') }, true); }
+  } else if (key === 'binding') { const existing = bindings.find(binding => binding.id === form.dataset.id); await api('binding.save', { id: form.dataset.id || undefined, ...(existing ? { expectedRevision: existing.revision } : {}), binding: { scope: selectedScope, sourceId: form.dataset.source, stageId: form.dataset.stage || undefined, targetId: get('targetId'), purpose: get('purpose'), selectedChoices: readModelSelections(form), choiceConditions: readModelChoiceConditions(form) }, provenance: provenance('資産の紐づけを編集') }, true); }
   else if (key === 'run') {
     const result = await api<{ run: Run }>('run.start', { workflowId: get('workflowId'), runtime: get('runtime'), instruction: get('instruction'), target: get('target'), ...(selectedScope !== 'global' ? { projectId: selectedScope } : {}) }, true);
     location.hash = `runs/${result.run.id}`;

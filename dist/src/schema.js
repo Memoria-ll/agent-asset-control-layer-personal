@@ -129,6 +129,7 @@ export const bindingSchema = z.object({
     scope: scope.default('global'), sourceId: id, stageId: text.optional(), targetId: id,
     purpose: z.enum(['reference', 'entry-role', 'stage-role', 'stage-model']).default('reference'),
     selectedChoices: z.record(z.string(), text).default({}),
+    choiceConditions: z.array(z.record(z.string(), text)).default([]),
 }).strict();
 export const provenanceSchema = z.object({
     origin: z.enum(['ui', 'ai', 'cli', 'restore', 'proposal', 'init']),

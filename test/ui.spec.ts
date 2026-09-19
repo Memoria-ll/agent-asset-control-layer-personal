@@ -69,6 +69,14 @@ test('C33: Chromium UI assigns existing and new Roles from Workflow editor, runs
   await dialog.getByRole('button', { name: '保存する', exact: true }).click();
   await expect(dialog).not.toBeVisible();
   await expect(page.getByRole('heading', { name: '実装Model', exact: true })).toBeVisible();
+  await page.getByRole('button', { name: '紐づける', exact: true }).click();
+  await dialog.getByLabel('参照する資産').selectOption({ label: 'Skill / 検証手順' });
+  await expect(dialog.getByRole('group', { name: '参照条件' })).toBeVisible();
+  await dialog.getByLabel('実行系の条件').selectOption('codex sol');
+  await dialog.getByLabel('effortの条件').selectOption('high');
+  await dialog.getByRole('button', { name: '紐づけを保存' }).click();
+  await expect(dialog).not.toBeVisible();
+  await expect(page.getByText('適用条件: 実行系=codex sol AND effort=high', { exact: true })).toBeVisible();
   await page.getByRole('button', { name: '＋ 資産を作成' }).click();
   await dialog.getByRole('button', { name: 'Workflow', exact: true }).click();
   await dialog.getByLabel('名前', { exact: true }).fill('改善の確認');
@@ -248,7 +256,7 @@ test('C33: Chromium UI assigns existing and new Roles from Workflow editor, runs
   await page.getByRole('searchbox').fill('検証手順');
   await page.locator('.asset-row').click();
   await expect(page.getByText('検証結果と具体的な根拠を報告する。', { exact: true })).toBeVisible();
-  await page.getByRole('button', { name: '参照元を編集' }).click();
+  await page.getByText('検証担当 経由', { exact: true }).locator('xpath=ancestor::div[contains(@class, "relation")][1]').getByRole('button', { name: '参照元を編集' }).click();
   await expect(dialog.getByText('検証担当 → 参照先')).toBeVisible();
   await dialog.getByRole('button', { name: '紐づけを保存' }).click();
   await expect(dialog).not.toBeVisible();
