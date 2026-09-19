@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { modelChoiceTemplateNames } from './model-template.ts';
 
 export const text = z.string().trim().min(1);
 export const id = z.uuid();
@@ -90,6 +91,14 @@ export const assetSchema = z.preprocess(normalizeAssetRecord, assetInputSchema).
     const choiceNames = a.choices.map(choice => choice.name);
     if (new Set(choiceNames).size !== choiceNames.length) fail('Modelの選択肢名は重複できません。');
     for (const choice of a.choices) if (new Set(choice.options).size !== choice.options.length) fail(`Modelの選択肢「${choice.name}」の値は重複できません。`);
+    const knownChoices = new Set(choiceNames);
+    for (const [field, template] of [['modelName', a.modelName], ['invocationMethod', a.invocationMethod]] as const) {
+      try {
+        for (const name of modelChoiceTemplateNames(template)) if (!knownChoices.has(name)) fail(`${field}の選択肢テンプレート「${name}」は定義されていません。`);
+      } catch (error) {
+        fail(error instanceof Error ? error.message : String(error));
+      }
+    }
   }
   if (a.kind !== 'skill' && a.useCase) fail('直接起動を設定できるのはSkillです。');
   if (a.kind === 'workflow') {

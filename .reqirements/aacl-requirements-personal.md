@@ -108,7 +108,7 @@ Canonical Assetは次の5種とする。
 - Rule
 - Model
 
-各Assetは、ID、name、description、revision、管理先、metadata、history、provenanceを持ち、種類ごとの本文・定義を保持する。SkillはRuntime入口のYAML front matterへ渡す`description`と、UIで人が呼び出し方を判断するための`explanation`、bodyを保持する。Modelはname、description、Model名、呼び出し方を保持する。
+各Assetは、ID、name、description、revision、管理先、metadata、history、provenanceを持ち、種類ごとの本文・定義を保持する。SkillはRuntime入口のYAML front matterへ渡す`description`と、UIで人が呼び出し方を判断するための`explanation`、bodyを保持する。Modelはname、description、Model名、呼び出し方、選択肢グループを保持し、Model名と呼び出し方の`{{choice.<選択肢名>}}`をStageの選択値へ展開する。
 
 Asset削除は対象Assetへの影響を確認してから確定する。確定前に、対象Assetを参照する紐づけ、対象Assetから参照する紐づけ、Project CommonからのRule参照をユーザーへ返す。参照の有無にかかわらず、Asset削除と一覧に含まれる参照解除にはユーザーの明示承認を必須とする。確認後、参照解除とAssetの削除状態への変更を一つの変更として保存する。プレビュー後にAssetまたは参照関係が変更された場合は削除を適用せず、最新の一覧から確認し直す。
 
@@ -269,7 +269,7 @@ Coreは次をRole Contextとして構成する。
 - Workflow / Stageで使うと明示されたSkill / Rule
 - Project Commonに登録されたRule
 
-ModelはModel名と呼び出し方、任意の選択肢グループを保持し、Modelから明示参照されたSkill / RuleをContextへ含める。StageのModel紐づけには各選択肢グループの選択値を保存する。ModelからSkill / Ruleへの紐づけには選択肢条件を指定でき、同じ条件内はAND、複数条件はORとして一致する参照だけをContextへ含める。条件を指定しない参照はすべての選択状態で有効とする。外部Modelの実在性と利用可否、実際のサブエージェント起動はユーザーとRuntime / AIが担う。
+ModelはModel名と呼び出し方、任意の選択肢グループを保持し、Model名と呼び出し方には`{{choice.<選択肢名>}}`を埋め込める。StageのModel紐づけには各選択肢グループの選択値を保存し、ContextとExecution Planでは選択値へ展開する。未定義または未選択の選択肢は拒否する。Modelから明示参照されたSkill / RuleをContextへ含める。ModelからSkill / Ruleへの紐づけには選択肢条件を指定でき、同じ条件内はAND、複数条件はORとして一致する参照だけをContextへ含める。条件を指定しない参照はすべての選択状態で有効とする。外部Modelの実在性と利用可否、実際のサブエージェント起動はユーザーとRuntime / AIが担う。
 
 ---
 
@@ -454,7 +454,7 @@ Resolutionの入力は、Project、使用する紐づけ、Project Common、Work
 - 利用対象Skillのcatalog
 - 現在Stage、担当Roleとresponsibilities、任意の追加指示、現在Stageからの許可transitionと各condition
 
-Stageの担当Roleとresponsibilitiesを工程の基本Contextとして含める。Stage固有の追加指示があればRoleへの補足として含める。StageにModelが紐づく場合はModel名、呼び出し方、Modelから参照したSkill / Rule、およびサブエージェント継続指示をContextへ含める。
+Stageの担当Roleとresponsibilitiesを工程の基本Contextとして含める。Stage固有の追加指示があればRoleへの補足として含める。StageにModelが紐づく場合は選択肢展開済みのModel名、呼び出し方、Modelから参照したSkill / Rule、およびサブエージェント継続指示をContextへ含める。
 
 Workflow RunではSkill本文とsupporting filesをAIが必要時に取得し、利用対象のSkill集合とrevisionをContextの一部として扱う。直接起動Skillは指定Assetの本文を取得して渡す。
 

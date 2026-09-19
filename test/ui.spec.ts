@@ -80,6 +80,11 @@ test('C33: Chromium UI assigns existing and new Roles from Workflow editor, runs
   await dialog.getByLabel('呼び出し方', { exact: true }).fill('Runtimeのsubagent呼び出し');
   await dialog.getByRole('button', { name: '＋ 選択肢を追加' }).click();
   await dialog.getByLabel('選択肢名').fill('実行系');
+  await expect(dialog.getByRole('button', { name: '{{choice.実行系}}', exact: true })).toHaveCount(2);
+  await dialog.getByLabel('Model名').fill('');
+  await dialog.getByRole('button', { name: '{{choice.実行系}}', exact: true }).first().click();
+  await expect(dialog.getByLabel('Model名')).toHaveValue('{{choice.実行系}}');
+  await dialog.getByLabel('Model名').fill('provider/implementer');
   await dialog.getByLabel('選択値').fill('codex luna');
   await dialog.getByRole('button', { name: '＋ 選択値を追加' }).click();
   await dialog.getByLabel('選択値').nth(1).fill('codex sol');

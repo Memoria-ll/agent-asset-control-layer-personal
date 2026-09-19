@@ -236,11 +236,26 @@ function readModelChoices(form) {
         options: [...row.querySelectorAll('[name=choiceOption]')].map(input => input.value),
     }));
 }
+function modelTemplateAssist(target, choices = []) {
+    const tokens = choices.filter(choice => choice.name?.trim()).map(choice => {
+        const token = `{{choice.${choice.name.trim()}}}`;
+        return `<button type="button" class="small ghost template-token" data-template-target="${target}" data-template="${esc(token)}">${htmlText(token)}</button>`;
+    }).join('');
+    return `<div class="template-assist" data-template-assist="${target}"><span class="template-assist-label">選択肢を挿入</span><div class="template-token-list">${tokens || '<small>選択肢を追加すると候補が表示されます。</small>'}</div></div>`;
+}
+function updateModelTemplateAssist(form) {
+    const choices = readModelChoices(form);
+    for (const target of ['modelName', 'invocationMethod']) {
+        const assist = form.querySelector(`[data-template-assist="${target}"]`);
+        if (assist)
+            assist.outerHTML = localizeHtml(modelTemplateAssist(target, choices), language);
+    }
+}
 function assetEditor(a, newKind = 'skill') {
     const kind = a?.kind ?? newKind;
     const commonDescription = kind === 'skill' ? area('コメント', 'explanation', a?.explanation || a?.description, true, false, 'AACL内でこのSkillを見分けるための短い補足です。Runtime YAMLのdescriptionとは別に管理します。') : area('説明', 'description', a?.description);
     const runtimeDescription = kind === 'skill' ? field('説明（Runtime YAML）', 'description', a?.description, false, 'text', 'Runtime YAMLへ出力するSkillのdescriptionです。実行時にSkillの用途を伝えます。') : '';
-    modal(a ? '資産を編集' : '資産を作成', `<form data-form="asset" data-id="${a?.id ?? ''}" data-kind="${kind}" class="form-stack">${!a ? `<div class="filters">${Object.entries(kinds).map(([k, title]) => button(`new-kind:${k}`, title, `filter ${kind === k ? 'active' : ''}`)).join('')}</div>` : ''}<div class="grid-two">${field('名前', 'name', a?.name)}${select('管理先', 'scope', a ? opt(a.scope, labelScope(a.scope)) : opt('global', 'Global', selectedScope) + projects.map(p => opt(p.id, p.name, selectedScope)).join(''))}</div>${commonDescription}${runtimeDescription}${kind === 'model' ? `<div class="grid-two">${field('Model名', 'modelName', a?.modelName)}${area('呼び出し方', 'invocationMethod', a?.invocationMethod)}</div><section><div class="section-header"><div><h3>選択肢</h3><p class="hint">例: 実行系（codex luna / claude opes）、effort（low / medium / high）のように自由に追加できます。</p></div>${button('choice-add', '＋ 選択肢を追加', 'small')}</div><div id="model-choice-rows">${(a?.choices ?? []).map(choice => modelChoiceEditorRow(choice)).join('')}</div></section><p class="hint">呼び出し方はRuntimeへ渡す自由記述です。認証情報は保存しないでください。</p>` : ''}${kind === 'workflow' ? `<section><div class="section-header"><h3>工程</h3>${button('stage-add', '＋ 工程を追加', 'small')}</div><div id="stage-rows">${(a?.stages ?? []).map((s, i) => stageRow(s, i, a ? stageRoleId(a.id, s.id) : '', a ? stageModelId(a.id, s.id) : '', a ? stageModelSelections(a.id, s.id) : {}, (a?.transitions ?? []).filter(t => t.from === s.id), a?.stages ?? [])).join('')}</div><p class="hint">先頭の工程から開始します。各工程に担当Roleと遷移条件を指定し、Modelは必要な工程だけ指定します。</p></section>` : kind !== 'model' ? area(kind === 'role' ? '責務・判断観点・成果責任' : '本文（Markdown）', 'body', kind === 'role' ? a?.responsibilities : a?.body, kind === 'skill', true) : ''}${kind === 'skill' ? `<label class="checkbox-label"><input type="checkbox" name="useCase"${a?.useCase ? ' checked' : ''}>Runtimeから直接起動できるSkillにする</label><section><div class="section-header"><h3>補助ファイル</h3>${button('file-add', '＋ 追加', 'small')}</div><div id="file-rows">${Object.entries(a?.supportingFiles ?? {}).map(([path, body]) => fileRow(path, body)).join('')}</div></section>` : ''}<p class="hint">認証情報は保存しないでください。</p>${formEnd()}</form>`, kind === 'workflow' ? 'workflow-editor' : '');
+    modal(a ? '資産を編集' : '資産を作成', `<form data-form="asset" data-id="${a?.id ?? ''}" data-kind="${kind}" class="form-stack">${!a ? `<div class="filters">${Object.entries(kinds).map(([k, title]) => button(`new-kind:${k}`, title, `filter ${kind === k ? 'active' : ''}`)).join('')}</div>` : ''}<div class="grid-two">${field('名前', 'name', a?.name)}${select('管理先', 'scope', a ? opt(a.scope, labelScope(a.scope)) : opt('global', 'Global', selectedScope) + projects.map(p => opt(p.id, p.name, selectedScope)).join(''))}</div>${commonDescription}${runtimeDescription}${kind === 'model' ? `<div class="grid-two model-template-fields"><div>${field('Model名', 'modelName', a?.modelName)}${modelTemplateAssist('modelName', a?.choices ?? [])}</div><div>${area('呼び出し方', 'invocationMethod', a?.invocationMethod)}${modelTemplateAssist('invocationMethod', a?.choices ?? [])}</div></div><section><div class="section-header"><div><h3>選択肢</h3><p class="hint">例: 実行系（codex luna / claude opes）、effort（low / medium / high）のように自由に追加できます。</p></div>${button('choice-add', '＋ 選択肢を追加', 'small')}</div><div id="model-choice-rows">${(a?.choices ?? []).map(choice => modelChoiceEditorRow(choice)).join('')}</div></section><p class="hint">呼び出し方では、選択肢を${'{{choice.name}}'}の形式で埋め込めます。認証情報は保存しないでください。</p>` : ''}${kind === 'workflow' ? `<section><div class="section-header"><h3>工程</h3>${button('stage-add', '＋ 工程を追加', 'small')}</div><div id="stage-rows">${(a?.stages ?? []).map((s, i) => stageRow(s, i, a ? stageRoleId(a.id, s.id) : '', a ? stageModelId(a.id, s.id) : '', a ? stageModelSelections(a.id, s.id) : {}, (a?.transitions ?? []).filter(t => t.from === s.id), a?.stages ?? [])).join('')}</div><p class="hint">先頭の工程から開始します。各工程に担当Roleと遷移条件を指定し、Modelは必要な工程だけ指定します。</p></section>` : kind !== 'model' ? area(kind === 'role' ? '責務・判断観点・成果責任' : '本文（Markdown）', 'body', kind === 'role' ? a?.responsibilities : a?.body, kind === 'skill', true) : ''}${kind === 'skill' ? `<label class="checkbox-label"><input type="checkbox" name="useCase"${a?.useCase ? ' checked' : ''}>Runtimeから直接起動できるSkillにする</label><section><div class="section-header"><h3>補助ファイル</h3>${button('file-add', '＋ 追加', 'small')}</div><div id="file-rows">${Object.entries(a?.supportingFiles ?? {}).map(([path, body]) => fileRow(path, body)).join('')}</div></section>` : ''}<p class="hint">認証情報は保存しないでください。</p>${formEnd()}</form>`, kind === 'workflow' ? 'workflow-editor' : '');
 }
 function fileRow(path = '', body = '') { return `<div class="editor-row file-editor"><div class="row-head"><strong>補助ファイル</strong>${button('row-remove', '削除', 'small ghost')}</div>${field('相対ファイル名', 'filePath', path)}<div class="spacer"></div>${area('内容', 'fileBody', body, false, true)}</div>`; }
 function readStages(form) { return [...form.querySelectorAll('.stage-editor')].map(row => ({ id: row.dataset.id, name: row.querySelector('[name=stageName]').value, additionalInstructions: row.querySelector('[name=additionalInstructions]').value, description: '' })); }
@@ -331,11 +346,13 @@ async function action(value, target) {
         return;
     }
     if (key === 'choice-add') {
-        dialog.querySelector('#model-choice-rows').insertAdjacentHTML('beforeend', modelChoiceEditorRow());
+        dialog.querySelector('#model-choice-rows').insertAdjacentHTML('beforeend', localizeHtml(modelChoiceEditorRow(), language));
+        updateModelTemplateAssist(dialog);
         return;
     }
     if (key === 'choice-remove') {
         target.closest('.model-choice-editor-row')?.remove();
+        updateModelTemplateAssist(dialog);
         return;
     }
     if (key === 'choice-condition-add') {
@@ -625,6 +642,18 @@ async function submit(form) {
     await refresh();
 }
 document.addEventListener('click', event => {
+    const templateButton = event.target.closest('[data-template]');
+    if (templateButton) {
+        const form = templateButton.closest('form');
+        const input = form?.querySelector(`[name="${templateButton.dataset.templateTarget}"]`);
+        if (!input)
+            return;
+        const token = templateButton.dataset.template ?? '', start = input.selectionStart ?? input.value.length, end = input.selectionEnd ?? start;
+        input.setRangeText(token, start, end, 'end');
+        input.dispatchEvent(new Event('input', { bubbles: true }));
+        input.focus();
+        return;
+    }
     const target = event.target.closest('[data-action]');
     if (!target)
         return;
@@ -681,6 +710,11 @@ document.addEventListener('input', event => {
         const next = document.querySelector('#asset-search');
         next.focus();
         next.setSelectionRange(position, position);
+    }
+    if (input.name === 'choiceName') {
+        const form = input.closest('[data-form=asset]');
+        if (form?.dataset.kind === 'model')
+            updateModelTemplateAssist(form);
     }
 });
 function errorMessage(error) { return error instanceof Error ? error.message : String(error); }
