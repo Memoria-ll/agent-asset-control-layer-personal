@@ -58,7 +58,7 @@ export class Operations {
     write('asset.delete', '影響一覧を確認したユーザーの明示承認後にAssetと参照を削除状態へ変更', { assetId: id, expectedRevision: z.int().positive(), expectedBindingRevisions: z.array(z.object({ id, revision: z.int().positive() }).strict()), expectedProjectCommonRevisions: z.array(z.object({ id, revision: z.int().positive() }).strict()), confirmed: z.literal(true), provenance }, p => core.deleteAsset(p, p.provenance), true);
     write('asset.restore', '過去revisionを新revisionとして復元。現在revisionが変わっていないことをexpectedRevisionで確認する', { assetId: id, revision, expectedRevision: revision }, p => core.restoreAsset(p.assetId, p.revision, p.expectedRevision), true);
     read('usecase.search', 'WorkflowとuseCaseが有効なSkillを検索', { scope: scope.default('global'), query: z.string().default('') }, p => ({ assets: store.list<Asset>('asset').filter(a => !a.deletedAt && (a.scope === 'global' || a.scope === p.scope) && (a.kind === 'workflow' || a.kind === 'skill' && a.useCase) && `${a.name} ${a.description} ${a.kind === 'skill' ? a.explanation : ''}`.toLowerCase().includes(p.query.toLowerCase())) }));
-    read('skill.get', '指定Skillの本文のみを取得。Runを作成しない', { assetId: id }, p => core.skillGet(p.assetId));
+    read('skill.get', '指定Skillの本文と、bindingで参照された通常Skill候補を取得。Runを作成しない', { assetId: id, revision: revision.optional() }, p => core.skillGet(p.assetId, p.revision));
     write('skill.usecase', 'Skillの直接起動を切り替えRuntime入口を同期', { assetId: id, enabled: z.boolean(), provenance }, p => {
       const a = core.asset(p.assetId); if (a.kind !== 'skill') throw new Error('Skillを指定してください。');
       return core.applyChanges([{ type: 'asset.save', id: a.id, expectedRevision: a.revision, asset: { ...core.assetPayload(a), useCase: p.enabled } }], p.provenance);

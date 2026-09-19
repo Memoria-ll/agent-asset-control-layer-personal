@@ -184,9 +184,16 @@ export interface Run extends Stamp {
 export interface Resolution { assetId: string; revision: number; path: string[]; reason: string }
 export type ContextStage = Omit<z.infer<typeof stageSchema>, 'description'>;
 export type ContextAsset = Omit<Asset, 'description' | 'stages'> & { stages: ContextStage[] };
+export interface SkillCatalogEntry { id: string; name: string; description: string }
+export interface SkillLoader {
+  catalogKey: string;
+  name: string;
+  source: 'aacl';
+  loader: { type: 'aacl-asset'; assetId: string; revision: number };
+}
 export interface Context {
   runId: string; workflow: ContextAsset; stage: ContextStage; stageRoleId: string;
-  model?: ContextAsset; modelSelections?: Record<string, string>; roles: ContextAsset[]; rules: ContextAsset[]; skillCatalog: { id: string; name: string; description: string }[];
+  model?: ContextAsset; modelSelections?: Record<string, string>; roles: ContextAsset[]; rules: ContextAsset[]; skillCatalog: SkillCatalogEntry[]; skillLoaders: SkillLoader[];
   subagent?: { id: string; roleId: string; modelId: string; continuity: 'new' | 'same'; instruction: string };
   resolution: Resolution[]; unavailable: { target: string; reason: string }[];
 }

@@ -77,13 +77,15 @@ export class RuntimeEntries {
             : `---\nname: ${entryName}\n---`;
         return `${frontmatter}\n\n<!-- aacl-entry:${asset.id} -->\n\nMCPの aacl_${operation} に ${input} を渡す。\n${asset.kind === 'workflow' ? '現在開いているProject rootをrootへ渡し、operationIdに新しいUUIDを使う。返されたnextExecutionのexecutorを確認し、実施主体がcontextHandleでaacl_context_getを呼び出してからStageを実施する。遷移後も返されたnextExecutionに従い、Skill・Rule本文をオーケストレーターへ転送しない。\n' : '取得したCanonical本文に従う。\n'}`;
     }
-    policy(runtime) {
-        return runtime === 'codex' ? 'policy:\n  allow_implicit_invocation: false\n' : undefined;
+    policy(runtime, implicitInvocation = false) {
+        return runtime === 'codex' ? `policy:\n  allow_implicit_invocation: ${implicitInvocation ? 'true' : 'false'}\n` : undefined;
     }
     sync() {
         const results = [];
         for (const target of this.core.store.list('runtime-target').filter(t => t.enabled)) {
-            const assets = this.core.store.list('asset').filter(a => !a.deletedAt && a.scope === target.scope && (a.kind === 'workflow' || a.kind === 'skill' && a.useCase));
+            const allAssets = this.core.store.list('asset');
+            const boundSkillIds = new Set(this.core.bindings(target.scope).filter(b => b.purpose === 'reference').map(b => b.targetId).filter(assetId => allAssets.some(a => a.id === assetId && a.kind === 'skill')));
+            const assets = allAssets.filter(a => !a.deletedAt && a.scope === target.scope && (a.kind === 'workflow' || a.kind === 'skill' && (a.useCase || boundSkillIds.has(a.id))));
             const names = runtimeNames(assets);
             const previous = this.core.store.list('runtime-entry').filter(e => e.targetId === target.id && e.active);
             const ids = new Set([...assets.map(a => a.id), ...previous.map(e => e.assetId)]);
@@ -113,8 +115,9 @@ export class RuntimeEntries {
                         existingPolicy = readFileSync(policyPath, 'utf8');
                     }
                     const desired = asset ? this.body(asset, target.runtime, entryName) : undefined;
-                    const expectedPolicy = target.runtime === 'codex' ? this.policy(target.runtime) : undefined;
-                    const desiredPolicy = asset ? expectedPolicy : undefined;
+                    const oldImplicitInvocation = old?.implicitInvocation === true;
+                    const ownedPolicy = target.runtime === 'codex' ? this.policy(target.runtime, oldImplicitInvocation) : undefined;
+                    const desiredPolicy = asset ? this.policy(target.runtime, asset.kind === 'skill' && boundSkillIds.has(asset.id)) : undefined;
                     let oldPathExists = false;
                     if (asset && old && old.path !== path && existsSync(old.path)) {
                         safeDirectory(dirname(old.path));
@@ -131,14 +134,14 @@ export class RuntimeEntries {
                             safeDirectory(dirname(oldPolicyPath));
                             if (lstatSync(oldPolicyPath).isSymbolicLink())
                                 throw new Error('以前のCodex Skill policyがsymlinkのため移動できません。');
-                            if (readFileSync(oldPolicyPath, 'utf8') !== desiredPolicy)
+                            if (readFileSync(oldPolicyPath, 'utf8') !== ownedPolicy)
                                 throw new Error('以前のCodex Skill policyがAACL生成後に変更されています。内容を確認してください。');
                             oldPolicyExists = true;
                         }
                     }
                     if (existing !== undefined && existing !== desired && (!old || old.path !== path || hash(existing) !== old.hash))
                         throw new Error('既存ファイルがAACL生成後に変更されています。内容を確認してください。');
-                    if (existingPolicy !== undefined && existingPolicy !== expectedPolicy)
+                    if (existingPolicy !== undefined && existingPolicy !== (old ? ownedPolicy : desiredPolicy))
                         throw new Error('Codex Skill policyがAACL生成後に変更されています。内容を確認してください。');
                     if (asset) {
                         if (existing !== desired) {
@@ -158,13 +161,14 @@ export class RuntimeEntries {
                             removeEmptyCodexSkillDirectory(target.runtime, old.path);
                         }
                         if (oldPolicyExists) {
-                            if (lstatSync(oldPolicyPath).isSymbolicLink() || readFileSync(oldPolicyPath, 'utf8') !== desiredPolicy)
+                            if (lstatSync(oldPolicyPath).isSymbolicLink() || readFileSync(oldPolicyPath, 'utf8') !== ownedPolicy)
                                 throw new Error('以前のCodex Skill policyがAACL生成後に変更されています。内容を確認してください。');
                             unlinkSync(oldPolicyPath);
                             removeEmptyCodexSkillDirectory(target.runtime, old.path);
                         }
-                        if (!old || old.path !== path || old.hash !== hash(desired))
-                            this.core.store.put('runtime-entry', { id: old?.id, targetId: target.id, assetId, path, hash: hash(desired), active: true });
+                        const implicitInvocation = asset.kind === 'skill' && boundSkillIds.has(asset.id);
+                        if (!old || old.path !== path || old.hash !== hash(desired) || old.implicitInvocation !== implicitInvocation)
+                            this.core.store.put('runtime-entry', { id: old?.id, targetId: target.id, assetId, path, hash: hash(desired), active: true, implicitInvocation });
                     }
                     else if (old) {
                         if (existing !== undefined) {
