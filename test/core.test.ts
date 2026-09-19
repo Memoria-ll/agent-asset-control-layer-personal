@@ -101,6 +101,12 @@ test('Model assets bind Skills and Rules, and consecutive matching Stage assignm
   assert.equal(first.context.model?.id, model.id);
   assert.equal(first.context.model?.modelName, 'provider/implementer');
   assert.equal(first.context.model?.invocationMethod, 'Runtimeのsubagent呼び出し');
+  assert.equal(Object.hasOwn(first.context.workflow, 'description'), false);
+  assert.equal(Object.hasOwn(first.context.workflow.stages[0]!, 'description'), false);
+  assert.equal(Object.hasOwn(first.context.stage, 'description'), false);
+  assert.equal(Object.hasOwn(first.context.model!, 'description'), false);
+  assert.equal(Object.hasOwn(first.context.roles[0]!, 'description'), false);
+  assert.equal(Object.hasOwn(first.context.rules[0]!, 'description'), false);
   assert.equal(first.context.subagent?.continuity, 'new');
   assert.ok(first.context.subagent?.id);
   assert.equal(first.context.skillCatalog.some(skillAsset => skillAsset.id === skill.id), true);
@@ -446,6 +452,7 @@ test('Runtime entry names come from Workflow and direct Skill names, with IDs on
     assert.match(readFileSync(join(codexRoot, 'skills', name, 'SKILL.md'), 'utf8'), new RegExp(`^name: ${name}$`, 'm'));
   }
   const workflowEntry = readFileSync(join(claudeRoot, 'commands', `${names[0]}.md`), 'utf8');
+  assert.ok(!workflowEntry.includes('\ndescription:'));
   assert.match(workflowEntry, /MCPの aacl_run_start/); assert.ok(!workflowEntry.includes('ensure')); assert.ok(!workflowEntry.includes('shellで'));
   const skillEntry = readFileSync(join(codexRoot, 'skills', 'architecture-review', 'SKILL.md'), 'utf8');
   assert.match(skillEntry, /MCPの aacl_skill_get/); assert.ok(!skillEntry.includes('ensure')); assert.ok(!skillEntry.includes('shellで'));

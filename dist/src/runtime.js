@@ -72,8 +72,10 @@ export class RuntimeEntries {
     body(asset, runtime, entryName = runtimeSlug(asset.name)) {
         const operation = asset.kind === 'workflow' ? 'run_start' : 'skill_get';
         const input = asset.kind === 'workflow' ? `workflowId: ${asset.id}` : `assetId: ${asset.id}`;
-        const description = asset.kind === 'skill' ? asset.description : `${asset.name}をAACLから起動する`;
-        return `---\nname: ${entryName}\ndescription: ${JSON.stringify(description)}\n---\n\n<!-- aacl-entry:${asset.id} -->\n\nMCPの aacl_${operation} に ${input} を渡す。\n${asset.kind === 'workflow' ? '現在開いているProject rootをrootへ渡し、operationIdに新しいUUIDを使う。返されたcontextHandleを、この会話の後続Run操作へ渡す。\n' : '取得したCanonical本文に従う。\n'}`;
+        const frontmatter = asset.kind === 'skill'
+            ? `---\nname: ${entryName}\ndescription: ${JSON.stringify(asset.description)}\n---`
+            : `---\nname: ${entryName}\n---`;
+        return `${frontmatter}\n\n<!-- aacl-entry:${asset.id} -->\n\nMCPの aacl_${operation} に ${input} を渡す。\n${asset.kind === 'workflow' ? '現在開いているProject rootをrootへ渡し、operationIdに新しいUUIDを使う。返されたcontextHandleを、この会話の後続Run操作へ渡す。\n' : '取得したCanonical本文に従う。\n'}`;
     }
     policy(runtime) {
         return runtime === 'codex' ? 'policy:\n  allow_implicit_invocation: false\n' : undefined;

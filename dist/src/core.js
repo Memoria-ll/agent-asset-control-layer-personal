@@ -275,11 +275,13 @@ export class Core {
         const model = stageModelId ? chosen.get(stageModelId) : undefined;
         if (stageModelId && model?.kind !== 'model')
             throw new Error(`このStageのModelを取得できません: ${stageId}`);
+        const contextStage = ({ description: _description, ...contextStage }) => contextStage;
+        const contextAsset = ({ description: _description, stages, ...contextAsset }) => ({ ...contextAsset, stages: stages.map(contextStage) });
         return {
-            runId: snapshot.runId, workflow, stage, stageRoleId,
-            ...(model ? { model } : {}),
-            roles: [...chosen.values()].filter(a => a.kind === 'role'),
-            rules: [...chosen.values()].filter(a => a.kind === 'rule'),
+            runId: snapshot.runId, workflow: contextAsset(workflow), stage: contextStage(stage), stageRoleId,
+            ...(model ? { model: contextAsset(model) } : {}),
+            roles: [...chosen.values()].filter(a => a.kind === 'role').map(contextAsset),
+            rules: [...chosen.values()].filter(a => a.kind === 'rule').map(contextAsset),
             skillCatalog: [...chosen.values()].filter(a => a.kind === 'skill').map(({ id, name, description }) => ({ id, name, description })),
             ...(model && subagent ? { subagent: { id: subagent.id, roleId: stageRoleId, modelId: model.id, continuity: subagent.continuity, instruction: 'このStageは指定Modelをサブエージェントとして呼び出して実行する。直前のStageと担当Role・Modelが同じ場合は同じサブエージェントへ依頼する。' } } : {}),
             resolution, unavailable: [],

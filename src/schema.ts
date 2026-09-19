@@ -136,9 +136,11 @@ export interface Run extends Stamp {
   subagentId?: string; subagentRoleId?: string; subagentModelId?: string; subagentContinuity?: 'new' | 'same';
 }
 export interface Resolution { assetId: string; revision: number; path: string[]; reason: string }
+export type ContextStage = Omit<z.infer<typeof stageSchema>, 'description'>;
+export type ContextAsset = Omit<Asset, 'description' | 'stages'> & { stages: ContextStage[] };
 export interface Context {
-  runId: string; workflow: Asset; stage: z.infer<typeof stageSchema>; stageRoleId: string;
-  model?: Asset; roles: Asset[]; rules: Asset[]; skillCatalog: { id: string; name: string; description: string }[];
+  runId: string; workflow: ContextAsset; stage: ContextStage; stageRoleId: string;
+  model?: ContextAsset; roles: ContextAsset[]; rules: ContextAsset[]; skillCatalog: { id: string; name: string; description: string }[];
   subagent?: { id: string; roleId: string; modelId: string; continuity: 'new' | 'same'; instruction: string };
   resolution: Resolution[]; unavailable: { target: string; reason: string }[];
 }
