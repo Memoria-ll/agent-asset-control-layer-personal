@@ -34,6 +34,39 @@ function fixture(t: { after: (fn: () => void) => void }) {
   return { store, core, ops, call, asset, workflow, bind, start };
 }
 
+test('Skill metadata separates the human explanation from Runtime description and discards old classifications', async t => {
+  const f = fixture(t);
+  const skill = await f.asset('skill', { name: 'frontmatter-skill', description: '人が読む説明', taskType: 'Runtimeが使う説明', body: '本文' });
+  assert.equal(skill.description, 'Runtimeが使う説明');
+  assert.equal(skill.explanation, '人が読む説明');
+  assert.equal('taskType' in skill, false);
+
+  const role = await f.asset('role', { taskType: 'Roleの旧分類' });
+  assert.equal('taskType' in role, false);
+  const workflow = await f.workflow();
+  assert.equal('taskType' in workflow, false);
+  assert.equal('taskType' in workflow.stages[0]!, false);
+  await f.bind(workflow, skill);
+  const run = await f.start(workflow);
+  assert.deepEqual(run.context.skillCatalog, [{ id: skill.id, name: skill.name, description: skill.description }]);
+  assert.equal('revision' in run.context.skillCatalog[0]!, false);
+  assert.equal('taskType' in run.run, false);
+});
+
+test('Runtime Skill entries carry only frontmatter metadata and the AACL entry ID', async t => {
+  const f = fixture(t), skill = await f.asset('skill', { name: 'runtime-description', description: 'yaml frontmatter description', explanation: '人が呼んで分かる説明', body: 'CANONICAL_SKILL_BODY_42', useCase: true });
+  const root = mkdtempSync(join(tmpdir(), 'aacl-runtime-description-'));
+  await f.call('runtime.register', { runtime: 'codex', platform: 'wsl', scope: 'global', path: root });
+  const content = readFileSync(join(root, 'skills', skill.name, 'SKILL.md'), 'utf8');
+  assert.match(content, /^name: runtime-description$/m);
+  assert.match(content, /^description: "yaml frontmatter description"$/m);
+  assert.match(content, new RegExp(`<!-- aacl-entry:${skill.id} -->`));
+  assert.ok(skill.explanation);
+  assert.ok(!content.includes(skill.explanation));
+  assert.ok(!content.includes(skill.body));
+  assert.ok(!content.includes('disable-model-invocation'));
+});
+
 test('C09: a Workflow cannot be saved while a Stage lacks its responsible Role', async t => {
   const f = fixture(t);
   const workflow = { kind: 'workflow', name: 'Role前提Workflow', description: '担当Roleを必須にする', entryStage: 'work', stages: [{ id: 'work', name: '作業', completion_condition: '作業結果を確認' }], transitions: [{ id: 'done', from: 'work', to: 'completed', type: 'complete', label: '完了' }] };

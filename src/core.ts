@@ -229,7 +229,7 @@ export class Core {
       ...(model ? { model } : {}),
       roles: [...chosen.values()].filter(a => a.kind === 'role'),
       rules: [...chosen.values()].filter(a => a.kind === 'rule'),
-      skillCatalog: [...chosen.values()].filter(a => a.kind === 'skill').map(({ id, name, description, revision }) => ({ id, name, description, revision })),
+      skillCatalog: [...chosen.values()].filter(a => a.kind === 'skill').map(({ id, name, description }) => ({ id, name, description })),
       ...(model && subagent ? { subagent: { id: subagent.id, roleId: stageRoleId, modelId: model.id, continuity: subagent.continuity, instruction: 'このStageは指定Modelをサブエージェントとして呼び出して実行する。直前のStageと担当Role・Modelが同じ場合は同じサブエージェントへ依頼する。' } } : {}),
       resolution, unavailable: [],
     };
@@ -274,7 +274,7 @@ export class Core {
     const snapshot = this.store.put('snapshot', { ...draft, initialContext });
     const run = this.store.put('run', { id: runId, contextHandle, workflowId: workflow.id, workflowRevision: workflow.revision, projectId: project?.id, snapshotId,
       stageId: workflow.entryStage, status: 'active' as const, version: 1, runtime: input.runtime, instruction: input.instruction, target: input.target,
-      taskType: workflow.taskType, lastActivity: new Date().toISOString(),
+      lastActivity: new Date().toISOString(),
       ...(initialBaseContext.model ? { subagentId: initialSubagentId, subagentRoleId: initialBaseContext.stageRoleId, subagentModelId: initialBaseContext.model.id, subagentContinuity: 'new' as const } : {}),
     }, scope);
     this.event(run, 'started', { snapshotId, ...(initialBaseContext.model ? { subagentId: initialSubagentId, modelId: initialBaseContext.model.id } : {}) });
@@ -308,7 +308,7 @@ export class Core {
   skillGet(assetId: string) {
     const asset = this.asset(assetId);
     if (asset.kind !== 'skill') throw new Error('Skillを指定してください。');
-    return { id: asset.id, name: asset.name, revision: asset.revision, body: asset.body };
+    return { id: asset.id, name: asset.name, description: asset.description, revision: asset.revision, body: asset.body };
   }
   runSkillGet(handle: string, assetId: string, file?: string) {
     const run = this.run(handle), snapshot = this.store.get<Snapshot>(run.snapshotId, 'snapshot');

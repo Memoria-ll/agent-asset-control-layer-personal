@@ -60,7 +60,7 @@ aacl health
 
 `setup`は編集可能な`journal`と`journal-review`のSkill Assetも導入します。管理するProjectのルートで`aacl init`を実行すると、Project登録とProject scopeのRuntime設定先を準備します。
 
-WSL上で`setup`を実行すると、Windowsログオン時に対象WSLとAACL Serviceを起動するタスクも登録します。配置するRuntime入口にはAsset IDを渡すMCP operationだけを記載します。自動起動は`aacl autostart enable`、`aacl autostart disable`、`aacl autostart status`で管理します。
+WSL上で`setup`を実行すると、Windowsログオン時に対象WSLとAACL Serviceを起動するタスクも登録します。配置するSkillのRuntime入口には`name`、`description`、Asset IDと、発火後にAACLから本文を取得するMCP operationだけを記載します。自動起動は`aacl autostart enable`、`aacl autostart disable`、`aacl autostart status`で管理します。
 
 主なCLIコマンド:
 
@@ -124,7 +124,7 @@ Assetの管理先に対応するGlobalまたはProject scopeへ、Claude Codeま
 | Claude Code | `<target>/commands/<slug>.md` |
 | Codex | `<target>/skills/<slug>/SKILL.md` |
 
-入口はAsset IDを参照し、指示本文はAACLから取得します。本文の正本はSQLiteにあります。Windowsの設定先では生成入口から`wsl.exe`を呼び出します。生成後に管理対象の入口が編集された場合、同期はその内容を上書きせず診断へ記録します。Runtime設定先の管理を解除しても、生成済み入口は残ります。
+入口は`name`、`description`、Asset IDを参照し、指示本文は発火後にAACLから取得します。本文の正本はSQLiteにあります。Windowsの設定先では生成入口から`wsl.exe`を呼び出します。生成後に管理対象の入口が編集された場合、同期はその内容を上書きせず診断へ記録します。Runtime設定先の管理を解除しても、生成済み入口は残ります。
 
 ## ブラウザーUIからWorkflowを開始する
 

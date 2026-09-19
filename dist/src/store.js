@@ -1,5 +1,6 @@
 import { DatabaseSync } from 'node:sqlite';
 import { randomUUID } from 'node:crypto';
+import { normalizeAssetRecord } from './schema.js';
 export class Store {
     db;
     constructor(path) {
@@ -33,34 +34,50 @@ export class Store {
         const row = this.db.prepare('SELECT kind,data FROM records WHERE id=?').get(id);
         if (!row || (kind && row.kind !== kind))
             throw new Error(`対象が見つかりません: ${id}`);
-        return JSON.parse(row.data);
+        return this.normalize(row.kind, JSON.parse(row.data));
     }
     maybe(id) {
-        const row = this.db.prepare('SELECT data FROM records WHERE id=?').get(id);
-        return row ? JSON.parse(row.data) : undefined;
+        const row = this.db.prepare('SELECT kind,data FROM records WHERE id=?').get(id);
+        return row ? this.normalize(row.kind, JSON.parse(row.data)) : undefined;
     }
     list(kind, scope) {
         const rows = scope === undefined
             ? this.db.prepare('SELECT data FROM records WHERE kind=? ORDER BY rowid DESC').all(kind)
             : this.db.prepare('SELECT data FROM records WHERE kind=? AND scope=? ORDER BY rowid DESC').all(kind, scope);
-        return rows.map(r => JSON.parse(r.data));
+        return rows.map(r => {
+            const row = r;
+            return this.normalize(kind, JSON.parse(row.data));
+        });
     }
     put(kind, input, scope = 'global') {
+        const normalized = this.normalize(kind, input);
         const id = input.id ?? randomUUID(), old = this.maybe(id), now = new Date().toISOString();
-        const data = { ...input, id, revision: (old?.revision ?? 0) + 1, createdAt: old?.createdAt ?? now, updatedAt: now };
+        const data = { ...normalized, id, revision: (old?.revision ?? 0) + 1, createdAt: old?.createdAt ?? now, updatedAt: now };
         const serialized = JSON.stringify(data);
         this.db.prepare('INSERT INTO records VALUES (?,?,?,?) ON CONFLICT(id) DO UPDATE SET data=excluded.data,scope=excluded.scope').run(id, kind, scope, serialized);
         this.db.prepare('INSERT INTO revisions(id,revision,kind,data) VALUES(?,?,?,?)').run(id, data.revision, kind, serialized);
         return data;
     }
     revision(id, revision) {
-        const row = this.db.prepare('SELECT data FROM revisions WHERE id=? AND revision=?').get(id, revision);
+        const row = this.db.prepare('SELECT kind,data FROM revisions WHERE id=? AND revision=?').get(id, revision);
         if (!row)
             throw new Error(`revisionが見つかりません: ${id}@${revision}`);
-        return JSON.parse(row.data);
+        return this.normalize(row.kind, JSON.parse(row.data));
     }
     revisions(id) {
-        return this.db.prepare('SELECT data FROM revisions WHERE id=? ORDER BY revision DESC').all(id).map(r => JSON.parse(r.data));
+        return this.db.prepare('SELECT kind,data FROM revisions WHERE id=? ORDER BY revision DESC').all(id).map(r => {
+            const row = r;
+            return this.normalize(row.kind, JSON.parse(row.data));
+        });
+    }
+    normalize(kind, value) {
+        if (kind === 'asset')
+            return normalizeAssetRecord(value);
+        if (kind === 'run' && value && typeof value === 'object' && !Array.isArray(value)) {
+            const { taskType: _taskType, ...rest } = value;
+            return rest;
+        }
+        return value;
     }
     boundary() { return Number(this.db.prepare('SELECT COALESCE(MAX(sequence),0) n FROM revisions').get().n); }
     atomic(fn) {

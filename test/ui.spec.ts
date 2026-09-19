@@ -31,10 +31,12 @@ test('C33: Chromium UI assigns existing and new Roles from Workflow editor, runs
   const dialog = page.getByRole('dialog');
   await dialog.getByLabel('名前', { exact: true }).fill('検証手順');
   await dialog.getByLabel('説明', { exact: true }).fill('実際のデータ経路で結果を確かめる');
+  await dialog.getByLabel('description（Runtime YAML）', { exact: true }).fill('実データを使う検証手順を選ぶ');
   await dialog.getByLabel('本文（Markdown）').fill('変更に関係する検証を実行し、結果を記録する。');
   await dialog.getByRole('button', { name: '保存する', exact: true }).click();
   await expect(dialog).not.toBeVisible();
   await expect(page.getByRole('heading', { name: '検証手順', exact: true })).toBeVisible();
+  await expect(page.getByText('実データを使う検証手順を選ぶ', { exact: true })).toBeVisible();
   await page.getByRole('switch').click();
   await expect(page.getByRole('switch')).toHaveAttribute('aria-checked', 'true');
   await page.getByRole('button', { name: '＋ 資産を作成' }).click();

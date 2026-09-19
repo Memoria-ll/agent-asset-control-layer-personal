@@ -1,5 +1,6 @@
 import { DatabaseSync } from 'node:sqlite';
 import { randomUUID } from 'node:crypto';
+import { normalizeAssetRecord } from './schema.ts';
 import type { Stamp } from './schema.ts';
 
 export class Store {
@@ -33,33 +34,48 @@ export class Store {
   get<T>(id: string, kind?: string): T {
     const row = this.db.prepare('SELECT kind,data FROM records WHERE id=?').get(id) as { kind: string; data: string } | undefined;
     if (!row || (kind && row.kind !== kind)) throw new Error(`対象が見つかりません: ${id}`);
-    return JSON.parse(row.data) as T;
+    return this.normalize<T>(row.kind, JSON.parse(row.data));
   }
   maybe<T>(id: string): T | undefined {
-    const row = this.db.prepare('SELECT data FROM records WHERE id=?').get(id) as { data: string } | undefined;
-    return row ? JSON.parse(row.data) as T : undefined;
+    const row = this.db.prepare('SELECT kind,data FROM records WHERE id=?').get(id) as { kind: string; data: string } | undefined;
+    return row ? this.normalize<T>(row.kind, JSON.parse(row.data)) : undefined;
   }
   list<T>(kind: string, scope?: string): T[] {
     const rows = scope === undefined
       ? this.db.prepare('SELECT data FROM records WHERE kind=? ORDER BY rowid DESC').all(kind)
       : this.db.prepare('SELECT data FROM records WHERE kind=? AND scope=? ORDER BY rowid DESC').all(kind, scope);
-    return rows.map(r => JSON.parse(r.data as string) as T);
+    return rows.map(r => {
+      const row = r as { data: string };
+      return this.normalize<T>(kind, JSON.parse(row.data));
+    });
   }
   put<T extends object>(kind: string, input: T & { id?: string }, scope = 'global'): T & Stamp {
+    const normalized = this.normalize<T>(kind, input);
     const id = input.id ?? randomUUID(), old = this.maybe<Stamp>(id), now = new Date().toISOString();
-    const data = { ...input, id, revision: (old?.revision ?? 0) + 1, createdAt: old?.createdAt ?? now, updatedAt: now };
+    const data = { ...normalized, id, revision: (old?.revision ?? 0) + 1, createdAt: old?.createdAt ?? now, updatedAt: now };
     const serialized = JSON.stringify(data);
     this.db.prepare('INSERT INTO records VALUES (?,?,?,?) ON CONFLICT(id) DO UPDATE SET data=excluded.data,scope=excluded.scope').run(id, kind, scope, serialized);
     this.db.prepare('INSERT INTO revisions(id,revision,kind,data) VALUES(?,?,?,?)').run(id, data.revision, kind, serialized);
     return data;
   }
   revision<T>(id: string, revision: number): T {
-    const row = this.db.prepare('SELECT data FROM revisions WHERE id=? AND revision=?').get(id, revision);
+    const row = this.db.prepare('SELECT kind,data FROM revisions WHERE id=? AND revision=?').get(id, revision) as { kind: string; data: string } | undefined;
     if (!row) throw new Error(`revisionが見つかりません: ${id}@${revision}`);
-    return JSON.parse(row.data as string) as T;
+    return this.normalize<T>(row.kind, JSON.parse(row.data));
   }
   revisions<T>(id: string): T[] {
-    return this.db.prepare('SELECT data FROM revisions WHERE id=? ORDER BY revision DESC').all(id).map(r => JSON.parse(r.data as string) as T);
+    return this.db.prepare('SELECT kind,data FROM revisions WHERE id=? ORDER BY revision DESC').all(id).map(r => {
+      const row = r as { kind: string; data: string };
+      return this.normalize<T>(row.kind, JSON.parse(row.data));
+    });
+  }
+  private normalize<T>(kind: string, value: unknown): T {
+    if (kind === 'asset') return normalizeAssetRecord(value) as T;
+    if (kind === 'run' && value && typeof value === 'object' && !Array.isArray(value)) {
+      const { taskType: _taskType, ...rest } = value as Record<string, unknown>;
+      return rest as T;
+    }
+    return value as T;
   }
   boundary(): number { return Number(this.db.prepare('SELECT COALESCE(MAX(sequence),0) n FROM revisions').get()!.n); }
   atomic<T>(fn: () => T): T {

@@ -167,7 +167,7 @@ Read the MCP tool definitions for each operation's current input schema. The Run
 
 ## Context and on-demand Skills
 
-At Run start, AACL pins the selected Workflow, relevant Assets, bindings, and Project Common settings in an immutable Snapshot. The initial Context includes the current stage, its Role, applicable Rule bodies, and candidate Skill descriptions. Skill bodies and supporting files are retrieved from the Snapshot's pinned revisions when needed.
+At Run start, AACL pins the selected Workflow, relevant Assets, bindings, and Project Common settings in an immutable Snapshot. The initial Context includes the current stage, its Role, applicable Rule bodies, and candidate Skill names plus Runtime descriptions. Skill bodies and supporting files are retrieved from the Snapshot's pinned revisions when needed.
 
 Context delivery and reported Skill use are stored separately. Retrieving a Skill for inspection does not by itself report that the AI used it. The execution view shows the current stage's Context and Skill candidates; Diagnostics reports the delivered Context size in UTF-8 bytes.
 

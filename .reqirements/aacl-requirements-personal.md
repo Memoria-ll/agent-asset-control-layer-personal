@@ -108,7 +108,7 @@ Canonical Assetは次の5種とする。
 - Rule
 - Model
 
-各Assetは、ID、name、description、revision、管理先、metadata、history、provenanceを持ち、種類ごとの本文・定義を保持する。Skillに必須の内容項目はname、description、bodyとする。Modelはname、description、Model名、呼び出し方を保持する。
+各Assetは、ID、name、description、revision、管理先、metadata、history、provenanceを持ち、種類ごとの本文・定義を保持する。SkillはRuntime入口のYAML front matterへ渡す`description`と、UIで人が呼び出し方を判断するための`explanation`、bodyを保持する。Modelはname、description、Model名、呼び出し方を保持する。
 
 Asset削除は対象Assetへの影響を確認してから確定する。確定前に、対象Assetを参照する紐づけ、対象Assetから参照する紐づけ、Project CommonからのRule参照をユーザーへ返す。参照の有無にかかわらず、Asset削除と一覧に含まれる参照解除にはユーザーの明示承認を必須とする。確認後、参照解除とAssetの削除状態への変更を一つの変更として保存する。プレビュー後にAssetまたは参照関係が変更された場合は削除を適用せず、最新の一覧から確認し直す。
 
@@ -225,7 +225,6 @@ Workflowは、複数工程からなる再利用可能な開発方法を定義す
 Workflowは次を保持する。
 
 - ID、name、description、revision
-- task type / classification
 - transitions
 - retry / reject / return
 - Stageの一覧と、各Stageに必須のcompletion_condition
@@ -242,7 +241,7 @@ Skillは、再利用する手順、専門知識、範囲の定まった作業を
 
 Skillは次を保持する。
 
-- ID、name、description、revision
+- ID、name、description、explanation、revision
 - body
 - supporting files
 - useCase
@@ -259,7 +258,7 @@ Skillは次を保持する。
 
 Roleは、実行主体が何者として振る舞い、何を担うかを定義する。共通の責務として複数のWorkflow / Stageから再利用する。
 
-RoleはID、name、description、revision、responsibilities、task type / classificationを保持する。responsibilitiesは、期待する責務・判断観点・成果責任を表す。
+RoleはID、name、description、revision、responsibilitiesを保持する。responsibilitiesは、期待する責務・判断観点・成果責任を表す。
 
 Roleで使うSkill / Ruleは、使用するGlobalまたはProject scopeの紐づけから取得する。Skill / Ruleの本文は独立したCanonical Assetとして管理し、Roleから参照する。ModelはStageから参照し、Model自身からSkill / Ruleを参照できる。
 
@@ -275,7 +274,7 @@ ModelはModel名と呼び出し方を保持し、Modelから明示参照され�
 
 ---
 
-# 12. Ruleと作業分類
+# 12. RuleとSkillのRuntime description
 
 Ruleは、対象実行で守る判断・行動指針を表す。ID、name、description、revision、bodyを保持する。
 
@@ -283,7 +282,7 @@ Roleのresponsibilitiesが責務・成果責任を定義するのに対し、Rul
 
 使うRuleはRole / Workflow / Stageへの紐づけ、またはProject Commonへの登録で明示する。
 
-Task Typeは作業の性質を表す分類情報とし、Workflow / Role / Skill等へ付与する。Runのmetadataとして記録し、実行の説明や観測・比較の軸として利用する。
+Skillの`description`はRuntime入口のYAML front matterへそのまま渡す短い説明とする。UIのSkillの「説明」欄には、人が呼び出すか判断しやすい`explanation`を保存する。Workflow、Role、Stage、Rule、Modelには作業分類を保持せず、既存の分類値も通常利用・保存時に破棄する。
 
 作業方法はWorkflow、実行責務はRole、具体的な手順や知識はSkill、制約はRuleとして表現する。
 
@@ -345,7 +344,7 @@ Bootstrapは繰り返し取得しても同じ案内として扱う。通常会�
 
 Runtime設定先には、そのscopeに属する各Workflowと`useCase=true`のSkillだけを入口として配置する。Claude Codeでは`.claude/commands/`配下に起動用Commandを、Codexでは`.codex/skills/`配下に起動用Skillを生成する。Global scopeの入口はGlobal設定先に、Project scopeの入口は該当Project内に配置する。入口名は対象Asset名をRuntimeで使える形式に整えて生成し、同一設定先で名前が衝突する場合だけAsset IDを末尾に付ける。配置単位はWorkflow全体または直接起動Skillとし、StageやWorkflow内で参照する通常SkillはWorkflowの構成要素として扱う。初期導入時に作成し、対象の追加・解除・名称変更等で入口との対応関係が変わる場合は、Canonical Stateと一致するよう更新する。
 
-Runtime入口には対象AssetのIDと対応するMCP operationの呼び出し方法だけを記載し、Service起動用のshell commandを含めない。WSL上のServiceはWindowsログオン時にタスクスケジューラから起動する。自動起動はCLIで有効・無効・状態確認でき、アンインストール時に登録を解除する。
+Runtime入口にはSkillの`name`、`description`、AACL Asset IDと対応するMCP operationの呼び出し方法だけを記載し、Canonical本文やsupporting files、Service起動用のshell commandを含めない。発火後はAACLのSkill取得operationから本文を取得する。WSL上のServiceはWindowsログオン時にタスクスケジューラから起動する。自動起動はCLIで有効・無効・状態確認でき、アンインストール時に登録を解除する。
 
 Global設定先はRuntimeの標準位置から検出し、UIから追加できる。Windows側とWSL側のGlobal設定先は別々に扱う。各設定先にはscopeが一致するUse Case入口を配置する。設定先を管理対象から外す場合は既存ファイルを残し、以後Coreの管理対象から外す。SkillのuseCaseをfalseに変更した場合は、そのSkillのRuntime入口を解除する。
 

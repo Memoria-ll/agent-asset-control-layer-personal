@@ -173,9 +173,9 @@ Workflow内の工程であり、Workflowの実行単位。Stage固有の必須`c
 
 Workflow上のTaskはStageに対応し、独立したTaskエンティティは設けない。JournalテンプレートのTask欄は自由記述の作業名とし、独立Task recordではない。
 
-### Task Type
+### Skillのdescriptionとexplanation
 
-作業の性質を表す分類情報。Workflow、Stage、Role、Skill、Rule等へ付与でき、Runの観測・比較軸として記録する。
+Skillの`description`はRuntime入口のYAML front matterへ渡す短い説明であり、`explanation`はUIで人がSkillを呼び出すか判断するための説明である。Workflow、Stage、Role、Rule、Modelには作業分類を保存しない。
 
 ### transition
 

@@ -3,28 +3,55 @@ import { z } from 'zod';
 export const text = z.string().trim().min(1);
 export const id = z.uuid();
 export const scope = z.union([z.literal('global'), id]);
-export const stageSchema = z.object({
+
+function withoutTaskType(value: unknown) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return value;
+  const { taskType: _taskType, ...rest } = value as Record<string, unknown>;
+  return rest;
+}
+
+export function normalizeAssetRecord(value: unknown) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return value;
+  const record = value as Record<string, unknown>;
+  const normalized: Record<string, unknown> = { ...record };
+  const oldTaskType = typeof record.taskType === 'string' ? record.taskType : '';
+  const oldDescription = typeof record.description === 'string' ? record.description : '';
+  delete normalized.taskType;
+  if (Array.isArray(normalized.stages)) normalized.stages = normalized.stages.map(withoutTaskType);
+  if (record.kind === 'skill') {
+    normalized.description = oldTaskType.trim() || oldDescription;
+    normalized.explanation = typeof record.explanation === 'string' ? record.explanation : oldDescription;
+  } else {
+    delete normalized.explanation;
+  }
+  return normalized;
+}
+
+export const stageSchema = z.preprocess(withoutTaskType, z.object({
   id: text, name: text, completion_condition: text,
-  additionalInstructions: z.string().default(''), description: z.string().default(''), taskType: z.string().default(''),
-}).strict();
+  additionalInstructions: z.string().default(''), description: z.string().default(''),
+}).strict());
 export const transitionSchema = z.object({
   id: text, from: text, to: text,
   type: z.enum(['next', 'return', 'retry', 'reject', 'complete']), label: text,
 }).strict();
-export const assetSchema = z.object({
+const assetInputSchema = z.object({
   kind: z.enum(['workflow', 'skill', 'role', 'rule', 'model']),
   name: text, description: text, body: z.string().default(''),
   responsibilities: z.string().default(''), scope: scope.default('global'),
-  useCase: z.boolean().default(false), taskType: z.string().default(''),
+  explanation: z.string().optional(), useCase: z.boolean().default(false),
   modelName: z.string().default(''), invocationMethod: z.string().default(''),
   metadata: z.record(z.string(), z.unknown()).default({}),
   supportingFiles: z.record(z.string(), z.string()).default({}),
   stages: z.array(stageSchema).default([]),
   transitions: z.array(transitionSchema).default([]),
   entryStage: z.string().default(''),
-}).strict().superRefine((a, ctx) => {
+}).strict();
+
+export const assetSchema = z.preprocess(normalizeAssetRecord, assetInputSchema).superRefine((a, ctx) => {
   const fail = (message: string) => ctx.addIssue({ code: 'custom', message });
   if (a.kind === 'skill' && !a.body.trim()) fail('Skillの本文は必須です。');
+  if (a.kind === 'skill' && !(a.explanation ?? '').trim()) fail('Skillの説明は必須です。');
   if (a.kind === 'model' && !a.modelName.trim()) fail('Model名は必須です。');
   if (a.kind === 'model' && !a.invocationMethod.trim()) fail('呼び出し方は必須です。');
   if (a.kind !== 'skill' && a.useCase) fail('直接起動を設定できるのはSkillです。');
@@ -105,13 +132,13 @@ export interface Common extends Stamp { projectId: string; ruleIds: string[] }
 export interface Run extends Stamp {
   contextHandle: string; workflowId: string; workflowRevision: number; projectId?: string;
   snapshotId: string; stageId: string; status: 'active' | 'completed' | 'cancelled' | 'failed';
-  version: number; runtime: string; instruction: string; target: string; taskType: string; lastActivity: string;
+  version: number; runtime: string; instruction: string; target: string; lastActivity: string;
   subagentId?: string; subagentRoleId?: string; subagentModelId?: string; subagentContinuity?: 'new' | 'same';
 }
 export interface Resolution { assetId: string; revision: number; path: string[]; reason: string }
 export interface Context {
   runId: string; workflow: Asset; stage: z.infer<typeof stageSchema>; stageRoleId: string;
-  model?: Asset; roles: Asset[]; rules: Asset[]; skillCatalog: { id: string; name: string; description: string; revision: number }[];
+  model?: Asset; roles: Asset[]; rules: Asset[]; skillCatalog: { id: string; name: string; description: string }[];
   subagent?: { id: string; roleId: string; modelId: string; continuity: 'new' | 'same'; instruction: string };
   resolution: Resolution[]; unavailable: { target: string; reason: string }[];
 }

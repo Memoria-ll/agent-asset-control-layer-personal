@@ -2,29 +2,57 @@ import { z } from 'zod';
 export const text = z.string().trim().min(1);
 export const id = z.uuid();
 export const scope = z.union([z.literal('global'), id]);
-export const stageSchema = z.object({
+function withoutTaskType(value) {
+    if (!value || typeof value !== 'object' || Array.isArray(value))
+        return value;
+    const { taskType: _taskType, ...rest } = value;
+    return rest;
+}
+export function normalizeAssetRecord(value) {
+    if (!value || typeof value !== 'object' || Array.isArray(value))
+        return value;
+    const record = value;
+    const normalized = { ...record };
+    const oldTaskType = typeof record.taskType === 'string' ? record.taskType : '';
+    const oldDescription = typeof record.description === 'string' ? record.description : '';
+    delete normalized.taskType;
+    if (Array.isArray(normalized.stages))
+        normalized.stages = normalized.stages.map(withoutTaskType);
+    if (record.kind === 'skill') {
+        normalized.description = oldTaskType.trim() || oldDescription;
+        normalized.explanation = typeof record.explanation === 'string' ? record.explanation : oldDescription;
+    }
+    else {
+        delete normalized.explanation;
+    }
+    return normalized;
+}
+export const stageSchema = z.preprocess(withoutTaskType, z.object({
     id: text, name: text, completion_condition: text,
-    additionalInstructions: z.string().default(''), description: z.string().default(''), taskType: z.string().default(''),
-}).strict();
+    additionalInstructions: z.string().default(''), description: z.string().default(''),
+}).strict());
 export const transitionSchema = z.object({
     id: text, from: text, to: text,
     type: z.enum(['next', 'return', 'retry', 'reject', 'complete']), label: text,
 }).strict();
-export const assetSchema = z.object({
+const assetInputSchema = z.object({
     kind: z.enum(['workflow', 'skill', 'role', 'rule', 'model']),
     name: text, description: text, body: z.string().default(''),
     responsibilities: z.string().default(''), scope: scope.default('global'),
-    useCase: z.boolean().default(false), taskType: z.string().default(''),
+    explanation: z.string().optional(), useCase: z.boolean().default(false),
     modelName: z.string().default(''), invocationMethod: z.string().default(''),
     metadata: z.record(z.string(), z.unknown()).default({}),
     supportingFiles: z.record(z.string(), z.string()).default({}),
     stages: z.array(stageSchema).default([]),
     transitions: z.array(transitionSchema).default([]),
     entryStage: z.string().default(''),
-}).strict().superRefine((a, ctx) => {
+}).strict();
+export const assetSchema = z.preprocess(normalizeAssetRecord, assetInputSchema).superRefine((a, ctx) => {
     const fail = (message) => ctx.addIssue({ code: 'custom', message });
     if (a.kind === 'skill' && !a.body.trim())
         fail('Skillの本文は必須です。');
+    if (a.kind === 'skill' && !(a.explanation ?? '').trim())
+        fail('Skillの説明は必須です。');
     if (a.kind === 'model' && !a.modelName.trim())
         fail('Model名は必須です。');
     if (a.kind === 'model' && !a.invocationMethod.trim())
