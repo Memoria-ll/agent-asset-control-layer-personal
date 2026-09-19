@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { serve } from '../src/server.ts';
-import type { Asset, Run } from '../src/schema.ts';
+import type { Asset, ExecutionPlan, Run } from '../src/schema.ts';
 
 test('C02 C17 C32 C33: real HTTP / typed MCP / loopback / two concurrent chat Handles / static UI', async t => {
   const directory = mkdtempSync(join(tmpdir(), 'aacl-http-'));
@@ -59,10 +59,13 @@ test('C02 C17 C32 C33: real HTTP / typed MCP / loopback / two concurrent chat Ha
     { type: 'binding.save', binding: { sourceId: workflowId, targetId: roleId, stageId: 'start', purpose: 'stage-role' } },
   ] });
   assert.equal(created.entities[0].id, workflowId);
-  const [a, b] = await Promise.all(['claude', 'codex'].map(runtime => tool<{ run: Run; contextHandle: string; context: { stageRoleId: string } }>('aacl_run_start', { operationId: randomUUID(), workflowId, instruction: runtime, runtime })));
-  assert.equal(a.context.stageRoleId, roleId);
+  const [a, b] = await Promise.all(['claude', 'codex'].map(runtime => tool<{ run: Run; contextHandle: string; nextExecution: ExecutionPlan; context?: unknown }>('aacl_run_start', { operationId: randomUUID(), workflowId, instruction: runtime, runtime })));
+  assert.equal('context' in a, false);
+  assert.equal(a.nextExecution.stage.id, 'start');
+  assert.equal(a.nextExecution.executor, 'orchestrator');
   assert.notEqual(a.contextHandle, b.contextHandle);
-  const [contextA, contextB] = await Promise.all([a, b].map(r => tool<{ runId: string }>('aacl_context_get', { contextHandle: r.contextHandle })));
+  const [contextA, contextB] = await Promise.all([a, b].map(r => tool<{ runId: string; stageRoleId: string }>('aacl_context_get', { contextHandle: r.contextHandle })));
+  assert.equal(contextA.stageRoleId, roleId);
   assert.equal(contextA.runId, a.run.id); assert.equal(contextB.runId, b.run.id);
   await tool('aacl_run_transition', { operationId: randomUUID(), contextHandle: a.contextHandle, version: 1, transitionId: 'end', report: '確認済み' });
   const other = await tool<{ run: Run }>('aacl_run_get', { contextHandle: b.contextHandle }); assert.equal(other.run.status, 'active');

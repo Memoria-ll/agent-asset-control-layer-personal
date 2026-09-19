@@ -73,7 +73,7 @@ export class RuntimeEntries {
     const frontmatter = asset.kind === 'skill'
       ? `---\nname: ${entryName}\ndescription: ${JSON.stringify(asset.description)}\n---`
       : `---\nname: ${entryName}\n---`;
-    return `${frontmatter}\n\n<!-- aacl-entry:${asset.id} -->\n\nMCPの aacl_${operation} に ${input} を渡す。\n${asset.kind === 'workflow' ? '現在開いているProject rootをrootへ渡し、operationIdに新しいUUIDを使う。返されたcontextHandleを、この会話の後続Run操作へ渡す。\n' : '取得したCanonical本文に従う。\n'}`;
+    return `${frontmatter}\n\n<!-- aacl-entry:${asset.id} -->\n\nMCPの aacl_${operation} に ${input} を渡す。\n${asset.kind === 'workflow' ? '現在開いているProject rootをrootへ渡し、operationIdに新しいUUIDを使う。返されたnextExecutionのexecutorを確認し、実施主体がcontextHandleでaacl_context_getを呼び出してからStageを実施する。遷移後も返されたnextExecutionに従い、Skill・Rule本文をオーケストレーターへ転送しない。\n' : '取得したCanonical本文に従う。\n'}`;
   }
   policy(runtime: string) {
     return runtime === 'codex' ? 'policy:\n  allow_implicit_invocation: false\n' : undefined;

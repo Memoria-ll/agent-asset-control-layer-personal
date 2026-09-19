@@ -455,8 +455,7 @@ export class Core {
             ...(initialBaseContext.model ? { subagentId: initialSubagentId, subagentRoleId: initialBaseContext.stageRoleId, subagentModelId: initialBaseContext.model.id, subagentContinuity: 'new' } : {}),
         }, scope);
         this.event(run, 'started', { snapshotId, ...(initialBaseContext.model ? { subagentId: initialSubagentId, modelId: initialBaseContext.model.id } : {}) });
-        this.deliver(run, 'context', initialContext, true, [workflow.id], workflow.revision, initialContext.roles.map(a => a.id));
-        return { run, contextHandle, context: initialContext, snapshotId: snapshot.id };
+        return { run, contextHandle, nextExecution: this.executionPlan(run, snapshot), snapshotId: snapshot.id };
     }
     assetPayload(a) {
         const { id: _id, revision: _rev, createdAt: _created, updatedAt: _updated, deletedAt: _deletedAt, ...payload } = a;
@@ -470,6 +469,18 @@ export class Core {
         if (touch && run.status === 'active')
             return this.store.put('run', { ...run, lastActivity: new Date().toISOString() }, run.projectId ?? 'global');
         return run;
+    }
+    executionPlan(run, snapshot) {
+        if (run.status !== 'active')
+            return undefined;
+        const context = this.resolve(snapshot, run.stageId, undefined, run.subagentId && run.subagentContinuity ? { id: run.subagentId, continuity: run.subagentContinuity } : undefined);
+        return {
+            runId: run.id, contextHandle: run.contextHandle, version: run.version,
+            stage: { id: context.stage.id, name: context.stage.name },
+            executor: context.model ? 'subagent' : 'orchestrator',
+            ...(context.model ? { model: { id: context.model.id, name: context.model.name, modelName: context.model.modelName, invocationMethod: context.model.invocationMethod, selections: context.modelSelections ?? {} } } : {}),
+            ...(context.subagent ? { subagent: context.subagent } : {}),
+        };
     }
     event(run, type, data) { return this.store.put('event', { runId: run.id, type, data }); }
     deliver(run, target, content, success, path, revision, roleIds = [], reason) {
@@ -524,7 +535,8 @@ export class Core {
         }, run.projectId ?? 'global');
         this.event(result, 'transition', { transition, report: input.report, evidence: input.evidence, comment: input.comment,
             ...(nextContext?.model ? { subagentId: nextSubagentId, modelId: nextContext.model.id, continuity: sameSubagent ? 'same' : 'new' } : {}) });
-        return { outcome: 'applied', run: result };
+        const nextExecution = this.executionPlan(result, snapshot);
+        return { outcome: 'applied', run: result, ...(nextExecution ? { nextExecution } : {}) };
     }
     endRun(handle, status, reason) {
         const run = this.run(handle);

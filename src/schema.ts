@@ -181,6 +181,13 @@ export interface Context {
   subagent?: { id: string; roleId: string; modelId: string; continuity: 'new' | 'same'; instruction: string };
   resolution: Resolution[]; unavailable: { target: string; reason: string }[];
 }
+export interface ExecutionPlan {
+  runId: string; contextHandle: string; version: number;
+  stage: { id: string; name: string };
+  executor: 'orchestrator' | 'subagent';
+  model?: { id: string; name: string; modelName: string; invocationMethod: string; selections: Record<string, string> };
+  subagent?: NonNullable<Context['subagent']>;
+}
 export interface Snapshot extends Stamp {
   runId: string; boundary: number; workflow: Asset; assets: Asset[]; bindings: Binding[];
   common: Common | null; project: Project | null; runtime: string; initialContext: Context;

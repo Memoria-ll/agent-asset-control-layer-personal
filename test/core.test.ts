@@ -10,7 +10,7 @@ import { Operations } from '../src/operations.ts';
 import { assetSchema, parseJournal } from '../src/schema.ts';
 import { backupData, exportData, restoreBackup } from '../src/maintenance.ts';
 import { relatedWorkflows, stageRoleBindingChanges, workflowDiagram } from '../web/view-model.ts';
-import type { Asset, Binding, ChangeSet, Context, Delivery, Insight, Journal, Project, ReviewItem, Run, RuntimeTarget, Snapshot } from '../src/schema.ts';
+import type { Asset, Binding, ChangeSet, Context, Delivery, ExecutionPlan, Insight, Journal, Project, ReviewItem, Run, RuntimeTarget, Snapshot } from '../src/schema.ts';
 
 const provenance = { origin: 'ai', userRequest: 'テスト用の明示依頼', reason: '挙動の確認' };
 function fixture(t: { after: (fn: () => void) => void }) {
@@ -30,7 +30,11 @@ function fixture(t: { after: (fn: () => void) => void }) {
     return core.asset(workflowId);
   };
   const bind = async (source: Asset, target: Asset, overrides: object = {}) => (await call<{ entities: Binding[] }>('binding.save', { binding: { sourceId: source.id, targetId: target.id, ...overrides }, provenance })).entities[0];
-  const start = (w: Asset, overrides: object = {}) => call<{ run: Run; contextHandle: string; context: Context; snapshotId: string }>('run.start', { workflowId: w.id, runtime: 'codex', instruction: '明示した作業', ...overrides });
+  const start = async (w: Asset, overrides: object = {}) => {
+    const started = await call<{ run: Run; contextHandle: string; nextExecution: ExecutionPlan; snapshotId: string }>('run.start', { workflowId: w.id, runtime: 'codex', instruction: '明示した作業', ...overrides });
+    const context = await call<Context>('context.get', { contextHandle: started.contextHandle });
+    return { ...started, context };
+  };
   return { store, core, ops, call, asset, workflow, bind, start };
 }
 
@@ -62,6 +66,21 @@ test('Legacy Workflow completion fields are normalized into transition condition
   assert.equal(Object.hasOwn(workflow.stages[0]!, 'completion_condition'), false);
   assert.equal(Object.hasOwn(workflow.transitions[0]!, 'type'), false);
   assert.equal(workflow.transitions[0]!.condition, '作業結果を確認');
+});
+
+test('Run start returns an execution plan before the executor retrieves Context', async t => {
+  const f = fixture(t), workflow = await f.workflow();
+  const started = await f.call<{ run: Run; contextHandle: string; nextExecution: ExecutionPlan; snapshotId: string; context?: Context }>('run.start', { workflowId: workflow.id, runtime: 'codex', instruction: '明示した作業' });
+  assert.equal('context' in started, false);
+  assert.equal(f.store.list('delivery').length, 0);
+  assert.equal(started.nextExecution.stage.id, 'build');
+  assert.equal(started.nextExecution.executor, 'orchestrator');
+  assert.equal(started.nextExecution.version, started.run.version);
+  const recovered = await f.call<{ nextExecution: ExecutionPlan }>('run.get', { contextHandle: started.contextHandle });
+  assert.deepEqual(recovered.nextExecution, started.nextExecution);
+  const context = await f.call<Context>('context.get', { contextHandle: started.contextHandle });
+  assert.equal(context.runId, started.run.id);
+  assert.equal(f.store.list('delivery').length, 1);
 });
 
 test('Runtime Skill entries carry only frontmatter metadata and the AACL entry ID', async t => {
@@ -110,6 +129,10 @@ test('Model assets bind Skills and Rules, and consecutive matching Stage assignm
   await f.bind(workflow, model, { stageId: 'review', purpose: 'stage-model' });
 
   const first = await f.start(workflow);
+  assert.equal(first.nextExecution.executor, 'subagent');
+  assert.equal(first.nextExecution.model?.id, model.id);
+  assert.equal(first.nextExecution.model?.modelName, 'provider/implementer');
+  assert.equal(first.nextExecution.subagent?.continuity, 'new');
   assert.equal(first.context.model?.id, model.id);
   assert.equal(first.context.model?.modelName, 'provider/implementer');
   assert.equal(first.context.model?.invocationMethod, 'Runtimeのsubagent呼び出し');
@@ -125,7 +148,11 @@ test('Model assets bind Skills and Rules, and consecutive matching Stage assignm
   assert.equal(first.context.rules.some(ruleAsset => ruleAsset.id === rule.id), true);
   assert.equal((await f.call<{ body: string }>('run.skill.get', { contextHandle: first.contextHandle, assetId: skill.id })).body, '本文');
 
-  const moved = await f.call<{ run: Run }>('run.transition', { contextHandle: first.contextHandle, version: 1, transitionId: 'next', report: '実装完了' });
+  const moved = await f.call<{ run: Run; nextExecution: ExecutionPlan }>('run.transition', { contextHandle: first.contextHandle, version: 1, transitionId: 'next', report: '実装完了' });
+  assert.equal(moved.nextExecution.stage.id, 'review');
+  assert.equal(moved.nextExecution.executor, 'subagent');
+  assert.equal(moved.nextExecution.model?.id, model.id);
+  assert.equal(moved.nextExecution.subagent?.continuity, 'same');
   assert.equal(moved.run.subagentId, first.run.subagentId);
   assert.equal(moved.run.subagentContinuity, 'same');
   const next = await f.call<Context & { subagent: { id: string; continuity: string } }>('context.get', { contextHandle: first.contextHandle });
@@ -376,7 +403,10 @@ test('C09 C11 C12 C17 C20 C21 C22 C23 C24 C31: immutable resolution, progressive
 test('C18 C19 C30: transitions are structural, idempotent, stale-safe; timeout includes reads', async t => {
   const f = fixture(t), w = await f.workflow(), r = await f.start(w);
   const input = { contextHandle: r.contextHandle, version: 1, transitionId: 'retry', report: '自由な意味判断' }, operationId = randomUUID();
-  assert.equal((await f.call<{ outcome: string }>('run.transition', input, operationId)).outcome, 'applied');
+  const applied = await f.call<{ outcome: string; nextExecution: ExecutionPlan }>('run.transition', input, operationId);
+  assert.equal(applied.outcome, 'applied');
+  assert.equal(applied.nextExecution.stage.id, 'build');
+  assert.equal(applied.nextExecution.version, 2);
   assert.equal((await f.call<{ duplicate: boolean }>('run.transition', input, operationId)).duplicate, true);
   assert.equal((await f.call<{ outcome: string }>('run.transition', { ...input, transitionId: 'next' })).outcome, 'stale');
   assert.equal(f.core.run(r.contextHandle).version, 2);

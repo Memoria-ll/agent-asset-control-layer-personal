@@ -110,8 +110,9 @@ Claude Code / Codex (Windows または同一WSL内のLinux)
 ### 6.1 Run開始とContext
 
 - Workflow Run開始用とSkill本文取得用に、別々のtyped MCP operationを実装する。Skill取得operationはRun Contextを生成しない。
-- `run.start`の応答にRun IDとRun Context Handleを含め、CoreはRun IDとHandleの対応を保存する。
+- `run.start`の応答にRun ID、Run Context Handle、次に実施するStageのExecution Planを含め、CoreはRun IDとHandleの対応を保存する。開始応答にはContext本文を含めない。
 - Run単位のMCP operationはContext Handleを必須入力として受け取り、その値から対象Runを解決する。AIは`run.start`から受け取ったHandleを同じAI実行Contextの後続operationへ渡す。
+- Execution Planには次StageのID・表示名、実行主体（`orchestrator`または`subagent`）、指定ModelのID・Model名・呼び出し方・選択値、サブエージェントの継続情報、Context Handle、Run versionを含める。Skill・Rule本文やStage Context本文は含めず、Planを受け取った実施主体が`context.get`で取得する。
 - Run開始transactionでWorkflowと参照revisionの境界を固定し、変更不能なExecution Snapshotを作成する。Snapshotにはrun id、Workflowとrevision、resolution revision boundary、Project、使用した紐づけとrevision、Project CommonのrevisionとRule参照、該当するStage、Role、Runtime、利用対象Assetとrevision、提供したRuleとSkill catalog、timestampを保持する。
 - Resolution recordには、利用対象になった各Assetの参照経路と解決理由を保持する。取得できなかったContextと理由も記録し、初期Contextに渡した情報と区別する。
 - Initial ContextはWorkflow Definition、現在Stageからの許可transitionと各`condition`、`stageRoleId`、担当Roleのresponsibilities、Stageの`additionalInstructions`、明示参照されたRule、利用対象Skill catalog、指定Modelの固定revision、呼び出し方、サブエージェント継続指示で構成する。
@@ -131,6 +132,7 @@ Claude Code / Codex (Windows または同一WSL内のLinux)
 
 - Runの終端状態は`completed`、`cancelled`、`failed`。ユーザーの中止は`cancelled`、継続不能の報告またはtimeoutは`failed`とする。
 - Workflowの進行可能な遷移はCoreが管理する。AIまたはユーザーが完了判断後に遷移を選び、Coreは構造と現在状態を検証する。
+- `run.start`、`run.get`、`run.transition`は、active Runで次に実施するStageのExecution Planを返す。`run.transition`でStageが進んだ場合、Runtimeは返されたPlanのexecutorに応じてサブエージェントを起動するか、自身を実施者としてContextを取得する。終端遷移では次のPlanを返さない。
 - transition更新はSQLite transactionで直列化する。同一操作の再送は`duplicate`、既に状態が進んだ後の別要求は`stale`として記録し、現在状態を不正に戻さない。
 - Run eventはappend-onlyで保存する。
 - 非活動timeoutは既定24時間とし、Global設定で変更できる。読み取りを含むRun-scoped MCP操作があればtimeoutの活動時刻を更新する。
@@ -220,12 +222,12 @@ Claude Code / Codex (Windows または同一WSL内のLinux)
 | C14 | §14 自然言語によるAsset管理 | MCP Asset / Binding / Project Common API、UI編集API、Provenance | 検索・取得・作成・更新・解除・削除の変更が明示操作で保存され、依頼と変更理由へ関連づく。削除は影響一覧と明示確認を経て確定する。 |
 | C15 | §15 既存情報と通常利用からの資産化 | Asset write、Provenance API | 明示依頼で資産化した元資料をProvenanceから確認でき、通常利用をRunやJournalへ遡及変換しない。 |
 | C16 | §16 Bootstrapと実行の入口 | Bootstrap API、Runtime adapter、entry writer | Bootstrap再取得で同じ案内を返し、入口はAsset IDを参照する。追加・解除・名称変更時に対応を更新し、管理解除した既存ファイルを残す。 |
-| C17 | §17 Runの開始と記録 | `run.start`、Context Handle返却・Run単位operation入力 | 不正なWorkflow・参照では開始せず、成功時はRun ID、Handle、revision境界、初期状態を作成する。並行Contextが別Handleで分離される。 |
+| C17 | §17 Runの開始と記録 | `run.start`、Execution Plan、Context Handle返却・Run単位operation入力 | 不正なWorkflow・参照では開始せず、成功時はRun ID、Handle、revision境界、初期状態、次のExecution Planを作成する。開始応答にContext本文を含めず、実施主体が取得する。並行Contextが別Handleで分離される。 |
 | C18 | §18 Runの状態とWorkflowの進行 | Run read、transition、cancel、fail API | activeから許可された終端状態へ遷移し、再送をduplicate、進行後の別要求をstaleとして状態を壊さず記録する。 |
 | C19 | §19 遷移条件と終了 | transition condition、transition API | 各transitionのconditionを必須保存し、Coreは意味の正しさを判定せず、`to=completed`の許可遷移でのみcompletedにする。 |
 | C20 | §20 revisionの一貫性 | revision resolver、Snapshot API | Run中の更新後も全Resolutionと取得が固定境界を使い、既存Snapshotは変わらず、次Runは新revisionを使う。 |
 | C21 | §21 Context Resolver | Resolver API、reference graph validation | 明示参照のみを辿って重複を除き、循環と必須参照欠落を検出する。任意ファイルの取得失敗は理由付きで返す。 |
-| C22 | §22 Contextの提供と説明 | Context read、Resolution record | 初期Contextの構成要素として現在StageのRole ID、Role責務、追加指示を提供し、各Assetの参照経路・解決理由、取得できない対象と理由を確認できる。 |
+| C22 | §22 Contextの提供と説明 | Context read、Resolution record | Execution Planを受けた実施主体へ`context.get`で現在StageのRole ID、Role責務、追加指示を提供し、各Assetの参照経路・解決理由、取得できない対象と理由を確認できる。 |
 | C23 | §23 Role間のContext引き渡し | Role handoff Context API | Run、Workflow revision、Stage、現在Stageからの許可transitionとcondition、`stageRoleId`、Role responsibilities、追加指示、明示参照Rule / Skillを渡し、実行主体の起動はRuntime側に残す。 |
 | C24 | §24 提供情報と実行報告 | Snapshot、Context delivery、Journal usage report API | Snapshotの全必須項目と提供内容を再現でき、未取得理由を保持する。利用対象・提供済み・実利用報告を区別する。 |
 | C25 | §25 Journal | Journal write/read、Run / Task association、parser | RunなしではTask associationを要求し、Run Context由来の関連を自動付与する。未知見出し・重複見出し・解析不能部分・原文が保たれ、気づき状態を個別更新できる。 |

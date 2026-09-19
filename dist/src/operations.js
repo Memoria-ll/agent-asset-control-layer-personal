@@ -8,9 +8,9 @@ export const bootstrap = `AACLはWorkflow・Skill・Role・Rule・Modelと、明
 通常の会話にWorkflow選択を催促せず、未選択の資産を適用しません。ユーザーが選択したWorkflowだけをaacl_run_startで開始します。
 aacl_project_resolveへ開いているProject rootを渡して完全一致で確認します。未登録の場合はaacl initで登録します。
 aacl_usecase_searchでWorkflowと直接起動Skillを探します。Skillの直接利用はaacl_skill_getだけを使い、Runや実行記録を作成しません。
-aacl_run_startから返るcontextHandleを、同じAI実行Contextの後続Run操作に必ず渡してください。別の会話のHandleを使わず、ユーザーへHandleの入力を求めません。
-ContextのSkill catalogから必要な本文・補助ファイルをaacl_run_skill_getで取得します。意味判断と開発操作はAI・Runtimeが行います。
-StageにModelが紐づいている場合、ContextのModel情報とsubagent指示に従ってそのStageを実行します。連続する同じRole・ModelのStageでは同じsubagentを継続します。
+aacl_run_startとaacl_run_transitionは、Context本文ではなく次の実行計画（nextExecution）とcontextHandleを返します。実際に次のStageを実施するオーケストレーターまたはサブエージェントが、そのHandleでaacl_context_getを呼び出してください。別の会話のHandleを使わず、ユーザーへHandleの入力を求めません。
+ContextのSkill catalogから必要な本文・補助ファイルを、実際にStageを実施するAIがaacl_run_skill_getで取得します。Ruleを含むContextの取得と意味判断、開発操作は実施者側が行い、オーケストレーターへ本文を転送しません。
+nextExecutionのexecutorがsubagentなら、返されたModel情報とsubagent継続指示に従ってRuntimeでサブエージェントを起動します。executorがorchestratorなら、オーケストレーター自身が実施者としてContextを取得します。連続する同じRole・ModelのStageでは同じsubagentを継続します。
 Modelには自由な名前の選択肢グループを複数定義できます。WorkflowのStageへModelを紐づけるときは、各選択肢の値をselectedChoicesで指定し、ContextのmodelSelectionsで確認します。
 現在Stageから進む遷移のconditionを評価し、遷移判断の報告とaacl_run_getのversionを付けて許可された遷移を要求します。自己ループや差し戻しとRun全体のfailedは別です。
 ModelからSkill / Ruleへの参照にはchoiceConditionsを指定でき、同じ組み合わせ内はAND、複数の組み合わせはORとして、一致する参照だけをContextへ含めます。
@@ -72,21 +72,21 @@ export class Operations {
         read('binding.get', '紐づけの現在または過去revisionを取得', { bindingId: id, revision: z.int().positive().optional() }, p => { const binding = store.get(p.bindingId, 'binding'); return { binding: p.revision ? store.revision(p.bindingId, p.revision) : binding }; });
         write('binding.save', '明示参照を追加・付け替え。ModelからSkill / Ruleへの参照ではchoiceConditionsで選択肢の組み合わせを指定できる。既存紐づけの更新は取得時点のexpectedRevisionを指定する', { id: id.optional(), expectedRevision: revision.optional(), binding: bindingSchema, provenance }, p => core.applyChanges([{ type: 'binding.save', id: p.id, expectedRevision: p.expectedRevision, binding: p.binding }], p.provenance));
         write('binding.remove', '紐づけを解除する。取得時点のexpectedRevisionを指定する', { id, expectedRevision: revision, provenance }, p => core.applyChanges([{ type: 'binding.remove', id: p.id, expectedRevision: p.expectedRevision }], p.provenance));
-        write('run.start', '明示選択したWorkflowのRunを開始しContext Handleを返す', { workflowId: id, projectId: id.optional(), root: text.optional(), runtime: text, instruction: text, target: z.string().default('') }, p => core.startRun(p));
+        write('run.start', '明示選択したWorkflowのRunを開始し、Context本文を含まない次の実行計画とContext Handleを返す', { workflowId: id, projectId: id.optional(), root: text.optional(), runtime: text, instruction: text, target: z.string().default('') }, p => core.startRun(p));
         read('run.list', 'Workflow Runを一覧', { projectId: id.optional() }, p => { core.expireRuns(); return { runs: store.list('run', p.projectId) }; });
         read('run.get', 'Handleに対応するRunと許可遷移を取得', handle, p => {
             const run = core.run(p.contextHandle), snapshot = store.get(run.snapshotId, 'snapshot');
-            return { run, transitions: run.status === 'active' ? snapshot.workflow.transitions.filter(t => t.from === run.stageId) : [] };
+            return { run, transitions: run.status === 'active' ? snapshot.workflow.transitions.filter(t => t.from === run.stageId) : [], ...(run.status === 'active' ? { nextExecution: core.executionPlan(run, snapshot) } : {}) };
         });
         read('run.inspect', 'RunのSnapshot・提供記録・進行履歴・Journalを参照', handle, p => {
             const run = core.run(p.contextHandle), detail = core.runDetail(run);
             core.deliver(run, 'snapshot-inspection', detail.snapshot, true, [run.snapshotId]);
             return detail;
         });
-        read('context.get', '固定revisionで現在StageのContextを提供', { ...handle, model: z.string().optional() }, p => core.context(p.contextHandle, undefined, p.model));
+        read('context.get', '実際にStageを実施する主体へ、固定revisionの現在Stage Contextを提供', { ...handle, model: z.string().optional() }, p => core.context(p.contextHandle, undefined, p.model));
         read('context.handoff', '明示されたRoleへの引き渡しContextを構成', { ...handle, roleId: id, model: z.string().optional() }, p => core.context(p.contextHandle, p.roleId, p.model));
         read('run.skill.get', 'Runの固定revisionからSkill本文・補助ファイルを取得', { ...handle, assetId: id, file: text.optional() }, p => core.runSkillGet(p.contextHandle, p.assetId, p.file));
-        write('run.transition', '遷移条件への判断報告を付けて許可されたStage遷移を選択', { ...handle, version: z.int().positive(), transitionId: text, report: text, evidence, comment: z.string().default('') }, p => core.transition(p));
+        write('run.transition', '遷移条件への判断報告を付けて許可されたStage遷移を選択し、次の実行計画を返す', { ...handle, version: z.int().positive(), transitionId: text, report: text, evidence, comment: z.string().default('') }, p => core.transition(p));
         write('run.cancel', 'ユーザー意思によるRunの中止', { ...handle, reason: text }, p => core.endRun(p.contextHandle, 'cancelled', p.reason));
         write('run.fail', '継続不能なRunの終了報告', { ...handle, reason: text }, p => core.endRun(p.contextHandle, 'failed', p.reason));
         write('run.report', '実際に使用したAssetと実行結果を報告', { ...handle, body: text, usedAssetIds: z.array(id).default([]), evidence }, p => {

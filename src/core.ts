@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { posix } from 'node:path';
 import { Store } from './store.ts';
 import { assetSchema, bindingSchema, parseJournal } from './schema.ts';
-import type { Asset, AssetDeletionPreview, Binding, Change, ChangeSet, Common, Context, ContextAsset, ContextStage, Decision, Delivery, Diagnostic, History, Insight, Journal, Project, Proposal, Provenance, ReviewItem, Run, RunEvent, Snapshot, Stamp } from './schema.ts';
+import type { Asset, AssetDeletionPreview, Binding, Change, ChangeSet, Common, Context, ContextAsset, ContextStage, Decision, Delivery, Diagnostic, ExecutionPlan, History, Insight, Journal, Project, Proposal, Provenance, ReviewItem, Run, RunEvent, Snapshot, Stamp } from './schema.ts';
 
 export class ConflictError extends Error {
   readonly code = 'CONFLICT';
@@ -379,8 +379,7 @@ export class Core {
       ...(initialBaseContext.model ? { subagentId: initialSubagentId, subagentRoleId: initialBaseContext.stageRoleId, subagentModelId: initialBaseContext.model.id, subagentContinuity: 'new' as const } : {}),
     }, scope);
     this.event(run, 'started', { snapshotId, ...(initialBaseContext.model ? { subagentId: initialSubagentId, modelId: initialBaseContext.model.id } : {}) });
-    this.deliver(run, 'context', initialContext, true, [workflow.id], workflow.revision, initialContext.roles.map(a => a.id));
-    return { run, contextHandle, context: initialContext, snapshotId: snapshot.id };
+    return { run, contextHandle, nextExecution: this.executionPlan(run, snapshot), snapshotId: snapshot.id };
   }
   assetPayload(a: Asset) {
     const { id: _id, revision: _rev, createdAt: _created, updatedAt: _updated, deletedAt: _deletedAt, ...payload } = a;
@@ -392,6 +391,17 @@ export class Core {
     if (!run) throw new Error('Run Context Handleが見つかりません。run.startの応答を使用してください。');
     if (touch && run.status === 'active') return this.store.put('run', { ...run, lastActivity: new Date().toISOString() }, run.projectId ?? 'global');
     return run;
+  }
+  executionPlan(run: Run, snapshot: Snapshot): ExecutionPlan | undefined {
+    if (run.status !== 'active') return undefined;
+    const context = this.resolve(snapshot, run.stageId, undefined, run.subagentId && run.subagentContinuity ? { id: run.subagentId, continuity: run.subagentContinuity } : undefined);
+    return {
+      runId: run.id, contextHandle: run.contextHandle, version: run.version,
+      stage: { id: context.stage.id, name: context.stage.name },
+      executor: context.model ? 'subagent' : 'orchestrator',
+      ...(context.model ? { model: { id: context.model.id, name: context.model.name, modelName: context.model.modelName, invocationMethod: context.model.invocationMethod, selections: context.modelSelections ?? {} } } : {}),
+      ...(context.subagent ? { subagent: context.subagent } : {}),
+    };
   }
   event(run: Run, type: string, data: unknown) { return this.store.put('event', { runId: run.id, type, data }); }
   deliver(run: Run, target: string, content: unknown, success: boolean, path: string[], revision?: number, roleIds: string[] = [], reason?: string) {
@@ -444,7 +454,8 @@ export class Core {
     }, run.projectId ?? 'global');
     this.event(result, 'transition', { transition, report: input.report, evidence: input.evidence, comment: input.comment,
       ...(nextContext?.model ? { subagentId: nextSubagentId, modelId: nextContext.model.id, continuity: sameSubagent ? 'same' : 'new' } : {}) });
-    return { outcome: 'applied', run: result };
+    const nextExecution = this.executionPlan(result, snapshot);
+    return { outcome: 'applied', run: result, ...(nextExecution ? { nextExecution } : {}) };
   }
   endRun(handle: string, status: 'cancelled' | 'failed', reason: string) {
     const run = this.run(handle);

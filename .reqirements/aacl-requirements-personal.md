@@ -68,7 +68,7 @@ Claude Code / Codexは、モデル起動、ファイル操作、shell・tool呼�
 
 Canonical Assetと管理記録の正本はCoreが管理するCanonical Stateとする。Asset本文はUIで確認・編集でき、ユーザーが要求したときに人間可読形式で出力できる。
 
-Workflow RunのContextは、Project Commonと、選択Workflow・現在Stage・Roleの紐づけに含まれる明示参照から構成する。Skill本文やsupporting filesは、AIが使う時点で取得する。Runを伴わないSkillの直接取得では、指定されたCanonical Skill本文を返す。
+Workflow RunのContextは、Project Commonと、選択Workflow・現在Stage・Roleの紐づけに含まれる明示参照から構成する。`run.start`と遷移操作はContext本文を自動で返さず、次に実施するStage・実行主体・Model・Context Handleを示すExecution Planだけを返す。実際にStageを実施するオーケストレーターまたはサブエージェントがHandleでContextを取得し、Skill本文やsupporting files、Ruleを使う時点で取得する。Runを伴わないSkillの直接取得では、指定されたCanonical Skill本文を返す。
 
 ---
 
@@ -367,7 +367,7 @@ Coreは次を検証し、Run IDと初期状態を作成した時点で管理対�
 
 接続、validation、revision整合性等によりRunを作成できなかった場合は、開始失敗として扱う。
 
-1つのAI実行コンテキストに関連づくRunは1つとする。並列実行は別のAI実行コンテキストに関連づくRunとして扱い、Run同士の状態・Context・Snapshot・Journal関連を分離する。CoreはRun IDとContext Handleを発行し、`run.start`の応答で返す。以後のRun単位MCP操作はContext Handleを必須入力として受け取り、その値から対象Runを特定する。AIは`run.start`から受け取ったHandleを同じAI実行コンテキストの後続操作へ渡し、ユーザーにHandleの入力を求めない。
+1つのAI実行コンテキストに関連づくRunは1つとする。並列実行は別のAI実行コンテキストに関連づくRunとして扱い、Run同士の状態・Context・Snapshot・Journal関連を分離する。CoreはRun IDとContext Handleを発行し、`run.start`の応答でExecution Planとともに返す。以後のRun単位MCP操作はContext Handleを必須入力として受け取り、その値から対象Runを特定する。Execution Planの実行主体がHandleでContext取得を行い、オーケストレーターはサブエージェントへSkill・Rule本文を転送しない。AIは`run.start`から受け取ったHandleを同じAI実行コンテキストの後続操作へ渡し、ユーザーにHandleの入力を求めない。
 
 CoreはRunごとにworkspaceを作成・分離せず、成果物やファイル変更の競合を管理しない。別workspaceやworktreeが必要な場合はユーザーまたはRuntimeが明示的に用意する。
 

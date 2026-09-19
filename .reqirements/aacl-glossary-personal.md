@@ -47,6 +47,10 @@ Workflow RunでAIへ渡す実行情報。Workflow Definition、現在Stage、担
 
 CoreがRunごとに発行し、`run.start`の応答で返す識別子。以後のRun単位MCP操作に入力として含め、Coreが対象Runを特定する。一つのHandleは一つのRunに対応し、並行するAI実行コンテキストはそれぞれのRunのHandleを使う。
 
+### Execution Plan
+
+Runの次に実施するStageをRuntimeへ渡す実行計画。Stage ID・表示名、実行主体（オーケストレーターまたはサブエージェント）、必要なModelの起動情報、サブエージェントの継続情報、Context Handle、Run versionを含む。Skill・Rule本文やStage Context本文は含めず、実施者がHandleで取得する。
+
 ### Context Resolution
 
 Workflow、Stage、Role、Projectの紐づけ、Project Common、revision boundaryから、Workflow Runで利用対象となるAssetとContextを決定する処理。名前や本文の意味からAssetを選ばず、明示参照だけを辿る。
