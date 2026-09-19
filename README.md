@@ -122,7 +122,7 @@ Register a Claude Code or Codex Runtime target for the Global or Project scope w
 | Runtime | Generated entry |
 | --- | --- |
 | Claude Code | `<target>/commands/<slug>.md` |
-| Codex | `<target>/skills/<slug>/SKILL.md` |
+| Codex | `<target>/skills/<slug>/SKILL.md` and `<target>/skills/<slug>/agents/openai.yaml` |
 
 The entry refers to the canonical Asset by ID and retrieves its instructions from AACL. The body stays in SQLite. On Windows targets, the generated entry invokes AACL through `wsl.exe`. If a managed entry has been changed after generation, synchronization records a diagnostic instead of replacing that content. Unregistering a Runtime target leaves its generated entries in place.
 

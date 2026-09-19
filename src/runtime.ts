@@ -26,8 +26,14 @@ function runtimeNames(assets: Asset[]) {
 }
 
 function removeEmptyCodexSkillDirectory(runtime: string, path: string) {
-  const directory = dirname(path);
-  if (runtime === 'codex' && path.endsWith('/SKILL.md') && existsSync(directory) && readdirSync(directory).length === 0) rmdirSync(directory);
+  if (runtime !== 'codex' || !path.endsWith('/SKILL.md')) return;
+  const directory = dirname(path), agents = join(directory, 'agents');
+  if (existsSync(agents) && readdirSync(agents).length === 0) rmdirSync(agents);
+  if (existsSync(directory) && readdirSync(directory).length === 0) rmdirSync(directory);
+}
+
+function codexPolicyPath(path: string) {
+  return join(dirname(path), 'agents', 'openai.yaml');
 }
 
 export function safeDirectory(path: string) {
@@ -67,6 +73,9 @@ export class RuntimeEntries {
     const description = asset.kind === 'skill' ? asset.description : `${asset.name}をAACLから起動する`;
     return `---\nname: ${entryName}\ndescription: ${JSON.stringify(description)}\n---\n\n<!-- aacl-entry:${asset.id} -->\n\nMCPの aacl_${operation} に ${input} を渡す。\n${asset.kind === 'workflow' ? '現在開いているProject rootをrootへ渡し、operationIdに新しいUUIDを使う。返されたcontextHandleを、この会話の後続Run操作へ渡す。\n' : '取得したCanonical本文に従う。\n'}`;
   }
+  policy(runtime: string) {
+    return runtime === 'codex' ? 'policy:\n  allow_implicit_invocation: false\n' : undefined;
+  }
   sync() {
     const results: { targetId: string; assetId: string; ok: boolean; message?: string }[] = [];
     for (const target of this.core.store.list<RuntimeTarget>('runtime-target').filter(t => t.enabled)) {
@@ -82,13 +91,21 @@ export class RuntimeEntries {
           if (asset && !entryName) throw new Error('Asset名からRuntime入口名を作れません。英小文字・数字を含む名前にしてください。');
           const path = asset ? target.runtime === 'claude' ? join(target.path, 'commands', `${entryName}.md`) : join(target.path, 'skills', entryName!, 'SKILL.md') : old?.path;
           if (!path) throw new Error('以前のRuntime入口の配置先を取得できません。');
+          const policyPath = target.runtime === 'codex' ? codexPolicyPath(path) : undefined;
           safeDirectory(dirname(path));
-          let existing: string | undefined;
+          if (policyPath) safeDirectory(dirname(policyPath));
+          let existing: string | undefined, existingPolicy: string | undefined;
           if (existsSync(path)) {
             if (lstatSync(path).isSymbolicLink()) throw new Error('入口がsymlinkのため更新できません。');
             existing = readFileSync(path, 'utf8');
           }
+          if (policyPath && existsSync(policyPath)) {
+            if (lstatSync(policyPath).isSymbolicLink()) throw new Error('Codex Skill policyがsymlinkのため更新できません。');
+            existingPolicy = readFileSync(policyPath, 'utf8');
+          }
           const desired = asset ? this.body(asset, target.runtime, entryName) : undefined;
+          const expectedPolicy = target.runtime === 'codex' ? this.policy(target.runtime) : undefined;
+          const desiredPolicy = asset ? expectedPolicy : undefined;
           let oldPathExists = false;
           if (asset && old && old.path !== path && existsSync(old.path)) {
             safeDirectory(dirname(old.path));
@@ -96,21 +113,44 @@ export class RuntimeEntries {
             if (hash(readFileSync(old.path, 'utf8')) !== old.hash) throw new Error('以前の入口がAACL生成後に変更されています。内容を確認してください。');
             oldPathExists = true;
           }
+          let oldPolicyPath: string | undefined, oldPolicyExists = false;
+          if (asset && old && target.runtime === 'codex' && old.path !== path) {
+            oldPolicyPath = codexPolicyPath(old.path);
+            if (existsSync(oldPolicyPath)) {
+              safeDirectory(dirname(oldPolicyPath));
+              if (lstatSync(oldPolicyPath).isSymbolicLink()) throw new Error('以前のCodex Skill policyがsymlinkのため移動できません。');
+              if (readFileSync(oldPolicyPath, 'utf8') !== desiredPolicy) throw new Error('以前のCodex Skill policyがAACL生成後に変更されています。内容を確認してください。');
+              oldPolicyExists = true;
+            }
+          }
           if (existing !== undefined && existing !== desired && (!old || old.path !== path || hash(existing) !== old.hash)) throw new Error('既存ファイルがAACL生成後に変更されています。内容を確認してください。');
+          if (existingPolicy !== undefined && existingPolicy !== expectedPolicy) throw new Error('Codex Skill policyがAACL生成後に変更されています。内容を確認してください。');
           if (asset) {
             if (existing !== desired) {
               const temp = `${path}.${process.pid}.tmp`;
               writeFileSync(temp, desired!, { mode: 0o600, flag: 'wx' });
               renameSync(temp, path);
             }
+            if (policyPath && existingPolicy !== desiredPolicy) {
+              const temp = `${policyPath}.${process.pid}.tmp`;
+              writeFileSync(temp, desiredPolicy!, { mode: 0o600, flag: 'wx' });
+              renameSync(temp, policyPath);
+            }
             if (oldPathExists) {
               if (lstatSync(old!.path).isSymbolicLink() || hash(readFileSync(old!.path, 'utf8')) !== old!.hash) throw new Error('以前の入口がAACL生成後に変更されています。内容を確認してください。');
               unlinkSync(old!.path);
               removeEmptyCodexSkillDirectory(target.runtime, old!.path);
             }
+            if (oldPolicyExists) {
+              if (lstatSync(oldPolicyPath!).isSymbolicLink() || readFileSync(oldPolicyPath!, 'utf8') !== desiredPolicy) throw new Error('以前のCodex Skill policyがAACL生成後に変更されています。内容を確認してください。');
+              unlinkSync(oldPolicyPath!);
+              removeEmptyCodexSkillDirectory(target.runtime, old!.path);
+            }
             if (!old || old.path !== path || old.hash !== hash(desired!)) this.core.store.put('runtime-entry', { id: old?.id, targetId: target.id, assetId, path, hash: hash(desired!), active: true });
           } else if (old) {
             if (existing !== undefined) { unlinkSync(path); removeEmptyCodexSkillDirectory(target.runtime, path); }
+            if (policyPath && existingPolicy !== undefined) { unlinkSync(policyPath); removeEmptyCodexSkillDirectory(target.runtime, path); }
+            removeEmptyCodexSkillDirectory(target.runtime, path);
             this.core.store.put('runtime-entry', { ...old, active: false });
           }
           if (prior && !prior.resolvedAt) this.core.store.put('diagnostic', { ...prior, resolvedAt: new Date().toISOString() });

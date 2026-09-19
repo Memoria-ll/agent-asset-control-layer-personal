@@ -383,14 +383,21 @@ test('C16 C33: Runtime entries are thin, owned, updated and retained on unregist
   const root = mkdtempSync(join(tmpdir(), 'aacl-runtime-'));
   const { target } = await f.call<{ target: RuntimeTarget }>('runtime.register', { runtime: 'codex', platform: 'wsl', scope: 'global', path: root });
   const path = join(root, 'skills', 'journal-review', 'SKILL.md');
+  const policyPath = join(root, 'skills', 'journal-review', 'agents', 'openai.yaml');
   const content = readFileSync(path, 'utf8');
-  assert.match(content, new RegExp(skill.id)); assert.match(content, /^name: journal-review$/m); assert.ok(!content.includes(skill.body)); assert.ok(!content.includes('aacl_run_start'));
+  assert.match(content, new RegExp(skill.id)); assert.match(content, /^name: journal-review$/m); assert.ok(!content.includes(skill.body)); assert.ok(!content.includes('aacl_run_start')); assert.ok(!content.includes('disable-model-invocation'));
+  assert.equal(readFileSync(policyPath, 'utf8'), 'policy:\n  allow_implicit_invocation: false\n');
+  writeFileSync(policyPath, 'policy:\n  allow_implicit_invocation: true\n');
+  const blockedPolicy = await f.call<{ runtimeSync: { ok: boolean }[] }>('runtime.sync');
+  assert.ok(blockedPolicy.runtimeSync.some(result => !result.ok)); assert.equal(readFileSync(policyPath, 'utf8'), 'policy:\n  allow_implicit_invocation: true\n');
+  writeFileSync(policyPath, f.ops.runtime.policy('codex')!); await f.call('runtime.sync');
   const renamedPath = join(root, 'skills', 'security-review', 'SKILL.md');
+  const renamedPolicyPath = join(root, 'skills', 'security-review', 'agents', 'openai.yaml');
   await f.call('asset.save', { id: skill.id, asset: { ...f.core.assetPayload(skill), name: 'security-review' }, provenance });
-  assert.equal(existsSync(path), false); assert.match(readFileSync(renamedPath, 'utf8'), /^name: security-review$/m);
-  await f.call('skill.usecase', { assetId: skill.id, enabled: false, provenance }); assert.equal(existsSync(renamedPath), false); assert.equal(existsSync(dirname(renamedPath)), false);
-  await f.call('skill.usecase', { assetId: skill.id, enabled: true, provenance }); assert.equal(existsSync(renamedPath), true);
-  await f.call('runtime.unregister', { targetId: target.id }); assert.equal(existsSync(renamedPath), true);
+  assert.equal(existsSync(path), false); assert.equal(existsSync(policyPath), false); assert.match(readFileSync(renamedPath, 'utf8'), /^name: security-review$/m); assert.equal(readFileSync(renamedPolicyPath, 'utf8'), 'policy:\n  allow_implicit_invocation: false\n');
+  await f.call('skill.usecase', { assetId: skill.id, enabled: false, provenance }); assert.equal(existsSync(renamedPath), false); assert.equal(existsSync(renamedPolicyPath), false); assert.equal(existsSync(dirname(renamedPath)), false);
+  await f.call('skill.usecase', { assetId: skill.id, enabled: true, provenance }); assert.equal(existsSync(renamedPath), true); assert.equal(existsSync(renamedPolicyPath), true);
+  await f.call('runtime.unregister', { targetId: target.id }); assert.equal(existsSync(renamedPath), true); assert.equal(existsSync(renamedPolicyPath), true);
   await f.call('skill.usecase', { assetId: skill.id, enabled: false, provenance }); assert.equal(existsSync(renamedPath), true);
   const collision = join(root, 'other'); mkdirSync(join(collision, 'commands'), { recursive: true });
   const w = await f.workflow(), blocked = join(collision, 'commands', 'workflow.md');
@@ -410,10 +417,11 @@ test('Confirmed Asset deletion removes its owned Runtime entry', async t => {
   const root = mkdtempSync(join(tmpdir(), 'aacl-delete-runtime-'));
   await f.call('runtime.register', { runtime: 'codex', platform: 'wsl', scope: 'global', path: root });
   const path = join(root, 'skills', 'delete-runtime-entry', 'SKILL.md');
-  assert.equal(existsSync(path), true);
+  const policyPath = join(root, 'skills', 'delete-runtime-entry', 'agents', 'openai.yaml');
+  assert.equal(existsSync(path), true); assert.equal(existsSync(policyPath), true);
   const preview = await f.call<{ asset: Asset; bindings: { id: string; revision: number }[]; projectCommons: { id: string; revision: number }[] }>('asset.delete.preview', { assetId: skill.id });
   await f.call('asset.delete', { assetId: skill.id, expectedRevision: preview.asset.revision, expectedBindingRevisions: preview.bindings, expectedProjectCommonRevisions: preview.projectCommons, confirmed: true, provenance });
-  assert.equal(existsSync(path), false);
+  assert.equal(existsSync(path), false); assert.equal(existsSync(policyPath), false);
   assert.equal(f.store.list<{ assetId: string; active: boolean }>('runtime-entry').find(e => e.assetId === skill.id)?.active, false);
 });
 
@@ -460,9 +468,11 @@ test('Runtime sync moves an owned ID-named entry to its asset name', async t => 
   const root = mkdtempSync(join(tmpdir(), 'aacl-runtime-migrate-'));
   const { target } = await f.call<{ target: RuntimeTarget }>('runtime.register', { runtime: 'codex', platform: 'wsl', scope: 'global', path: root });
   const currentPath = join(root, 'skills', 'security-review', 'SKILL.md');
+  const currentPolicyPath = join(root, 'skills', 'security-review', 'agents', 'openai.yaml');
   const oldPath = join(root, 'skills', `aacl-${skill.id}`, 'SKILL.md');
+  const oldPolicyPath = join(root, 'skills', `aacl-${skill.id}`, 'agents', 'openai.yaml');
   const oldBody = f.ops.runtime.body(skill, 'codex', `aacl-${skill.id}`);
-  unlinkSync(currentPath); rmdirSync(dirname(currentPath)); mkdirSync(dirname(oldPath)); writeFileSync(oldPath, oldBody);
+  unlinkSync(currentPath); unlinkSync(currentPolicyPath); rmdirSync(dirname(currentPolicyPath)); rmdirSync(dirname(currentPath)); mkdirSync(dirname(oldPolicyPath), { recursive: true }); writeFileSync(oldPath, oldBody); writeFileSync(oldPolicyPath, f.ops.runtime.policy('codex')!);
   const entry = f.store.list<{ id: string; targetId: string; assetId: string; path: string; hash: string; active: boolean }>('runtime-entry').find(item => item.targetId === target.id && item.assetId === skill.id)!;
   f.store.put('runtime-entry', { ...entry, path: oldPath, hash: createHash('sha256').update(oldBody).digest('hex') });
   writeFileSync(oldPath, '利用者による変更');
@@ -471,7 +481,7 @@ test('Runtime sync moves an owned ID-named entry to its asset name', async t => 
   writeFileSync(oldPath, oldBody);
   await f.call('runtime.sync');
   assert.equal(existsSync(oldPath), false); assert.equal(existsSync(dirname(oldPath)), false);
-  assert.match(readFileSync(currentPath, 'utf8'), /^name: security-review$/m);
+  assert.match(readFileSync(currentPath, 'utf8'), /^name: security-review$/m); assert.equal(readFileSync(currentPolicyPath, 'utf8'), 'policy:\n  allow_implicit_invocation: false\n');
 });
 
 test('C29 C33: Change Set restoration / persistent SQLite / export / consistent Backup restore', async t => {
