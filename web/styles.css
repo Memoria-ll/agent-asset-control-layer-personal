@@ -466,6 +466,12 @@ pre {
 .asset-shell .toolbar {
   flex:none
 }
+.asset-stage {
+  position:relative;
+  min-height:0;
+  flex:1 1 auto;
+  display:flex
+}
 .asset-scroll {
   position:relative;
   min-height:0;

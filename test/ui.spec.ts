@@ -327,3 +327,47 @@ test('C33: Chromium UI assigns existing and new Roles from Workflow editor, runs
   await expect(page.locator('.asset-row')).toHaveCount(0);
   expect(errors).toEqual([]);
 });
+
+test('Asset Library keeps the list position while opening and closing the detail drawer', async ({ page }) => {
+  for (let index = 0; index < 30; index++) {
+    const response = await page.request.post(`http://127.0.0.1:${app.port}/api/asset.save`, {
+      data: {
+        operationId: randomUUID(),
+        provenance: { origin: 'ui', userRequest: 'drawer scroll regression' },
+        asset: {
+          kind: 'skill',
+          name: `Drawer scroll test ${index}`,
+          description: 'Drawer scroll regression asset',
+          explanation: 'Drawer scroll regression asset',
+          body: 'Drawer scroll regression body',
+          scope: 'global',
+          useCase: false,
+          supportingFiles: {},
+          stages: [],
+          transitions: [],
+          entryStage: '',
+          metadata: {}
+        }
+      }
+    });
+    expect(response.ok()).toBeTruthy();
+  }
+  await page.goto(`http://127.0.0.1:${app.port}`);
+  await page.locator('.asset-card').last().waitFor();
+  const before = await page.locator('.asset-scroll').evaluate(node => {
+    node.scrollTop = node.scrollHeight - node.clientHeight - 10;
+    return node.scrollTop;
+  });
+  await page.locator('.asset-card').last().click();
+  await expect(page.locator('.asset-drawer')).toBeVisible();
+  const stageBounds = await page.locator('.asset-stage').boundingBox();
+  const drawerBounds = await page.locator('.asset-drawer').boundingBox();
+  expect(stageBounds).not.toBeNull();
+  expect(drawerBounds).not.toBeNull();
+  expect(drawerBounds!.y).toBeGreaterThanOrEqual(stageBounds!.y);
+  expect(drawerBounds!.y + drawerBounds!.height).toBeLessThanOrEqual(stageBounds!.y + stageBounds!.height + 1);
+  await expect(page.locator('.asset-scroll')).toHaveJSProperty('scrollTop', before);
+  await page.locator('.asset-drawer').getByRole('button', { name: '×', exact: true }).click();
+  await expect(page.locator('.asset-drawer')).toHaveCount(0);
+  await expect(page.locator('.asset-scroll')).toHaveJSProperty('scrollTop', before);
+});
