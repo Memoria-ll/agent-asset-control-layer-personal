@@ -643,6 +643,8 @@ test('Runtime entry names come from Workflow and direct Skill names, with IDs on
   const workflowEntry = readFileSync(join(claudeRoot, 'commands', `${names[0]}.md`), 'utf8');
   assert.ok(!workflowEntry.includes('\ndescription:'));
   assert.match(workflowEntry, /MCPの aacl_run_start/); assert.ok(!workflowEntry.includes('ensure')); assert.ok(!workflowEntry.includes('shellで'));
+  const codexWorkflowEntry = readFileSync(join(codexRoot, 'skills', names[0], 'SKILL.md'), 'utf8');
+  assert.match(codexWorkflowEntry, /^description: "shared-reviewをAACLから起動する"$/m);
   const skillEntry = readFileSync(join(codexRoot, 'skills', 'architecture-review', 'SKILL.md'), 'utf8');
   assert.match(skillEntry, /MCPの aacl_skill_get/); assert.ok(!skillEntry.includes('ensure')); assert.ok(!skillEntry.includes('shellで'));
   for (const name of [longSkill.id, anotherLongSkill.id].map(id => `${'a'.repeat(26)}-${id}`)) {

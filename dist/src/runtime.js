@@ -138,8 +138,9 @@ export class RuntimeEntries {
     body(asset, runtime, entryName = runtimeSlug(asset.name)) {
         const operation = asset.kind === 'workflow' ? 'run_start' : 'skill_get';
         const input = asset.kind === 'workflow' ? `workflowId: ${asset.id}` : `assetId: ${asset.id}`;
-        const frontmatter = asset.kind === 'skill'
-            ? `---\nname: ${entryName}\ndescription: ${JSON.stringify(asset.description)}\n---`
+        const description = asset.kind === 'skill' ? asset.description : `${asset.name}をAACLから起動する`;
+        const frontmatter = runtime === 'codex' || asset.kind === 'skill'
+            ? `---\nname: ${entryName}\ndescription: ${JSON.stringify(description)}\n---`
             : `---\nname: ${entryName}\n---`;
         return `${frontmatter}\n\n<!-- aacl-entry:${asset.id} -->\n\nMCPの aacl_${operation} に ${input} を渡す。\n${asset.kind === 'workflow' ? '現在開いているProject rootをrootへ渡し、operationIdに新しいUUIDを使う。返されたnextExecutionのexecutorを確認し、実施主体がcontextHandleでaacl_context_getを呼び出してからStageを実施する。遷移後も返されたnextExecutionに従い、Skill・Rule本文をオーケストレーターへ転送しない。\n' : '取得したCanonical本文に従う。\n'}`;
     }
