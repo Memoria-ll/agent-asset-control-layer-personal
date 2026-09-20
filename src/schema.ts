@@ -111,12 +111,21 @@ export const assetSchema = z.preprocess(normalizeAssetRecord, assetInputSchema).
     }
   }
   for (const path of Object.keys(a.supportingFiles)) {
-    if (path.startsWith('/') || path.includes('\\') || path.split('/').some(p => p === '..' || !p)) fail('補助ファイルには安全な相対名を指定してください。');
+    const error = supportingFilePathError(path);
+    if (error) fail(error);
   }
   if (Object.keys(a.metadata).some(k => /^(model|capability|password|secret|token|credential)/i.test(k))) fail('Model・Capability・認証情報はmetadataの管理対象外です。');
   const content = JSON.stringify(a);
   if (/-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----|\b(?:sk-[A-Za-z0-9_-]{24,}|gh[pousr]_[A-Za-z0-9]{30,})\b/.test(content)) fail('認証情報をAssetへ保存できません。');
 });
+
+export function supportingFilePathError(path: string) {
+  if (path.startsWith('/') || /^[A-Za-z]:[\\/]/.test(path) || path.includes('\\') || path.includes('\0')) return '補助ファイルには安全な相対名を指定してください。';
+  if (path.split('/').some(part => part === '..' || part === '.' || !part)) return '補助ファイルには安全な相対名を指定してください。';
+  if (path === 'SKILL.md' || path === 'agents/openai.yaml') return `補助ファイルの予約パスは使用できません: ${path}`;
+  return undefined;
+}
+
 export const bindingSchema = z.object({
   scope: scope.default('global'), sourceId: id, stageId: text.optional(), targetId: id,
   purpose: z.enum(['reference', 'entry-role', 'stage-role', 'stage-model']).default('reference'),
@@ -218,4 +227,7 @@ export interface Decision extends Stamp { proposalId: string; choice: 'approved'
 export interface History extends Stamp { entityId: string; kind: string; before: number | null; after: number; changeSetId: string; restoredFrom?: number }
 export interface ChangeSet extends Stamp { operations: Change[]; provenanceId: string; historyIds: string[]; proposalId?: string; approvalId?: string; restoresChangeSetId?: string }
 export interface RuntimeTarget extends Stamp { runtime: 'claude' | 'codex'; scope: string; path: string; enabled: boolean; platform: 'wsl' | 'windows' }
+export interface RuntimeFile extends Stamp {
+  targetId: string; assetId: string; assetRevision: number; relativePath: string; path: string; hash: string; active: boolean; executable: boolean;
+}
 export interface Diagnostic extends Stamp { severity: 'info' | 'warning' | 'error'; code: string; target: string; message: string; evidence: unknown; resolvedAt?: string }

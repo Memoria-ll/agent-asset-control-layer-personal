@@ -643,6 +643,29 @@ export class Core {
         return { run, snapshot: this.store.get(run.snapshotId, 'snapshot'), events: this.store.list('event').filter(e => e.runId === run.id).reverse(),
             deliveries: this.store.list('delivery').filter(d => d.runId === run.id), journals: this.store.list('journal').filter(j => j.runId === run.id) };
     }
+    reviewRunInspect(journalId) {
+        const journal = this.store.get(journalId, 'journal');
+        const hasReviewItem = this.store.list('review-item').some(item => item.journalId === journal.id);
+        const hasInsight = this.store.list('insight').some(insight => insight.journalId === journal.id);
+        if (!hasReviewItem && !hasInsight)
+            throw new Error('Review経由で取得したJournalを指定してください。');
+        if (!journal.runId)
+            throw new Error('Journalに関連するRunがありません。');
+        const run = this.store.get(journal.runId, 'run');
+        if (run.status === 'active')
+            throw new Error('進行中のRunはJournal Review inspectionの対象外です。');
+        const snapshot = this.store.get(run.snapshotId, 'snapshot');
+        const assets = snapshot.assets.map(asset => ({ id: asset.id, kind: asset.kind, name: asset.name, revision: asset.revision }));
+        return {
+            journalId: journal.id,
+            run,
+            snapshot: { id: snapshot.id, boundary: snapshot.boundary, runtime: snapshot.runtime, assets },
+            deliveries: this.store.list('delivery').filter(delivery => delivery.runId === run.id).map(delivery => ({
+                target: delivery.target, revision: delivery.assetRevision, success: delivery.success, bytes: delivery.bytes,
+            })),
+            events: this.store.list('event').filter(event => event.runId === run.id).map(event => ({ type: event.type, timestamp: event.createdAt })),
+        };
+    }
     writeJournal(input) {
         if (!this.settings().journalEnabled)
             throw new Error('Journal記録が無効です。設定でJournal記録を有効にしてください。');

@@ -1,12 +1,14 @@
 import { createHash } from 'node:crypto';
-import { existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, renameSync, rmdirSync, unlinkSync, writeFileSync } from 'node:fs';
+import { existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, renameSync, rmdirSync, unlinkSync, writeFileSync, chmodSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { dirname, join, parse } from 'node:path';
+import { dirname, isAbsolute, join, parse, relative } from 'node:path';
 import { Core, normalizeRoot } from './core.ts';
-import type { Asset, Diagnostic, RuntimeTarget, Stamp } from './schema.ts';
+import { supportingFilePathError } from './schema.ts';
+import type { Asset, Diagnostic, RuntimeFile, RuntimeTarget, Stamp } from './schema.ts';
 
 type Entry = Stamp & { targetId: string; assetId: string; path: string; hash: string; active: boolean; implicitInvocation?: boolean };
 const hash = (text: string) => createHash('sha256').update(text).digest('hex');
+const fileMode = (path: string) => path.toLowerCase().endsWith('.sh') ? 0o700 : 0o600;
 const runtimeSlug = (name: string) => name.normalize('NFKD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
 
 function runtimeNames(assets: Asset[]) {
@@ -34,6 +36,61 @@ function removeEmptyCodexSkillDirectory(runtime: string, path: string) {
 
 function codexPolicyPath(path: string) {
   return join(dirname(path), 'agents', 'openai.yaml');
+}
+
+function supportRoot(runtime: RuntimeTarget['runtime'], entryPath: string, entryName?: string) {
+  return runtime === 'claude' ? join(dirname(entryPath), entryName ?? parse(entryPath).name) : dirname(entryPath);
+}
+
+function assertWithin(root: string, path: string) {
+  const child = relative(root, path);
+  if (!child || child === '..' || child.startsWith(`..${path.includes('\\') ? '\\' : '/'}`) || isAbsolute(child)) throw new Error(`Runtime配置先の外側へ補助ファイルを配置できません: ${path}`);
+}
+
+function cleanupEmptyDirectories(path: string, stop: string) {
+  let current = path;
+  while (current !== stop && existsSync(current)) {
+    const stat = lstatSync(current);
+    if (stat.isSymbolicLink() || !stat.isDirectory() || readdirSync(current).length > 0) return;
+    rmdirSync(current);
+    current = dirname(current);
+  }
+}
+
+function safeExistingDirectory(path: string) {
+  let current = parse(path).root;
+  for (const part of path.slice(current.length).split('/').filter(Boolean)) {
+    current = join(current, part);
+    let stat;
+    try { stat = lstatSync(current); } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return;
+      throw error;
+    }
+    if (stat.isSymbolicLink() || !stat.isDirectory()) throw new Error(`通常のディレクトリを指定してください: ${current}`);
+  }
+}
+
+function readRegularFile(path: string) {
+  let stat;
+  try { stat = lstatSync(path); } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return undefined;
+    throw error;
+  }
+  if (stat.isSymbolicLink()) throw new Error(`Runtime補助ファイルがsymlinkのため操作できません: ${path}`);
+  if (!stat.isFile()) throw new Error(`Runtime補助ファイルが通常ファイルではありません: ${path}`);
+  return readFileSync(path, 'utf8');
+}
+
+function writeOwnedFile(path: string, content: string) {
+  const temporary = `${path}.${process.pid}.${Date.now()}.tmp`;
+  try {
+    writeFileSync(temporary, content, { mode: fileMode(path), flag: 'wx' });
+    renameSync(temporary, path);
+    chmodSync(path, fileMode(path));
+  } catch (error) {
+    if (existsSync(temporary)) unlinkSync(temporary);
+    throw error;
+  }
 }
 
 export function safeDirectory(path: string) {
@@ -78,6 +135,61 @@ export class RuntimeEntries {
   policy(runtime: string, implicitInvocation = false) {
     return runtime === 'codex' ? `policy:\n  allow_implicit_invocation: ${implicitInvocation ? 'true' : 'false'}\n` : undefined;
   }
+  private syncSupportingFiles(target: RuntimeTarget, asset: Asset | undefined, oldEntry: Entry | undefined, entryPath: string | undefined, previous: RuntimeFile[]) {
+    const oldRoot = oldEntry ? supportRoot(target.runtime, oldEntry.path) : undefined;
+    const currentRoot = asset && entryPath ? supportRoot(target.runtime, entryPath, runtimeSlug(asset.name)) : undefined;
+    const desired = new Map<string, string>();
+    if (asset && currentRoot) {
+      for (const [relativePath, content] of Object.entries(asset.supportingFiles)) {
+        const error = supportingFilePathError(relativePath);
+        if (error) throw new Error(error);
+        const path = join(currentRoot, relativePath);
+        assertWithin(currentRoot, path);
+        desired.set(relativePath, content);
+      }
+      if (desired.size) safeDirectory(currentRoot);
+    }
+    const paths = new Set([...previous.map(file => file.relativePath), ...desired.keys()]);
+    for (const relativePath of paths) {
+      const prior = previous.find(file => file.relativePath === relativePath);
+      const content = desired.get(relativePath);
+      const currentPath = content === undefined || !currentRoot ? undefined : join(currentRoot, relativePath);
+      const oldPath = prior?.path;
+      if (currentPath && currentRoot) assertWithin(currentRoot, currentPath);
+      if (oldPath && oldRoot) assertWithin(oldRoot, oldPath);
+      if (content !== undefined && currentPath && asset) {
+        safeDirectory(dirname(currentPath));
+        const existing = readRegularFile(currentPath);
+        if (existing !== undefined && (!prior || prior.path !== currentPath)) throw new Error(`Runtime補助ファイルが既存ファイルと衝突しています: ${currentPath}`);
+        if (existing !== undefined && prior && hash(existing) !== prior.hash) throw new Error(`Runtime補助ファイルがAACL生成後に変更されています。内容を確認してください: ${currentPath}`);
+        if (existing !== content) writeOwnedFile(currentPath, content);
+        else chmodSync(currentPath, fileMode(currentPath));
+        if (oldPath && oldPath !== currentPath) {
+          safeExistingDirectory(dirname(oldPath));
+          const oldContent = readRegularFile(oldPath);
+          if (oldContent !== undefined) {
+            if (!oldRoot || !prior || hash(oldContent) !== prior.hash) throw new Error(`以前のRuntime補助ファイルがAACL生成後に変更されています。内容を確認してください: ${oldPath}`);
+            unlinkSync(oldPath);
+            cleanupEmptyDirectories(dirname(oldPath), dirname(oldRoot));
+          }
+        }
+        if (!prior || prior.path !== currentPath || prior.assetRevision !== asset.revision || prior.hash !== hash(content) || prior.executable !== (fileMode(currentPath) === 0o700) || !prior.active) {
+          this.core.store.put('runtime-file', { id: prior?.id, targetId: target.id, assetId: asset.id, assetRevision: asset.revision, relativePath, path: currentPath, hash: hash(content), active: true, executable: fileMode(currentPath) === 0o700 });
+        }
+      } else if (prior) {
+        if (oldPath) {
+          safeExistingDirectory(dirname(oldPath));
+          const oldContent = readRegularFile(oldPath);
+          if (oldContent !== undefined) {
+            if (!oldRoot || hash(oldContent) !== prior.hash) throw new Error(`Runtime補助ファイルがAACL生成後に変更されています。内容を確認してください: ${oldPath}`);
+            unlinkSync(oldPath);
+            cleanupEmptyDirectories(dirname(oldPath), dirname(oldRoot));
+          }
+        }
+        if (prior.active) this.core.store.put('runtime-file', { ...prior, active: false });
+      }
+    }
+  }
   sync() {
     const results: { targetId: string; assetId: string; ok: boolean; message?: string }[] = [];
     for (const target of this.core.store.list<RuntimeTarget>('runtime-target').filter(t => t.enabled)) {
@@ -86,9 +198,12 @@ export class RuntimeEntries {
       const assets = allAssets.filter(a => !a.deletedAt && a.scope === target.scope && (a.kind === 'workflow' || a.kind === 'skill' && (a.useCase || boundSkillIds.has(a.id))));
       const names = runtimeNames(assets);
       const previous = this.core.store.list<Entry>('runtime-entry').filter(e => e.targetId === target.id && e.active);
-      const ids = new Set([...assets.map(a => a.id), ...previous.map(e => e.assetId)]);
+      const previousFiles = this.core.store.list<RuntimeFile>('runtime-file').filter(file => file.targetId === target.id);
+      const ids = new Set([...assets.map(a => a.id), ...previous.map(e => e.assetId), ...previousFiles.map(file => file.assetId)]);
       for (const assetId of ids) {
+        let phase: 'runtime-entry' | 'runtime-file' = 'runtime-entry';
         const prior = this.core.store.list<Diagnostic>('diagnostic').find(d => d.code === 'runtime-entry' && d.target === target.id && (d.evidence as { assetId?: string })?.assetId === assetId);
+        const priorFile = this.core.store.list<Diagnostic>('diagnostic').find(d => d.code === 'runtime-file' && d.target === target.id && (d.evidence as { assetId?: string })?.assetId === assetId);
         try {
           const asset = assets.find(a => a.id === assetId), old = previous.find(e => e.assetId === assetId);
           const entryName = asset ? names.get(assetId)! : undefined;
@@ -159,11 +274,15 @@ export class RuntimeEntries {
             removeEmptyCodexSkillDirectory(target.runtime, path);
             this.core.store.put('runtime-entry', { ...old, active: false });
           }
+          phase = 'runtime-file';
+          this.syncSupportingFiles(target, asset, old, asset ? path : old?.path, previousFiles.filter(file => file.assetId === assetId));
           if (prior && !prior.resolvedAt) this.core.store.put('diagnostic', { ...prior, resolvedAt: new Date().toISOString() });
+          if (priorFile && !priorFile.resolvedAt) this.core.store.put('diagnostic', { ...priorFile, resolvedAt: new Date().toISOString() });
           results.push({ targetId: target.id, assetId, ok: true });
         } catch (error) {
           const message = error instanceof Error ? error.message : String(error);
-          this.core.store.put('diagnostic', { id: prior?.id, severity: 'error', code: 'runtime-entry', target: target.id, message, evidence: { assetId } });
+          const diagnostic = phase === 'runtime-entry' ? prior : priorFile;
+          this.core.store.put('diagnostic', { id: diagnostic?.id, severity: 'error', code: phase, target: target.id, message, evidence: { assetId } });
           results.push({ targetId: target.id, assetId, ok: false, message });
         }
       }

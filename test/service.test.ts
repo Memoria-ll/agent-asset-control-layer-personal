@@ -50,6 +50,8 @@ test('C02 C17 C32 C33: real HTTP / typed MCP / loopback / two concurrent chat Ha
   const tools = (await listed.json() as { result: { tools: { name: string; inputSchema: { required?: string[] } }[] } }).result.tools;
   assert.ok(tools.length >= 40);
   assert.ok(tools.find(t => t.name === 'aacl_context_get')?.inputSchema.required?.includes('contextHandle'));
+  assert.equal(tools.some(t => t.name === 'aacl_run_inspect'), false);
+  assert.equal(tools.some(t => t.name === 'aacl_review_run_inspect'), true);
   assert.ok(!tools.some(t => /sql|dispatch|execute_action/.test(t.name)));
   const badHeader = await rpc('tools/list', {}, undefined, { 'Mcp-Method': 'tools/call' }); assert.equal(badHeader.status, 400);
   const workflowId = randomUUID(), roleId = randomUUID();

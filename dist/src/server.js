@@ -31,6 +31,8 @@ export async function serve(directory, port = 4318) {
     const mcp = createMcpHandler(() => {
         const server = new McpServer({ name: 'aacl', version: '0.1.0' }, { instructions: '共通の利用案内と操作例はaacl_bootstrap_getで取得してください。各ツールのdescriptionには操作条件と入力例だけを記載しています。' });
         for (const [name, op] of operations.entries) {
+            if (!op.mcpVisible)
+                continue;
             server.registerTool(`aacl_${name.replaceAll('.', '_')}`, {
                 description: op.description, inputSchema: op.schema,
                 annotations: { readOnlyHint: !op.write && !name.startsWith('data.'), destructiveHint: name.endsWith('restore') || name.endsWith('remove'), idempotentHint: op.write, openWorldHint: false },

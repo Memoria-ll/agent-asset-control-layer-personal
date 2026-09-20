@@ -4,7 +4,7 @@ import { RuntimeEntries } from './runtime.ts';
 import { installJournalSkills } from './journal-skills.ts';
 import { backupData, exportData } from './maintenance.ts';
 import { assetSchema, bindingSchema, changeSchema, id, journalTemplate, provenanceSchema, revision, scope, text } from './schema.ts';
-import type { Asset, Binding, ChangeSet, Decision, History, Insight, Journal, Project, Proposal, Run, RuntimeTarget, Snapshot } from './schema.ts';
+import type { Asset, Binding, ChangeSet, Decision, History, Insight, Journal, Project, Proposal, Run, RuntimeFile, RuntimeTarget, Snapshot } from './schema.ts';
 
 export const bootstrap = `AACLはWorkflow・Skill・Role・Rule・Modelと、明示的なWorkflow実行・Journalによる改善を管理します。
 通常の会話にWorkflow選択を催促せず、未選択の資産を適用しません。ユーザーが選択したWorkflowだけをaacl_run_startで開始します。
@@ -23,9 +23,10 @@ ModelからSkill / Ruleへの参照にはchoiceConditionsを指定でき、同�
 書き込みのoperationIdにはUUIDを使用し、同じ操作の再送だけで再利用します。
 気づきがあればaacl_journal_templateのMarkdownでaacl_journal_writeへ送ります。Core IDは本文に書かず、contextHandleまたは終了後のpostRunIdを操作入力に指定します。Run外のJournalにはTaskを指定します。
 Journal Reviewはユーザーが明示的に開始します。Review自体のRunを作らず、aacl_review_pendingで要約と関連IDを取得し、必要な対象だけaacl_review_item_get・aacl_proposal_getと関連するSnapshot・History・Provenanceを参照します。提案を伴わない判断はaacl_review_decideまたはaacl_review_decide_bulkで直接記録します。
+完了・中止・失敗したRunのJournalをReviewする場合はaacl_review_run_inspectへjournalIdを渡します。結果はbody-lessのSnapshot・Delivery・Event要約だけで、本文や補助ファイルはaacl_asset_getで対象Asset IDとrevisionを個別に取得します。進行中Runや未ReviewのJournalは対象外です。
 提案には対象変更・理由・根拠Journal・レビューしたJournal一覧・処理する気づきを明示します。aacl_proposal_decideでユーザー判断を記録し、承認後aacl_proposal_applyを実行します。保留の気づきは残します。`;
 
-export interface Operation { description: string; schema: z.ZodObject; write: boolean; execute: (input: unknown) => Promise<unknown> }
+export interface Operation { description: string; schema: z.ZodObject; write: boolean; mcpVisible: boolean; execute: (input: unknown) => Promise<unknown> }
 
 export class Operations {
   core: Core;
@@ -88,6 +89,8 @@ export class Operations {
       core.deliver(run, 'snapshot-inspection', detail.snapshot, true, [run.snapshotId]);
       return detail;
     });
+    this.entries.get('run.inspect')!.mcpVisible = false;
+    read('review.run.inspect', 'Review対象Journalに関連する完了Runをbody-lessで参照', { journalId: id }, p => core.reviewRunInspect(p.journalId));
     read('context.get', '実際にStageを実施する主体へ、固定revisionの現在Stage Contextを提供', { ...handle, model: z.string().optional() }, p => core.context(p.contextHandle, undefined, p.model));
     read('context.handoff', '明示されたRoleへの引き渡しContextを構成', { ...handle, roleId: id, model: z.string().optional() }, p => core.context(p.contextHandle, p.roleId, p.model));
     read('run.skill.get', 'Runの固定revisionからSkill本文・補助ファイルを取得', { ...handle, assetId: id, file: text.optional() }, p => core.runSkillGet(p.contextHandle, p.assetId, p.file));
@@ -130,7 +133,7 @@ export class Operations {
     read('history.get', '変更履歴・revision・由来・Change Setを確認', { entityId: id.optional() }, p => ({ histories: store.list<History>('history').filter(h => !p.entityId || h.entityId === p.entityId), revisions: p.entityId ? store.revisions(p.entityId) : [], changeSets: store.list<ChangeSet>('changeset'), provenance: store.list('provenance') }));
     read('diagnostics.get', '参照・状態・反復遷移と実提供量を診断', {}, () => core.diagnostics());
     read('costs.get', '実際のContext提供量をRun・Stage・Role・対象別に比較', {}, () => ({ costs: core.costs() }));
-    read('runtime.list', 'Runtime設定先と入口の状態を確認', {}, () => ({ targets: store.list<RuntimeTarget>('runtime-target'), entries: store.list('runtime-entry') }));
+    read('runtime.list', 'Runtime設定先と入口・補助ファイルの状態を確認', {}, () => ({ targets: store.list<RuntimeTarget>('runtime-target'), entries: store.list('runtime-entry'), files: store.list<RuntimeFile>('runtime-file') }));
     read('runtime.discover', 'Windows・WSLの標準設定先を列挙', {}, () => ({ candidates: this.runtime.discover() }));
     write('runtime.register', 'Runtime設定先を登録して入口を生成', { runtime: z.enum(['claude', 'codex']), scope, path: text, platform: z.enum(['wsl', 'windows']) }, p => ({ target: this.runtime.register(p) }), true);
     write('runtime.unregister', '設定先の管理を解除。生成済み入口は残す', { targetId: id }, p => ({ target: store.put('runtime-target', { ...store.get<RuntimeTarget>(p.targetId, 'runtime-target'), enabled: false }) }));
@@ -144,9 +147,9 @@ export class Operations {
     read('data.backup', 'SQLite整合性を保つBackupを新規fileへ出力', { path: text }, p => backupData(core, p.path));
   }
 
-  register<T extends z.ZodObject>(name: string, description: string, schema: T, handler: (input: z.output<T>) => unknown, write = false, sync = false) {
+  register<T extends z.ZodObject>(name: string, description: string, schema: T, handler: (input: z.output<T>) => unknown, write = false, sync = false, mcpVisible = true) {
     const inputSchema = write ? schema.extend({ operationId: id }) : schema;
-    this.entries.set(name, { description, schema: inputSchema, write, execute: async raw => {
+    this.entries.set(name, { description, schema: inputSchema, write, mcpVisible, execute: async raw => {
       const parsed = inputSchema.parse(raw) as Record<string, unknown>;
       const { operationId, ...fields } = parsed;
       let result: unknown;

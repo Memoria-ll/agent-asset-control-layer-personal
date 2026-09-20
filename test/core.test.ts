@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createHash, randomUUID } from 'node:crypto';
-import { mkdtempSync, readFileSync, existsSync, mkdirSync, rmdirSync, unlinkSync, writeFileSync, symlinkSync } from 'node:fs';
+import { mkdtempSync, readFileSync, existsSync, mkdirSync, rmdirSync, unlinkSync, writeFileSync, symlinkSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { Store } from '../src/store.ts';
@@ -695,6 +695,69 @@ test('Runtime sync moves an owned ID-named entry to its asset name', async t => 
   await f.call('runtime.sync');
   assert.equal(existsSync(oldPath), false); assert.equal(existsSync(dirname(oldPath)), false);
   assert.match(readFileSync(currentPath, 'utf8'), /^name: security-review$/m); assert.equal(readFileSync(currentPolicyPath, 'utf8'), 'policy:\n  allow_implicit_invocation: false\n');
+});
+
+test('Runtime sync places Skill supporting files independently for Codex and Claude', async t => {
+  const f = fixture(t), skill = await f.asset('skill', {
+    name: 'integrated-browser', useCase: true,
+    supportingFiles: { 'scripts/browser-api.sh': '#!/bin/sh\necho browser\n', 'references/http-api.md': 'HTTP API' },
+  });
+  const codexRoot = mkdtempSync(join(tmpdir(), 'aacl-support-codex-')), claudeRoot = mkdtempSync(join(tmpdir(), 'aacl-support-claude-'));
+  await f.call('runtime.register', { runtime: 'codex', platform: 'wsl', scope: 'global', path: codexRoot });
+  await f.call('runtime.register', { runtime: 'claude', platform: 'wsl', scope: 'global', path: claudeRoot });
+  const codexScript = join(codexRoot, 'skills', skill.name, 'scripts/browser-api.sh');
+  const claudeScript = join(claudeRoot, 'commands', skill.name, 'scripts/browser-api.sh');
+  for (const path of [codexScript, claudeScript]) {
+    assert.equal(readFileSync(path, 'utf8'), '#!/bin/sh\necho browser\n');
+    assert.equal(statSync(path).mode & 0o777, 0o700);
+  }
+  const files = f.store.list<{ targetId: string; assetId: string; assetRevision: number; relativePath: string; hash: string; active: boolean; executable: boolean }>('runtime-file');
+  assert.equal(files.filter(file => file.assetId === skill.id && file.active).length, 4);
+  assert.ok(files.filter(file => file.assetId === skill.id).every(file => file.assetRevision === skill.revision));
+  assert.ok(files.some(file => file.relativePath === 'scripts/browser-api.sh' && file.executable));
+
+  const updated = await f.call<{ entities: Asset[] }>('asset.save', {
+    id: skill.id, expectedRevision: skill.revision,
+    asset: { ...f.core.assetPayload(skill), supportingFiles: { 'scripts/browser-api.sh': '#!/bin/sh\necho updated\n', 'references/new-api.md': 'New API' } }, provenance,
+  });
+  assert.equal(readFileSync(codexScript, 'utf8'), '#!/bin/sh\necho updated\n');
+  assert.equal(existsSync(join(codexRoot, 'skills', skill.name, 'references/http-api.md')), false);
+  assert.equal(existsSync(join(codexRoot, 'skills', skill.name, 'references/new-api.md')), true);
+  await f.call('skill.usecase', { assetId: skill.id, enabled: false, provenance });
+  assert.equal(existsSync(join(codexRoot, 'skills', skill.name, 'scripts/browser-api.sh')), false);
+  assert.equal(existsSync(join(claudeRoot, 'commands', skill.name)), false);
+  assert.ok(f.store.list<{ assetId: string; active: boolean }>('runtime-file').filter(file => file.assetId === skill.id).every(file => !file.active));
+  assert.equal(updated.entities[0]!.supportingFiles['scripts/browser-api.sh'], '#!/bin/sh\necho updated\n');
+
+  const edited = await f.asset('skill', { name: 'edited-supporting-file', useCase: true, supportingFiles: { 'scripts/tool.sh': 'original' } });
+  const editedPath = join(codexRoot, 'skills', edited.name, 'scripts/tool.sh');
+  writeFileSync(editedPath, 'user edit');
+  const sync = await f.call<{ runtimeSync: { failureCount: number } }>('runtime.sync');
+  assert.ok(sync.runtimeSync.failureCount > 0);
+  assert.equal(readFileSync(editedPath, 'utf8'), 'user edit');
+  assert.ok(f.core.diagnostics().diagnostics.some(d => d.code === 'runtime-file' && d.message.includes('変更')));
+  assert.throws(() => assetSchema.parse({ kind: 'skill', name: 'reserved', description: '説明', body: '本文', explanation: '説明', supportingFiles: { 'agents/openai.yaml': '衝突' } }), /予約パス/);
+});
+
+test('Journal Review Run inspection is body-less and excludes active Runs', async t => {
+  const f = fixture(t), workflow = await f.workflow(), skill = await f.asset('skill', { name: 'review-only-skill', body: 'SECRET_REVIEW_BODY_174' });
+  await f.bind(workflow, skill);
+  const started = await f.start(workflow);
+  await f.call('run.cancel', { contextHandle: started.contextHandle, reason: 'Review inspection test' });
+  const journal = await f.call<{ journal: Journal }>('journal.write', { postRunId: started.run.id, body: '## 改善の種\nSnapshot本文を返さない' });
+  const inspected = await f.call<{ journalId: string; run: Run; snapshot: { assets: { id: string; kind: string; name: string; revision: number }[] }; deliveries: { target: string; revision?: number; success: boolean; bytes: number }[]; events: { type: string; timestamp: string }[] }>('review.run.inspect', { journalId: journal.journal.id });
+  assert.equal(inspected.journalId, journal.journal.id);
+  assert.equal(inspected.run.status, 'cancelled');
+  assert.ok(inspected.snapshot.assets.some(asset => asset.id === skill.id && !('body' in asset)));
+  assert.ok(inspected.events.every(event => !('data' in event)));
+  assert.ok(inspected.deliveries.every(delivery => !('content' in delivery)));
+  assert.ok(!JSON.stringify(inspected).includes('SECRET_REVIEW_BODY_174'));
+
+  const active = await f.start(workflow);
+  const activeJournal = await f.call<{ journal: Journal }>('journal.write', { contextHandle: active.contextHandle, body: '## 改善の種\n進行中はReview不可' });
+  await assert.rejects(f.call('review.run.inspect', { journalId: activeJournal.journal.id }), /進行中/);
+  const taskOnly = await f.call<{ journal: Journal }>('journal.write', { task: 'RunなしReview', body: '## 改善の種\nRun未関連' });
+  await assert.rejects(f.call('review.run.inspect', { journalId: taskOnly.journal.id }), /関連するRun/);
 });
 
 test('C29 C33: Change Set restoration / persistent SQLite / export / consistent Backup restore', async t => {
