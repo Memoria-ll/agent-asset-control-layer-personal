@@ -473,6 +473,9 @@ pre {
   overflow:auto;
   padding:2px 3px 24px
 }
+.asset-scroll.drawer-open {
+  overflow:hidden
+}
 .asset-grid {
   display:grid;
   grid-template-columns:repeat(auto-fill,minmax(220px,1fr));

@@ -9,6 +9,7 @@ const reviewDecisionLabels = { approved: '処理済み', deferred: '保留', rej
 const navs = [['assets', '資産ライブラリ', 'M4 4h6v6H4zM14 4h6v6h-6zM4 14h6v6H4zM14 14h6v6h-6z'], ['runs', 'Workflow Run', 'M5 5h5v5H5zM14 14h5v5h-5zM10 7h6v7'], ['journals', 'Journal', 'M5 4h14v16H5zM8 8h8M8 12h8M8 16h5'], ['review', 'Journal Review', 'M4 12a8 8 0 1 0 3-6M4 4v5h5M9 12l2 2 4-4'], ['history', '変更履歴', 'M4 12a8 8 0 1 0 3-6M4 4v5h5M12 7v5l3 2'], ['diagnostics', '診断', 'M3 12h4l3-7 4 14 3-7h4'], ['settings', '設定・接続', 'M4 7h16M4 17h16M8 4v6M16 14v6']];
 let assets = [], projects = [], bindings = [];
 let selectedScope = 'global', filter = 'all', search = '', loading = false;
+let assetScrollTop = 0;
 let language = localStorage.getItem('aacl-language') === 'ja' ? 'ja' : 'en';
 let screenData = {};
 let toastTimer;
@@ -104,13 +105,18 @@ function assetDrawer(a) {
     return `<div class="asset-drawer-backdrop" data-action="asset-close" aria-hidden="true"></div><aside class="asset-drawer" aria-label="${esc(a.name)}の詳細"><div class="asset-drawer-head"><span>資産の詳細</span>${button('asset-close', '×', 'icon-button')}</div>${assetDetail(a)}</aside>`;
 }
 function renderAssets() {
+    const currentScroll = document.querySelector('.asset-scroll');
+    if (currentScroll)
+        assetScrollTop = currentScroll.scrollTop;
     const list = assets.filter(a => (a.scope === 'global' || a.scope === selectedScope) && (filter === 'all' || a.kind === filter) && `${a.name} ${a.description} ${a.kind === 'skill' ? a.explanation : ''} ${a.kind === 'model' ? `${a.modelName} ${a.invocationMethod}` : ''}`.toLowerCase().includes(search.toLowerCase()));
     const selected = assets.find(a => a.id === route()[1]);
+    const hasDrawer = Boolean(selected && (selected.scope === 'global' || selected.scope === selectedScope));
     const toolbar = `<div class="toolbar"><div class="filters">${[['all', 'すべて'], ...Object.entries(kinds)].map(([key, title]) => `<button class="filter ${filter === key ? 'active' : ''}" data-action="filter:${key}">${title}<span class="pill-count">${assets.filter(a => (a.scope === 'global' || a.scope === selectedScope) && (key === 'all' || a.kind === key)).length}</span></button>`).join('')}</div><input id="asset-search" class="search" type="search" aria-label="資産を検索" placeholder="名前・説明から検索" value="${esc(search)}" translate="no"></div>`;
     const cards = list.map(a => `<a href="#assets/${a.id}" class="asset-row asset-card ${selected?.id === a.id ? 'selected' : ''}" aria-label="${esc(a.name)}を表示"><div class="asset-card-top"><span class="type-icon ${a.kind}">${symbols[a.kind]}</span><span class="badge">${kinds[a.kind]}</span><span class="asset-card-scope">${esc(labelScope(a.scope))}</span></div><strong>${esc(a.name)}</strong><p>${esc(a.kind === 'skill' ? a.explanation || a.description : a.description) || '説明はありません。'}</p><div class="asset-card-meta"><span class="mono">rev. ${a.revision}</span><span class="asset-card-open">詳細を見る →</span></div></a>`).join('');
-    const grid = `<div class="asset-scroll"><div class="asset-grid" role="list" aria-label="利用できる資産">${cards || empty('見つかりません', '検索語や種類を変更してください。', '', true)}</div>${selected && (selected.scope === 'global' || selected.scope === selectedScope) ? assetDrawer(selected) : ''}</div>`;
+    const grid = `<div class="asset-scroll${hasDrawer ? ' drawer-open' : ''}"><div class="asset-grid" role="list" aria-label="利用できる資産">${cards || empty('見つかりません', '検索語や種類を変更してください。', '', true)}</div>${hasDrawer ? assetDrawer(selected) : ''}</div>`;
     const emptyState = `<div class="asset-scroll"><div class="glass">${empty('開発方法を、育てる。', 'あなたが繰り返し使う手順や判断基準を、最初の資産として保存しましょう。', button('asset-new', '最初の資産を作成', 'primary'))}</div><div class="onboarding"><article class="glass"><div class="step-label">01 / 保存する</div><h3>知識と役割を資産に</h3><p>Skill・Role・Ruleに、使いたい内容を記述します。</p></article><article class="glass"><div class="step-label">02 / 組み立てる</div><h3>Workflowで進め方を定義</h3><p>工程と遷移条件を決め、使う資産を紐づけます。</p></article><article class="glass"><div class="step-label">03 / 振り返る</div><h3>Journalから改善へ</h3><p>実行で得た気づきを残し、次の開発に反映します。</p></article></div></div>`;
     shell(`<div class="asset-shell">${pageHeading('資産ライブラリ', '繰り返し使う方法・知識・役割・規則を、ひとつの場所に。', button('asset-new', '＋ 資産を作成', 'primary'))}${toolbar}${assets.length ? grid : emptyState}</div>`, 'asset-main-content');
+    document.querySelector('.asset-scroll')?.scrollTo({ top: assetScrollTop });
 }
 async function render() {
     const [page, selectedId] = route();

@@ -53,7 +53,8 @@ test('C33: Chromium UI assigns existing and new Roles from Workflow editor, runs
   await expect(page.locator('.asset-drawer')).toBeVisible();
   await expect(page.locator('.asset-layout')).toHaveCount(0);
   await expect(page.locator('.asset-main-content')).toHaveCSS('overflow', 'hidden');
-  await expect(page.locator('.asset-scroll')).toHaveCSS('overflow', 'auto');
+  await expect(page.locator('.asset-scroll')).toHaveCSS('overflow', 'hidden');
+  await expect(page.locator('.asset-drawer > .detail')).toHaveCSS('overflow', 'auto');
   await page.locator('.asset-drawer').getByRole('button', { name: '×', exact: true }).click();
   await expect(page.locator('.asset-drawer')).toHaveCount(0);
   await page.locator('.asset-card').click();
