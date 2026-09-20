@@ -739,6 +739,17 @@ test('Runtime sync places Skill supporting files independently for Codex and Cla
   assert.throws(() => assetSchema.parse({ kind: 'skill', name: 'reserved', description: '説明', body: '本文', explanation: '説明', supportingFiles: { 'agents/openai.yaml': '衝突' } }), /予約パス/);
 });
 
+test('Runtime supporting files follow the collision-safe Claude entry name', async t => {
+  const f = fixture(t), first = await f.asset('skill', { name: 'same-name', useCase: true, supportingFiles: { 'scripts/tool.sh': 'first' } }), second = await f.asset('skill', { name: 'same-name', useCase: true, supportingFiles: { 'scripts/tool.sh': 'second' } });
+  const root = mkdtempSync(join(tmpdir(), 'aacl-support-collision-'));
+  await f.call('runtime.register', { runtime: 'claude', platform: 'wsl', scope: 'global', path: root });
+  const firstEntry = `same-name-${first.id}`, secondEntry = `same-name-${second.id}`;
+  assert.equal(readFileSync(join(root, 'commands', `${firstEntry}.md`), 'utf8').includes(first.id), true);
+  assert.equal(readFileSync(join(root, 'commands', firstEntry, 'scripts/tool.sh'), 'utf8'), 'first');
+  assert.equal(readFileSync(join(root, 'commands', secondEntry, 'scripts/tool.sh'), 'utf8'), 'second');
+  assert.equal(existsSync(join(root, 'commands', 'same-name', 'scripts/tool.sh')), false);
+});
+
 test('Journal Review Run inspection is body-less and excludes active Runs', async t => {
   const f = fixture(t), workflow = await f.workflow(), skill = await f.asset('skill', { name: 'review-only-skill', body: 'SECRET_REVIEW_BODY_174' });
   await f.bind(workflow, skill);

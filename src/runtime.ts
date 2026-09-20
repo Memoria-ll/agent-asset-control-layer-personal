@@ -38,8 +38,8 @@ function codexPolicyPath(path: string) {
   return join(dirname(path), 'agents', 'openai.yaml');
 }
 
-function supportRoot(runtime: RuntimeTarget['runtime'], entryPath: string, entryName?: string) {
-  return runtime === 'claude' ? join(dirname(entryPath), entryName ?? parse(entryPath).name) : dirname(entryPath);
+function supportRoot(runtime: RuntimeTarget['runtime'], entryPath: string) {
+  return runtime === 'claude' ? join(dirname(entryPath), parse(entryPath).name) : dirname(entryPath);
 }
 
 function assertWithin(root: string, path: string) {
@@ -137,7 +137,7 @@ export class RuntimeEntries {
   }
   private syncSupportingFiles(target: RuntimeTarget, asset: Asset | undefined, oldEntry: Entry | undefined, entryPath: string | undefined, previous: RuntimeFile[]) {
     const oldRoot = oldEntry ? supportRoot(target.runtime, oldEntry.path) : undefined;
-    const currentRoot = asset && entryPath ? supportRoot(target.runtime, entryPath, runtimeSlug(asset.name)) : undefined;
+    const currentRoot = asset && entryPath ? supportRoot(target.runtime, entryPath) : undefined;
     const desired = new Map<string, string>();
     if (asset && currentRoot) {
       for (const [relativePath, content] of Object.entries(asset.supportingFiles)) {
@@ -157,6 +157,12 @@ export class RuntimeEntries {
       const oldPath = prior?.path;
       if (currentPath && currentRoot) assertWithin(currentRoot, currentPath);
       if (oldPath && oldRoot) assertWithin(oldRoot, oldPath);
+      let oldContent: string | undefined;
+      if (oldPath && oldPath !== currentPath) {
+        safeExistingDirectory(dirname(oldPath));
+        oldContent = readRegularFile(oldPath);
+        if (oldContent !== undefined && (!oldRoot || !prior || hash(oldContent) !== prior.hash)) throw new Error(`以前のRuntime補助ファイルがAACL生成後に変更されています。内容を確認してください: ${oldPath}`);
+      }
       if (content !== undefined && currentPath && asset) {
         safeDirectory(dirname(currentPath));
         const existing = readRegularFile(currentPath);
@@ -164,14 +170,9 @@ export class RuntimeEntries {
         if (existing !== undefined && prior && hash(existing) !== prior.hash) throw new Error(`Runtime補助ファイルがAACL生成後に変更されています。内容を確認してください: ${currentPath}`);
         if (existing !== content) writeOwnedFile(currentPath, content);
         else chmodSync(currentPath, fileMode(currentPath));
-        if (oldPath && oldPath !== currentPath) {
-          safeExistingDirectory(dirname(oldPath));
-          const oldContent = readRegularFile(oldPath);
-          if (oldContent !== undefined) {
-            if (!oldRoot || !prior || hash(oldContent) !== prior.hash) throw new Error(`以前のRuntime補助ファイルがAACL生成後に変更されています。内容を確認してください: ${oldPath}`);
-            unlinkSync(oldPath);
-            cleanupEmptyDirectories(dirname(oldPath), dirname(oldRoot));
-          }
+        if (oldContent !== undefined && oldPath && oldRoot) {
+          unlinkSync(oldPath);
+          cleanupEmptyDirectories(dirname(oldPath), dirname(oldRoot));
         }
         if (!prior || prior.path !== currentPath || prior.assetRevision !== asset.revision || prior.hash !== hash(content) || prior.executable !== (fileMode(currentPath) === 0o700) || !prior.active) {
           this.core.store.put('runtime-file', { id: prior?.id, targetId: target.id, assetId: asset.id, assetRevision: asset.revision, relativePath, path: currentPath, hash: hash(content), active: true, executable: fileMode(currentPath) === 0o700 });
