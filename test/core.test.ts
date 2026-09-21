@@ -730,7 +730,6 @@ test('Binding-referenced Skills are implicit Codex candidates without becoming d
   const entry = f.store.list<{ assetId: string; implicitInvocation?: boolean }>('runtime-entry').find(item => item.assetId === child.id)!;
   assert.equal(entry.implicitInvocation, true);
   await f.call('binding.remove', { id: f.core.bindings().find(binding => binding.sourceId === parent.id && binding.targetId === child.id)!.id, expectedRevision: f.core.bindings().find(binding => binding.sourceId === parent.id && binding.targetId === child.id)!.revision, provenance });
-  await f.call('runtime.sync');
   assert.equal(existsSync(path), false);
   assert.equal(existsSync(policyPath), false);
 });

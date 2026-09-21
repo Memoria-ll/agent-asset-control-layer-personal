@@ -340,6 +340,40 @@ test('C33: Chromium UI assigns existing and new Roles from Workflow editor, runs
   expect(errors).toEqual([]);
 });
 
+test('Asset Library loads summaries first and fetches the selected body on demand', async ({ page }) => {
+  const response = await page.request.post(`http://127.0.0.1:${app.port}/api/asset.save`, {
+    data: {
+      operationId: randomUUID(),
+      provenance: { origin: 'ui', userRequest: 'lazy asset detail' },
+      asset: {
+        kind: 'skill',
+        name: 'Lazy detail skill',
+        description: 'Summary description',
+        explanation: 'Summary explanation',
+        body: 'LAZY_DETAIL_BODY',
+        supportingFiles: { 'guide.md': 'LAZY_DETAIL_FILE' },
+        useCase: false,
+      },
+    },
+  });
+  expect(response.ok()).toBeTruthy();
+  const asset = (await response.json()).entities[0];
+  const assetListRequests: object[] = [];
+  page.on('request', request => {
+    if (request.url().endsWith('/api/asset.list')) assetListRequests.push(request.postDataJSON());
+  });
+  await page.goto(`http://127.0.0.1:${app.port}/#assets`);
+  await expect(page.locator(`[href="#assets/${asset.id}"]`)).toBeVisible();
+  expect(assetListRequests.length).toBeGreaterThan(0);
+  expect(assetListRequests.at(-1)).not.toHaveProperty('includeBody');
+  const detailResponse = page.waitForResponse(request => request.url().endsWith('/api/asset.get') && request.request().method() === 'POST');
+  await page.locator(`[href="#assets/${asset.id}"]`).click();
+  await detailResponse;
+  await expect(page.getByText('LAZY_DETAIL_BODY', { exact: true })).toBeVisible();
+  await page.getByText('guide.md', { exact: true }).click();
+  await expect(page.getByText('LAZY_DETAIL_FILE', { exact: true })).toBeVisible();
+});
+
 test('Diagnostics identifies the concrete Asset behind a Runtime failure', async ({ page }) => {
   const assetResponse = await page.request.post(`http://127.0.0.1:${app.port}/api/asset.save`, {
     data: {

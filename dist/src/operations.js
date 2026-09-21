@@ -23,6 +23,50 @@ ModelからSkill / Ruleへの参照にはchoiceConditionsを指定でき、同�
 Journal Reviewはユーザーが明示的に開始します。Review自体のRunを作らず、aacl_review_pendingで要約と関連IDを取得し、必要な対象だけaacl_review_item_get・aacl_proposal_getと関連するSnapshot・History・Provenanceを参照します。提案を伴わない判断はaacl_review_decideまたはaacl_review_decide_bulkで直接記録します。
 完了・中止・失敗したRunのJournalをReviewする場合はaacl_review_run_inspectへjournalIdを渡します。結果はbody-lessのSnapshot・Delivery・Event要約だけで、本文や補助ファイルはaacl_asset_getで対象Asset IDとrevisionを個別に取得します。進行中Runや未ReviewのJournalは対象外です。
 提案には対象変更・理由・根拠Journal・レビューしたJournal一覧・処理する気づきを明示します。aacl_proposal_decideでユーザー判断を記録し、承認後aacl_proposal_applyを実行します。保留の気づきは残します。`;
+const assetKinds = new Set(['workflow', 'skill', 'role', 'rule', 'model']);
+const recordsFromResult = (result) => {
+    if (!result || typeof result !== 'object' || Array.isArray(result))
+        return [];
+    const entities = result.entities;
+    return Array.isArray(entities) ? entities.filter((entity) => Boolean(entity) && typeof entity === 'object' && !Array.isArray(entity)) : [];
+};
+const assetIdsFromResult = (result) => new Set(recordsFromResult(result).flatMap(entity => typeof entity.id === 'string' && typeof entity.kind === 'string' && assetKinds.has(entity.kind) ? [entity.id] : []));
+const assetIdsFromResultAndRelations = (result) => {
+    const ids = assetIdsFromResult(result);
+    for (const entity of recordsFromResult(result))
+        for (const key of ['sourceId', 'targetId'])
+            if (typeof entity[key] === 'string')
+                ids.add(entity[key]);
+    return ids;
+};
+const resultAssetIds = (_fields, result) => assetIdsFromResult(result);
+const resultAssetIdsAndRelations = (_fields, result) => assetIdsFromResultAndRelations(result);
+const assetIdsFromChanges = (fields, result) => {
+    const ids = assetIdsFromResultAndRelations(result), changes = Array.isArray(fields.changes) ? fields.changes : [];
+    for (const change of changes) {
+        if (!change || typeof change !== 'object' || Array.isArray(change))
+            continue;
+        const item = change;
+        if (typeof item.id === 'string' && ['asset.save', 'asset.update', 'asset.create', 'asset.delete'].includes(String(item.type)))
+            ids.add(item.id);
+        const binding = item.binding;
+        if (binding && typeof binding === 'object' && !Array.isArray(binding)) {
+            for (const key of ['sourceId', 'targetId'])
+                if (typeof binding[key] === 'string')
+                    ids.add(binding[key]);
+        }
+    }
+    return ids;
+};
+const bindingAssetIds = (fields, result) => {
+    const ids = assetIdsFromResultAndRelations(result), binding = fields.binding;
+    if (binding && typeof binding === 'object' && !Array.isArray(binding)) {
+        for (const key of ['sourceId', 'targetId'])
+            if (typeof binding[key] === 'string')
+                ids.add(binding[key]);
+    }
+    return ids;
+};
 export class Operations {
     core;
     runtime;
@@ -47,14 +91,14 @@ export class Operations {
         };
         read('bootstrap.get', 'AACLの利用案内とRuntimeに応じた入口を取得', { runtime: z.enum(['claude', 'codex']).optional() }, p => ({ instructions: bootstrap, runtime: p.runtime, entry: p.runtime === 'claude' ? 'Command' : 'Skill', journalEnabled: core.settings().journalEnabled }));
         read('asset.list', 'Assetを概要（本文・補助ファイルなし）で検索。本文が必要ならincludeBodyまたはfieldsを指定する。例: { kind: "skill", query: "review" }', { scope: scope.optional(), kind: z.enum(['workflow', 'skill', 'role', 'rule', 'model']).optional(), query: z.string().default(''), includeDeleted: z.boolean().default(false), includeBody: z.boolean().default(false), fields: assetListFields }, p => ({ assets: store.list('asset', p.scope).filter(a => (p.includeDeleted || !a.deletedAt) && (!p.kind || a.kind === p.kind) && `${a.name} ${a.description} ${a.kind === 'skill' ? a.explanation : ''} ${a.kind === 'model' ? `${a.modelName} ${a.invocationMethod}` : ''}`.toLowerCase().includes(p.query.toLowerCase())).map(a => assetView(a, p.includeBody, p.fields)) }));
-        write('setup.skills', 'Journal・Journal Reviewの標準Skillを導入。導入済みの編集内容を保持', {}, () => installJournalSkills(core), true);
+        write('setup.skills', 'Journal・Journal Reviewの標準Skillを導入。導入済みの編集内容を保持', {}, () => installJournalSkills(core), resultAssetIds);
         read('asset.get', 'Assetの現在または過去revisionを取得', { assetId: id, revision: z.int().positive().optional() }, p => { const current = core.asset(p.assetId, true); return { asset: p.revision ? store.revision(p.assetId, p.revision) : current }; });
         read('asset.get_many', '複数AssetをID順で取得。本文も返す。例: { assetIds: ["uuid", "uuid"] }', { assetIds: z.array(id).min(1).max(100), includeDeleted: z.boolean().default(false) }, p => ({ assets: p.assetIds.map(assetId => core.asset(assetId, p.includeDeleted)) }));
-        write('asset.save', 'Assetを完全な内容で作成・更新する。既存Assetの更新は取得時点のexpectedRevisionを指定する。例: { id: "uuid", expectedRevision: 3, asset: { ... } }', { id: id.optional(), expectedRevision: revision.optional(), asset: assetSchema, provenance }, p => core.applyChanges([{ type: 'asset.save', id: p.id, expectedRevision: p.expectedRevision, asset: p.asset }], p.provenance), true);
-        write('asset.update', 'Assetの指定fieldだけを更新する。省略したfieldは現在値を保持する。既存Assetの更新には取得時点のexpectedRevisionが必要。例: { id: "uuid", expectedRevision: 3, asset: { body: "本文だけ変更" } }', { id, expectedRevision: revision, asset: assetPatchSchema, provenance }, p => core.applyChanges([{ type: 'asset.update', id: p.id, expectedRevision: p.expectedRevision, asset: p.asset }], p.provenance), true);
+        write('asset.save', 'Assetを完全な内容で作成・更新する。既存Assetの更新は取得時点のexpectedRevisionを指定する。例: { id: "uuid", expectedRevision: 3, asset: { ... } }', { id: id.optional(), expectedRevision: revision.optional(), asset: assetSchema, provenance }, p => core.applyChanges([{ type: 'asset.save', id: p.id, expectedRevision: p.expectedRevision, asset: p.asset }], p.provenance), resultAssetIds);
+        write('asset.update', 'Assetの指定fieldだけを更新する。省略したfieldは現在値を保持する。既存Assetの更新には取得時点のexpectedRevisionが必要。例: { id: "uuid", expectedRevision: 3, asset: { body: "本文だけ変更" } }', { id, expectedRevision: revision, asset: assetPatchSchema, provenance }, p => core.applyChanges([{ type: 'asset.update', id: p.id, expectedRevision: p.expectedRevision, asset: p.asset }], p.provenance), resultAssetIds);
         read('asset.delete.preview', '削除対象Assetを参照する紐づけとProject Commonを確認', { assetId: id }, p => core.assetDeletionPreview(p.assetId));
-        write('asset.delete', '影響一覧を確認したユーザーの明示承認後にAssetと参照を削除状態へ変更', { assetId: id, expectedRevision: z.int().positive(), expectedBindingRevisions: z.array(z.object({ id, revision: z.int().positive() }).strict()), expectedProjectCommonRevisions: z.array(z.object({ id, revision: z.int().positive() }).strict()), confirmed: z.literal(true), provenance }, p => core.deleteAsset(p, p.provenance), true);
-        write('asset.restore', '過去revisionを新revisionとして復元。現在revisionが変わっていないことをexpectedRevisionで確認する', { assetId: id, revision, expectedRevision: revision }, p => core.restoreAsset(p.assetId, p.revision, p.expectedRevision), true);
+        write('asset.delete', '影響一覧を確認したユーザーの明示承認後にAssetと参照を削除状態へ変更', { assetId: id, expectedRevision: z.int().positive(), expectedBindingRevisions: z.array(z.object({ id, revision: z.int().positive() }).strict()), expectedProjectCommonRevisions: z.array(z.object({ id, revision: z.int().positive() }).strict()), confirmed: z.literal(true), provenance }, p => core.deleteAsset(p, p.provenance), resultAssetIdsAndRelations);
+        write('asset.restore', '過去revisionを新revisionとして復元。現在revisionが変わっていないことをexpectedRevisionで確認する', { assetId: id, revision, expectedRevision: revision }, p => core.restoreAsset(p.assetId, p.revision, p.expectedRevision), resultAssetIds);
         read('usecase.search', 'WorkflowとuseCaseが有効なSkillを検索', { scope: scope.default('global'), query: z.string().default('') }, p => ({ assets: store.list('asset').filter(a => !a.deletedAt && (a.scope === 'global' || a.scope === p.scope) && (a.kind === 'workflow' || a.kind === 'skill' && a.useCase) && `${a.name} ${a.description} ${a.kind === 'skill' ? a.explanation : ''}`.toLowerCase().includes(p.query.toLowerCase())) }));
         read('skill.get', '指定Skillの本文と、bindingで参照された通常Skill候補を取得。Runを作成しない', { assetId: id, revision: revision.optional() }, p => core.skillGet(p.assetId, p.revision));
         write('skill.usecase', 'Skillの直接起動を切り替えRuntime入口を同期', { assetId: id, enabled: z.boolean(), provenance }, p => {
@@ -62,7 +106,7 @@ export class Operations {
             if (a.kind !== 'skill')
                 throw new Error('Skillを指定してください。');
             return core.applyChanges([{ type: 'asset.save', id: a.id, expectedRevision: a.revision, asset: { ...core.assetPayload(a), useCase: p.enabled } }], p.provenance);
-        }, true);
+        }, fields => [String(fields.assetId)]);
         read('project.list', '登録済みProjectを取得', {}, () => ({ projects: store.list('project') }));
         read('project.resolve', '正規化したrootの完全一致でProjectを確認', { root: text }, p => ({ root: normalizeRoot(p.root), project: store.list('project').find(v => v.root === normalizeRoot(p.root)) ?? null }));
         write('project.init', 'Project登録とGlobal紐づけコピーを一括実行', { root: text, name: text }, p => {
@@ -74,8 +118,8 @@ export class Operations {
         write('common.save', 'Project CommonのRule参照を更新する。取得時点のexpectedRevisionを指定する', { projectId: id, expectedRevision: revision, ruleIds: z.array(id), provenance }, p => core.applyChanges([{ type: 'common.save', projectId: p.projectId, expectedRevision: p.expectedRevision, ruleIds: p.ruleIds }], p.provenance));
         read('binding.list', '管理先ごとの紐づけを一覧', { scope: scope.optional(), assetId: id.optional() }, p => ({ bindings: core.bindings(p.scope).filter(b => !p.assetId || b.sourceId === p.assetId || b.targetId === p.assetId) }));
         read('binding.get', '紐づけの現在または過去revisionを取得', { bindingId: id, revision: z.int().positive().optional() }, p => { const binding = store.get(p.bindingId, 'binding'); return { binding: p.revision ? store.revision(p.bindingId, p.revision) : binding }; });
-        write('binding.save', '明示参照を追加・付け替え。ModelからSkill / Ruleへの参照ではchoiceConditionsで選択肢の組み合わせを指定できる。既存紐づけの更新は取得時点のexpectedRevisionを指定する', { id: id.optional(), expectedRevision: revision.optional(), binding: bindingSchema, provenance }, p => core.applyChanges([{ type: 'binding.save', id: p.id, expectedRevision: p.expectedRevision, binding: p.binding }], p.provenance));
-        write('binding.remove', '紐づけを解除する。取得時点のexpectedRevisionを指定する', { id, expectedRevision: revision, provenance }, p => core.applyChanges([{ type: 'binding.remove', id: p.id, expectedRevision: p.expectedRevision }], p.provenance));
+        write('binding.save', '明示参照を追加・付け替え。ModelからSkill / Ruleへの参照ではchoiceConditionsで選択肢の組み合わせを指定できる。既存紐づけの更新は取得時点のexpectedRevisionを指定する', { id: id.optional(), expectedRevision: revision.optional(), binding: bindingSchema, provenance }, p => core.applyChanges([{ type: 'binding.save', id: p.id, expectedRevision: p.expectedRevision, binding: p.binding }], p.provenance), bindingAssetIds);
+        write('binding.remove', '紐づけを解除する。取得時点のexpectedRevisionを指定する', { id, expectedRevision: revision, provenance }, p => core.applyChanges([{ type: 'binding.remove', id: p.id, expectedRevision: p.expectedRevision }], p.provenance), resultAssetIdsAndRelations);
         write('run.start', '明示選択したWorkflowのRunを開始し、Context本文を含まない次の実行計画とContext Handleを返す', { workflowId: id, projectId: id.optional(), root: text.optional(), runtime: text, instruction: text, target: z.string().default('') }, p => core.startRun(p));
         read('run.list', 'Workflow Runを一覧', { projectId: id.optional() }, p => { core.expireRuns(); return { runs: store.list('run', p.projectId) }; });
         read('run.get', 'Handleに対応するRunと許可遷移を取得', handle, p => {
@@ -132,10 +176,10 @@ export class Operations {
             evidenceJournalIds: z.array(id).min(1), reviewedJournalIds: z.array(id).min(1), affectedAssetIds: z.array(id), affectedBindingIds: z.array(id), affectedProjectIds: z.array(id), changes: z.array(changeSchema).min(1), insightIds: z.array(id),
         }, p => { const { id, ...proposal } = p; return core.saveProposal(proposal, id); });
         write('proposal.decide', '提案へのユーザー判断と対象Review項目の状態を同時に記録', { proposalId: id, choice: z.enum(['approved', 'deferred', 'rejected']), note: text }, p => core.decideProposal(p.proposalId, p.choice, p.note));
-        write('proposal.apply', '承認済み変更の適用と対象の気づき処理を一括実行', { proposalId: id }, p => core.applyProposal(p.proposalId), true);
+        write('proposal.apply', '承認済み変更の適用と対象の気づき処理を一括実行', { proposalId: id }, p => core.applyProposal(p.proposalId), resultAssetIdsAndRelations);
         read('changeset.preview', 'Change Setを保存せず検証するDry Run。各更新・解除にはexpectedRevisionを含め、valid=falseなら全体を適用しない', { changes: z.array(changeSchema).min(1), provenance: provenance.optional() }, p => core.previewChanges(p.changes, p.provenance ?? { origin: 'ui', reason: 'Change SetのDry Run', userRequest: '', sources: [], proposedBy: '', decision: '' }));
-        write('changeset.apply', 'expectedRevision付きの具体的なasset.save / asset.create / binding.save / binding.remove / common.saveを一括適用する。1件でもConflictなら全体を適用しない', { changes: z.array(changeSchema).min(1), provenance }, p => core.applyChanges(p.changes, p.provenance), true);
-        write('changeset.restore', 'Change Set適用前の内容を新revisionとして復元する。適用後revisionから変更されていればConflictとして中止する', { changeSetId: id }, p => core.restoreChangeSet(p.changeSetId), true);
+        write('changeset.apply', 'expectedRevision付きの具体的なasset.save / asset.create / binding.save / binding.remove / common.saveを一括適用する。1件でもConflictなら全体を適用しない', { changes: z.array(changeSchema).min(1), provenance }, p => core.applyChanges(p.changes, p.provenance), assetIdsFromChanges);
+        write('changeset.restore', 'Change Set適用前の内容を新revisionとして復元する。適用後revisionから変更されていればConflictとして中止する', { changeSetId: id }, p => core.restoreChangeSet(p.changeSetId), resultAssetIdsAndRelations);
         read('history.get', '変更履歴を概要一覧。Change Setの詳細はchangeSetIdで取得する', { entityId: id.optional(), changeSetId: id.optional(), limit: z.int().positive().max(100).default(20), cursor: z.string().nullable().optional(), includeDetails: z.boolean().default(false) }, p => core.history(p));
         read('diagnostics.get', '参照・状態・反復遷移と実提供量を診断', {}, () => core.diagnostics());
         read('costs.get', '実際のContext提供量をRun・Stage・Role・対象別に比較', {}, () => ({ costs: core.costs() }));
@@ -170,7 +214,10 @@ export class Operations {
                 else
                     result = handler(parsed);
                 result = await result;
-                return sync ? { ...result, runtimeSync: this.runtime.sync() } : result;
+                if (!sync)
+                    return result;
+                const assetIds = typeof sync === 'function' ? sync(fields, result) : undefined;
+                return { ...result, runtimeSync: this.runtime.sync(assetIds) };
             } });
     }
     async execute(name, input) {

@@ -1,4 +1,4 @@
-import type { Asset, Binding, Change } from '../src/schema.ts';
+import type { AssetSummary, Binding, Change } from '../src/schema.ts';
 
 export function diagnosticAssetId(evidence: unknown) {
   if (!evidence || typeof evidence !== 'object' || Array.isArray(evidence)) return undefined;
@@ -6,13 +6,13 @@ export function diagnosticAssetId(evidence: unknown) {
   return typeof assetId === 'string' ? assetId : undefined;
 }
 
-export function diagnosticAsset(evidence: unknown, assets: Asset[]) {
+export function diagnosticAsset(evidence: unknown, assets: AssetSummary[]) {
   const assetId = diagnosticAssetId(evidence);
   return assetId ? assets.find(asset => asset.id === assetId) : undefined;
 }
 
-export function relatedWorkflows(assetId: string, assets: Asset[], bindings: Binding[]) {
-  const result: { workflow: Asset; stageId?: string; via: string[]; binding: Binding }[] = [];
+export function relatedWorkflows(assetId: string, assets: AssetSummary[], bindings: Binding[]) {
+  const result: { workflow: AssetSummary; stageId?: string; via: string[]; binding: Binding }[] = [];
   const walk = (target: string, via: string[], visited: Set<string>, attachment?: Binding) => {
     if (visited.has(target)) return;
     const next = new Set(visited).add(target);
@@ -59,7 +59,7 @@ export function stageModelBindingChanges(workflowId: string, scope: string, assi
   return changes;
 }
 
-export function workflowDiagram(asset: Asset) {
+export function workflowDiagram(asset: AssetSummary) {
   const nodes = [...asset.stages.map(s => ({ id: s.id, name: s.name })), { id: 'completed', name: '完了' }].map((s, i) => ({ ...s, x: 35 + i * 210, y: 125 }));
   const edges = asset.transitions.map((t, i) => {
     const from = nodes.find(n => n.id === t.from), to = nodes.find(n => n.id === t.to);

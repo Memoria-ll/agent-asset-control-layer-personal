@@ -239,16 +239,35 @@ export class RuntimeEntries {
             }
         }
     }
-    sync() {
+    sync(assetIds) {
+        const requested = assetIds === undefined ? undefined : new Set(assetIds);
+        const allAssets = this.core.store.list('asset');
         const results = [];
         for (const target of this.core.store.list('runtime-target').filter(t => t.enabled)) {
-            const allAssets = this.core.store.list('asset');
             const boundSkillIds = new Set(this.core.bindings(target.scope).filter(b => b.purpose === 'reference').map(b => b.targetId).filter(assetId => allAssets.some(a => a.id === assetId && a.kind === 'skill')));
             const assets = allAssets.filter(a => !a.deletedAt && a.scope === target.scope && (a.kind === 'workflow' || a.kind === 'skill' && (a.useCase || boundSkillIds.has(a.id))));
             const names = runtimeNames(assets);
             const previous = this.core.store.list('runtime-entry').filter(e => e.targetId === target.id && e.active);
             const previousFiles = this.core.store.list('runtime-file').filter(file => file.targetId === target.id);
             const ids = new Set([...assets.map(a => a.id), ...previous.map(e => e.assetId), ...previousFiles.map(file => file.assetId)]);
+            if (requested) {
+                ids.clear();
+                for (const asset of assets) {
+                    const old = previous.find(entry => entry.assetId === asset.id);
+                    const entryName = names.get(asset.id);
+                    const path = entryName ? target.runtime === 'claude' ? join(target.path, 'commands', `${entryName}.md`) : join(target.path, 'skills', entryName, 'SKILL.md') : undefined;
+                    const desired = entryName ? this.body(asset, target.runtime, entryName) : undefined;
+                    const implicitInvocation = asset.kind === 'skill' && boundSkillIds.has(asset.id);
+                    if (requested.has(asset.id) || (old && path && (old.path !== path || old.hash !== hash(desired) || old.implicitInvocation !== implicitInvocation)))
+                        ids.add(asset.id);
+                }
+                for (const entry of previous)
+                    if (requested.has(entry.assetId))
+                        ids.add(entry.assetId);
+                for (const file of previousFiles)
+                    if (requested.has(file.assetId))
+                        ids.add(file.assetId);
+            }
             for (const assetId of ids) {
                 let phase = 'runtime-entry';
                 const prior = this.core.store.list('diagnostic').find(d => d.code === 'runtime-entry' && d.target === target.id && d.evidence?.assetId === assetId);

@@ -1,4 +1,4 @@
-import type { Asset, AssetDeletionPreview, Binding, Change, ChangeSet, Common, Decision, Delivery, Diagnostic, History, Insight, Journal, Project, Proposal, Provenance, ReviewItem, Run, RunEvent, RuntimeTarget, Snapshot } from '../src/schema.ts';
+import type { Asset, AssetDeletionPreview, AssetSummary, Binding, Change, ChangeSet, Common, Decision, Delivery, Diagnostic, History, Insight, Journal, Project, Proposal, Provenance, ReviewItem, Run, RunEvent, RuntimeTarget, Snapshot } from '../src/schema.ts';
 import { diagnosticAsset, diagnosticAssetId, relatedWorkflows, stageModelBindingChanges, stageRoleBindingChanges, workflowDiagram } from './view-model.ts';
 import { localizeHtml, type Language } from './i18n.ts';
 
@@ -9,7 +9,11 @@ const symbols = { workflow: '◇', skill: '✧', role: '◉', rule: '≡', model
 const states: Record<string, string> = { active: '進行中', completed: '完了', cancelled: '中止', failed: '終了・失敗', pending: '保留', processed: '処理済み', rejected: '却下', approved: '承認', deferred: '保留' };
 const reviewDecisionLabels: Record<string, string> = { approved: '処理済み', deferred: '保留', rejected: '却下' };
 const navs = [['assets', '資産ライブラリ', 'M4 4h6v6H4zM14 4h6v6h-6zM4 14h6v6H4zM14 14h6v6h-6z'], ['runs', 'Workflow Run', 'M5 5h5v5H5zM14 14h5v5h-5zM10 7h6v7'], ['journals', 'Journal', 'M5 4h14v16H5zM8 8h8M8 12h8M8 16h5'], ['review', 'Journal Review', 'M4 12a8 8 0 1 0 3-6M4 4v5h5M9 12l2 2 4-4'], ['history', '変更履歴', 'M4 12a8 8 0 1 0 3-6M4 4v5h5M12 7v5l3 2'], ['diagnostics', '診断', 'M3 12h4l3-7 4 14 3-7h4'], ['settings', '設定・接続', 'M4 7h16M4 17h16M8 4v6M16 14v6']];
-let assets: Asset[] = [], projects: Project[] = [], bindings: Binding[] = [];
+let assets: AssetSummary[] = [], projects: Project[] = [], bindings: Binding[] = [];
+const assetDetails = new Map<string, Asset>();
+let assetDetailRequest: { id: string; token: number } | undefined;
+let assetDetailRequestToken = 0;
+let assetDetailError: { id: string; message: string } | undefined;
 let selectedScope = 'global', filter = 'all', search = '', loading = false;
 let journalReportCount = 0;
 let assetScrollTop = 0;
@@ -20,7 +24,7 @@ const htmlText = (value: unknown) => String(value ?? '').replace(/[&<>"']/g, c =
 const esc = (value: unknown) => htmlText(value).replace(/[^\x00-\x7F]/gu, c => `&#x${c.codePointAt(0)!.toString(16)};`);
 const date = (value: string) => new Date(value).toLocaleString(language === 'en' ? 'en-US' : 'ja-JP', { dateStyle: 'short', timeStyle: 'short' });
 const name = (id: string) => assets.find(a => a.id === id)?.name ?? id;
-const journalSkillKey = (asset: Asset) => asset.kind === 'skill' && (asset.metadata.aaclUtility === 'journal' || asset.metadata.aaclUtility === 'journal-review') ? asset.metadata.aaclUtility : undefined;
+const journalSkillKey = (asset: Pick<Asset, 'kind' | 'metadata'>) => asset.kind === 'skill' && (asset.metadata.aaclUtility === 'journal' || asset.metadata.aaclUtility === 'journal-review') ? asset.metadata.aaclUtility : undefined;
 const labelScope = (id: string) => id === 'global' ? 'Global' : projects.find(p => p.id === id)?.name ?? id;
 const icon = (path: string) => `<svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="${path}"/></svg>`;
 const badge = (text: string, color = '') => `<span class="badge ${color}">${htmlText(text)}</span>`;
@@ -56,6 +60,42 @@ async function api<T>(operation: string, input: object = {}, write = false): Pro
   if (data.runtimeSync?.failureCount > 0) notify('保存しました。Runtime入口の生成に失敗があります。診断を確認してください。');
   return data as T;
 }
+function isFullAsset(asset: AssetSummary | undefined): asset is Asset {
+  return Boolean(asset && typeof asset.body === 'string' && asset.supportingFiles !== undefined);
+}
+function cacheAsset(asset: Asset) {
+  assetDetails.set(asset.id, asset);
+  const index = assets.findIndex(value => value.id === asset.id);
+  if (index >= 0) assets[index] = { ...assets[index], ...asset };
+  return asset;
+}
+function cacheAssetEntities(result: unknown) {
+  if (!result || typeof result !== 'object' || Array.isArray(result)) return;
+  const entities = (result as { entities?: unknown }).entities;
+  if (!Array.isArray(entities)) return;
+  for (const entity of entities) if (entity && typeof entity === 'object' && !Array.isArray(entity) && isFullAsset(entity as AssetSummary)) cacheAsset(entity as Asset);
+}
+async function ensureAssetDetails(id: string) {
+  const summary = assets.find(asset => asset.id === id), cached = assetDetails.get(id);
+  if (cached && (!summary || cached.revision === summary.revision)) return cacheAsset(cached);
+  const result = await api<{ asset: Asset }>('asset.get', { assetId: id });
+  return cacheAsset(result.asset);
+}
+async function loadAssetDetail(id: string, token: number) {
+  try {
+    const result = await api<{ asset: Asset }>('asset.get', { assetId: id });
+    if (!assetDetailRequest || assetDetailRequest.id !== id || assetDetailRequest.token !== token || route()[0] !== 'assets' || route()[1] !== id) return;
+    assetDetailError = undefined;
+    assetDetailRequest = undefined;
+    cacheAsset(result.asset);
+    renderAssets();
+  } catch (error) {
+    if (!assetDetailRequest || assetDetailRequest.id !== id || assetDetailRequest.token !== token) return;
+    assetDetailRequest = undefined;
+    assetDetailError = { id, message: errorMessage(error) };
+    renderAssets();
+  }
+}
 function modal(title: string, html: string, layout = '') { dialog.dataset.layout = layout; dialog.innerHTML = localizeHtml(`<div class="dialog-head"><h2>${htmlText(title)}</h2>${button('close', '×', 'icon-button')}</div>${html}`, language); if (!dialog.open) dialog.showModal(); }
 function pageHeading(title: string, description: string, action = '') { return `<header class="page-heading"><div><h1>${title}</h1><p>${description}</p></div>${action}</header>`; }
 function shell(content: string, contentClass = '') {
@@ -72,8 +112,12 @@ async function refresh() {
   recordRouteKey = '';
   recordGeneration += 1;
   try {
-    const [a, p, b, j] = await Promise.all([api<{ assets: Asset[] }>('asset.list', { includeBody: true }), api<{ projects: Project[] }>('project.list'), api<{ bindings: Binding[] }>('binding.list', { scope: selectedScope }), api<{ total: number }>('journal.list', { ...(selectedScope !== 'global' ? { projectId: selectedScope } : {}) })]);
-    assets = a.assets; projects = p.projects; bindings = b.bindings;
+    const [a, p, b, j] = await Promise.all([api<{ assets: AssetSummary[] }>('asset.list'), api<{ projects: Project[] }>('project.list'), api<{ bindings: Binding[] }>('binding.list', { scope: selectedScope }), api<{ total: number }>('journal.list', { ...(selectedScope !== 'global' ? { projectId: selectedScope } : {}) })]);
+    assets = a.assets.map(asset => {
+      const cached = assetDetails.get(asset.id);
+      return cached && cached.revision === asset.revision ? { ...asset, ...cached } : asset;
+    });
+    projects = p.projects; bindings = b.bindings;
     journalReportCount = j.total;
     await render();
   } catch (error) { shell(`<div class="glass error-panel"><h2>読み込めませんでした</h2><p>${esc((error as Error).message)}</p>${button('refresh', '再読み込み')}</div>`); }
@@ -108,10 +152,11 @@ function assetDetail(a: Asset) {
   const summary = a.kind === 'skill' ? a.explanation || a.description : a.description;
   return `<article class="glass detail"><div class="detail-head"><div><div class="badge-row">${badge(kinds[a.kind])}${badge(labelScope(a.scope))}<span class="mono">rev. ${a.revision}</span></div><h2>${esc(a.name)}</h2><p>${esc(summary)}</p></div><div class="row">${button(`asset-edit:${a.id}`, '編集する')}${button(`asset-delete:${a.id}`, '削除する', 'danger')}</div></div>${a.kind === 'skill' ? `<div class="row spread section"><div><h3>直接起動</h3><p class="hint">${a.useCase ? 'RuntimeからこのSkillを直接使えます。' : '必要なWorkflowから参照して使います。'}</p></div><button type="button" role="switch" aria-checked="${a.useCase}" data-action="usecase:${a.id}" class="${a.useCase ? 'primary' : ''}">${a.useCase ? '有効' : '無効'}</button></div><section class="section"><h3>Runtimeのdescription ${info('Runtimeのdescription', 'Runtime YAMLへ出力されるSkillの説明です。')}</h3><p class="body-panel prose">${esc(a.description)}</p></section>` : ''}${a.kind === 'model' ? `<section class="section"><div class="grid-two"><div><h3>Model名</h3><p class="body-panel prose">${esc(a.modelName)}</p></div><div><h3>呼び出し方</h3><p class="body-panel prose">${esc(a.invocationMethod)}</p></div></div>${a.choices?.length ? `<div class="section"><h3>選択肢</h3>${a.choices.map(choice => `<div class="relation"><strong>${esc(choice.name)}</strong><small>${choice.options.map(value => esc(value)).join(' / ')}</small></div>`).join('')}</div>` : ''}<p class="hint">このModelをWorkflowのStageへ紐づけると、そのStageをサブエージェントで実行する指示になります。</p></section>` : ''}${a.kind === 'workflow' ? `${diagram(a)}<div class="section-header"><h3>工程、担当Role、遷移条件</h3>${button(`run-new:${a.id}`, 'Runを開始', 'primary small')}</div>${a.stages.map(s => { const roleId = stageRoleId(a.id, s.id), modelId = stageModelId(a.id, s.id), model = assets.find(asset => asset.id === modelId), outgoing = a.transitions.filter(t => t.from === s.id); return `<div class="editor-row"><div class="row-head"><strong>${esc(s.name)}</strong>${button(`binding-new:${a.id}:${s.id}`, '紐づける', 'small')}</div><p class="hint">担当Role: ${roleId ? `<a href="#assets/${roleId}">${esc(name(roleId))}</a>` : '未割当'}</p><p class="hint">Model: ${modelId ? `<a href="#assets/${modelId}">${esc(name(modelId))}（サブエージェント実行）${modelChoiceSummary(model!) ? `<br>選択肢: ${esc(selectedChoiceSummary(model, stageModelSelections(a.id, s.id)))}` : ''}` : 'Runtimeの通常実行'}</p>${s.additionalInstructions ? `<p class="prose"><strong>追加指示</strong><br>${esc(s.additionalInstructions)}</p>` : ''}<p class="prose"><strong>遷移条件</strong><br>${outgoing.length ? outgoing.map(t => `${esc(t.label)}: ${esc(t.condition)}`).join('<br>') : '未設定'}</p>${bindingRows(a, s.id)}</div>`; }).join('')}` : a.kind !== 'model' ? `<section class="section"><h3>${a.kind === 'role' ? '役割と責務' : '本文'}</h3><div class="body-panel prose">${esc(a.kind === 'role' ? a.responsibilities : a.body) || '<span class="muted">未記入</span>'}</div></section>` : ''}${a.kind === 'skill' && Object.keys(a.supportingFiles).length ? `<section class="section"><h3>補助ファイル</h3>${Object.entries(a.supportingFiles).map(([f, body]) => `<details><summary>${esc(f)}</summary><pre>${esc(body)}</pre></details>`).join('')}</section>` : ''}${a.kind !== 'rule' ? `<section class="section"><div class="section-header"><h3>${a.kind === 'workflow' ? 'Workflow全体の紐づけ' : '参照する資産'}</h3>${button(`binding-new:${a.id}`, '紐づける', 'small')}</div>${bindingRows(a)}</section>` : ''}<section class="section"><h3>関連するWorkflow / Stage</h3>${relationships.length ? relationships.map(r => `<div class="relation"><div><a href="#assets/${r.workflow.id}">${esc(r.workflow.name)}${r.stageId ? ` / ${esc(r.workflow.stages.find(s => s.id === r.stageId)?.name)}` : ''}</a><small>${r.via.length ? `${esc(r.via.join(' → '))} 経由` : '直接参照'}</small></div><div class="row">${badge(r.via.length ? '間接参照' : '直接参照')}${button(`binding-edit:${r.binding.id}`, '参照元を編集', 'small ghost')}${r.binding.purpose === 'stage-role' || r.binding.purpose === 'stage-model' ? '' : button(`binding-remove:${r.binding.id}`, '解除', 'small ghost')}</div>`).join('') : '<p class="hint">関連するWorkflowはありません。</p>'}</section><section class="section"><div class="row spread"><span class="mono">${esc(a.id)}</span>${button(`history-asset:${a.id}`, '変更履歴・復元', 'small ghost')}</div><p class="hint">最終更新 ${date(a.updatedAt)}</p></section></article>`;
 }
-function assetDrawer(a: Asset) {
-  return `<div class="asset-drawer-backdrop" data-action="asset-close" aria-hidden="true"></div><aside class="asset-drawer" aria-label="${esc(a.name)}の詳細"><div class="asset-drawer-head"><span>資産の詳細</span>${button('asset-close', '×', 'icon-button')}</div>${assetDetail(a)}</aside>`;
+function assetDrawer(a: AssetSummary) {
+  const error = assetDetailError?.id === a.id ? `<div class="error-panel"><p>${esc(assetDetailError.message)}</p>${button(`asset-detail-retry:${a.id}`, '再読み込み', 'small')}</div>` : '<div class="loading">詳細を読み込んでいます。</div>';
+  return `<div class="asset-drawer-backdrop" data-action="asset-close" aria-hidden="true"></div><aside class="asset-drawer" aria-label="${esc(a.name)}の詳細"><div class="asset-drawer-head"><span>資産の詳細</span>${button('asset-close', '×', 'icon-button')}</div>${isFullAsset(a) ? assetDetail(a) : `<article class="glass detail">${error}</article>`}</aside>`;
 }
-function diagnosticAssetCard(evidence: unknown, catalog: Asset[]) {
+function diagnosticAssetCard(evidence: unknown, catalog: AssetSummary[]) {
   const asset = diagnosticAsset(evidence, catalog);
   if (!asset) return '';
   return `<a class="diagnostic-asset" href="#assets/${esc(asset.id)}"><span class="type-icon ${asset.kind}" aria-hidden="true">${symbols[asset.kind]}</span><span class="diagnostic-asset-info"><span class="diagnostic-asset-label">対象Asset</span><strong>${esc(asset.name)}</strong><small>${esc(kinds[asset.kind])} · rev. ${asset.revision}</small><span class="mono diagnostic-asset-id">${esc(asset.id)}</span></span><span class="diagnostic-asset-open">Assetを開く →</span></a>`;
@@ -128,6 +173,16 @@ function renderAssets() {
   const emptyState = `<div class="asset-stage"><div class="asset-scroll"><div class="glass">${empty('開発方法を、育てる。', 'あなたが繰り返し使う手順や判断基準を、最初の資産として保存しましょう。', button('asset-new', '最初の資産を作成', 'primary'))}</div><div class="onboarding"><article class="glass"><div class="step-label">01 / 保存する</div><h3>知識と役割を資産に</h3><p>Skill・Role・Ruleに、使いたい内容を記述します。</p></article><article class="glass"><div class="step-label">02 / 組み立てる</div><h3>Workflowで進め方を定義</h3><p>工程と遷移条件を決め、使う資産を紐づけます。</p></article><article class="glass"><div class="step-label">03 / 振り返る</div><h3>Journalから改善へ</h3><p>実行で得た気づきを残し、次の開発に反映します。</p></article></div></div></div>`;
   shell(`<div class="asset-shell">${pageHeading('資産ライブラリ', '繰り返し使う方法・知識・役割・規則を、ひとつの場所に。', button('asset-new', '＋ 資産を作成', 'primary'))}${toolbar}${assets.length ? grid : emptyState}</div>`, 'asset-main-content');
   document.querySelector<HTMLElement>('.asset-scroll')?.scrollTo({ top: assetScrollTop });
+  if (hasDrawer && selected && !isFullAsset(selected)) {
+    if (assetDetailError?.id !== selected.id && assetDetailRequest?.id !== selected.id) {
+      const token = ++assetDetailRequestToken;
+      assetDetailRequest = { id: selected.id, token };
+      void loadAssetDetail(selected.id, token);
+    }
+  } else {
+    assetDetailRequest = undefined;
+    assetDetailRequestToken += 1;
+  }
 }
 
 function recordRoute(page: string) {
@@ -246,6 +301,7 @@ async function loadMoreRecords(page: 'journals' | 'review' | 'history') {
 }
 async function render() {
   const [page, selectedId] = route();
+  if (page !== 'assets') { assetDetailRequest = undefined; assetDetailRequestToken += 1; }
   if (page === 'assets') { renderAssets(); return; }
   if (page === 'runs') {
     const data = await api<{ runs: Run[] }>('run.list', selectedScope === 'global' ? {} : { projectId: selectedScope }); screenData = data;
@@ -308,10 +364,10 @@ async function render() {
 function roleOptions(selected = '') {
   return opt('', '担当Roleなし', selected) + assets.filter(a => a.kind === 'role' && (a.scope === 'global' || a.scope === selectedScope)).map(a => opt(a.id, `${a.name}（${labelScope(a.scope)}）`, selected)).join('');
 }
-function modelChoiceSummary(model: Asset) {
+function modelChoiceSummary(model: AssetSummary) {
   return (model.choices ?? []).map(choice => `${choice.name}: ${choice.options.join(' / ')}`).join(' · ');
 }
-function selectedChoiceSummary(model: Asset | undefined, selected: Record<string, string> = {}) {
+function selectedChoiceSummary(model: AssetSummary | undefined, selected: Record<string, string> = {}) {
   if (!model) return '';
   return (model.choices ?? []).map(choice => `${choice.name}: ${selected[choice.name] ?? '未選択'}`).join(' · ');
 }
@@ -338,14 +394,14 @@ function modelChoiceFields(modelId: string, selected: Record<string, string> = {
 function readModelSelections(row: Element) {
   return Object.fromEntries([...row.querySelectorAll<HTMLSelectElement>('[name=modelChoice]')].map(input => [input.dataset.choiceName ?? '', input.value]).filter(([name, value]) => name && value));
 }
-function choiceConditionSummary(model: Asset | undefined, conditions: Record<string, string>[] = []) {
+function choiceConditionSummary(model: AssetSummary | undefined, conditions: Record<string, string>[] = []) {
   if (!model || !conditions.length) return 'すべての選択状態';
   return conditions.map(condition => {
     const values = Object.entries(condition).map(([name, value]) => `${name}=${value}`);
     return values.length ? values.join(' AND ') : 'すべての選択状態';
   }).join(' OR ');
 }
-function modelChoiceConditionRow(model: Asset, condition: Record<string, string> = {}, index = 0) {
+function modelChoiceConditionRow(model: AssetSummary, condition: Record<string, string> = {}, index = 0) {
   return `<fieldset class="choice-condition-row" data-condition-index="${index}"><legend>組み合わせ ${index + 1}</legend><div class="grid-two">${(model.choices ?? []).map(choice => select(`${choice.name}の条件`, 'choiceCondition', opt('', '指定しない', condition[choice.name]) + choice.options.map(value => opt(value, value, condition[choice.name])).join('')).replace('<select ', `<select data-condition-name="${esc(choice.name)}" `)).join('')}</div>${button('choice-condition-remove', '削除', 'small ghost')}</fieldset>`;
 }
 function modelChoiceConditionFields(modelId: string, conditions: Record<string, string>[] = []) {
@@ -354,7 +410,7 @@ function modelChoiceConditionFields(modelId: string, conditions: Record<string, 
   const rows = conditions.length ? conditions : [{}];
   return `<fieldset class="model-choice-condition-fields"><legend>参照条件</legend><p class="hint">この参照を有効にする選択状態を指定します。空欄は任意、組み合わせ同士はORです。</p><div id="choice-condition-rows">${rows.map((condition, index) => modelChoiceConditionRow(model, condition, index)).join('')}</div>${button('choice-condition-add', '＋ 組み合わせを追加', 'small ghost')}</fieldset>`;
 }
-function assetCheckboxPicker(label: string, key: string, items: Asset[], selected: string[]) {
+function assetCheckboxPicker(label: string, key: string, items: AssetSummary[], selected: string[]) {
   const rows = items.map(a => `<label class="checkbox-label asset-picker-item" data-asset-item><input type="checkbox" name="${esc(key)}" value="${esc(a.id)}"${selected.includes(a.id) ? ' checked' : ''}>${esc(kinds[a.kind])} / ${esc(a.name)}</label>`).join('');
   return `<div class="asset-picker asset-check-picker" data-asset-picker><span class="field-label">${htmlText(label)}</span><input class="asset-picker-search" type="search" aria-label="資産検索" placeholder="名前で検索" autocomplete="off" data-asset-picker-search translate="no"><div class="asset-picker-items">${rows}</div><span class="asset-picker-empty hint" hidden>一致する資産はありません。</span></div>`;
 }
@@ -441,11 +497,12 @@ async function action(value: string, target: HTMLElement) {
   const a = assets.find(a => a.id === id);
   if (key === 'close') { dialog.close(); return; }
   if (key === 'asset-close') { location.hash = 'assets'; return; }
+  if (key === 'asset-detail-retry') { assetDetailError = undefined; assetDetailRequest = undefined; renderAssets(); return; }
   if (key === 'refresh') { await refresh(); return; }
   if (key === 'record-load') { await loadMoreRecords(id as 'journals' | 'review' | 'history'); return; }
   if (key === 'filter') { filter = id; renderAssets(); return; }
   if (key === 'asset-new' || key === 'new-kind') { assetEditor(undefined, (id as Asset['kind']) || 'skill'); return; }
-  if (key === 'asset-edit') { assetEditor(a); return; }
+  if (key === 'asset-edit') { if (!a) throw new Error('Assetを再取得してください。'); assetEditor(await ensureAssetDetails(a.id)); return; }
   if (key === 'asset-delete') {
     const preview = await api<AssetDeletionPreview>('asset.delete.preview', { assetId: id });
     const bindingItems = preview.bindings.map(b => `<li><strong>${b.direction === 'incoming' ? 'このAssetを参照' : 'このAssetから参照'}</strong> — ${esc(b.sourceName)}${b.stageName ? ` / ${esc(b.stageName)}` : ''} → ${esc(b.targetName)} <span class="mono">${esc(labelScope(b.scope))} · rev.${b.revision}</span></li>`).join('');
@@ -564,7 +621,7 @@ async function submit(form: HTMLFormElement) {
     if (!data.has('confirm')) throw new Error('削除を確認してください。');
     await api('asset.delete', { assetId: get('assetId'), expectedRevision: Number(get('expectedRevision')), expectedBindingRevisions: JSON.parse(get('expectedBindingRevisions')), expectedProjectCommonRevisions: JSON.parse(get('expectedProjectCommonRevisions')), confirmed: true, provenance: { ...provenance('Asset削除を確認'), decision: 'ユーザーが削除確認を確定' } }, true);
   } else if (key === 'asset') {
-    const old = assets.find(a => a.id === form.dataset.id), kind = form.dataset.kind as Asset['kind'];
+    const old = form.dataset.id ? await ensureAssetDetails(form.dataset.id) : undefined, kind = form.dataset.kind as Asset['kind'];
     const stages = readStages(form);
     const transitions = readTransitions(form);
     const files = [...form.querySelectorAll('.file-editor')].map(row => [(row.querySelector('[name=filePath]') as HTMLInputElement).value, (row.querySelector('[name=fileBody]') as HTMLTextAreaElement).value]);
@@ -599,10 +656,12 @@ async function submit(form: HTMLFormElement) {
         ...roleChanges.filter(change => change.type !== 'binding.remove'),
         ...modelChanges.filter(change => change.type !== 'binding.remove'),
       ];
-      await api('changeset.apply', { changes, provenance: provenance(old ? 'Workflowを編集' : 'Workflowを作成') }, true);
+      const result = await api('changeset.apply', { changes, provenance: provenance(old ? 'Workflowを編集' : 'Workflowを作成') }, true);
+      cacheAssetEntities(result);
       location.hash = `assets/${workflowId}`;
     } else {
       const result = await api<{ entities: Asset[] }>('asset.save', { id: old?.id, ...(old ? { expectedRevision: old.revision } : {}), asset, provenance: provenance(old ? '資産を編集' : '資産を作成') }, true);
+      cacheAssetEntities(result);
       location.hash = `assets/${result.entities[0].id}`;
     }
   } else if (key === 'binding') { const existing = bindings.find(binding => binding.id === form.dataset.id); await api('binding.save', { id: form.dataset.id || undefined, ...(existing ? { expectedRevision: existing.revision } : {}), binding: { scope: selectedScope, sourceId: form.dataset.source, stageId: form.dataset.stage || undefined, targetId: get('targetId'), purpose: get('purpose'), selectedChoices: readModelSelections(form), choiceConditions: readModelChoiceConditions(form) }, provenance: provenance('資産の紐づけを編集') }, true); }
@@ -617,8 +676,7 @@ async function submit(form: HTMLFormElement) {
     const run = (screenData.runs as Run[] | undefined)?.find(r => r.id === form.dataset.run);
     await api('journal.write', { body: get('body'), task: get('task') || undefined, ...(run ? run.status === 'active' ? { contextHandle: run.contextHandle } : { postRunId: run.id } : {}) }, true);
   } else if (key === 'proposal') {
-    const a = assets.find(a => a.id === get('assetId'))!;
-    if (!a) throw new Error('先に変更対象の資産を作成してください。');
+    const a = await ensureAssetDetails(get('assetId'));
     const { id, revision: _rev, createdAt: _created, updatedAt: _updated, ...payload } = a;
     const ids = data.getAll('journalIds');
     await api('proposal.save', { title: get('title'), observedContext: get('observedContext'), proposedChange: get('proposedChange'), reason: get('reason'), evidenceJournalIds: ids, reviewedJournalIds: ids, affectedAssetIds: [id], affectedBindingIds: bindings.filter(b => b.sourceId === id || b.targetId === id).map(b => b.id), affectedProjectIds: a.scope === 'global' ? projects.map(p => p.id) : [a.scope], changes: [{ type: 'asset.save', id, expectedRevision: a.revision, asset: { ...payload, [a.kind === 'role' ? 'responsibilities' : 'body']: get('body') } }], insightIds: data.getAll('insightIds') }, true);
@@ -630,7 +688,7 @@ async function submit(form: HTMLFormElement) {
   else if (key === 'runtime') await api('runtime.register', { runtime: get('runtime'), platform: get('platform'), path: get('path'), scope: selectedScope }, true);
   else if (key === 'settings') await api('settings.save', { timeoutHours: Number(get('timeoutHours')), journalEnabled: data.has('journalEnabled') }, true);
   else if (key === 'export' || key === 'backup') await api(`data.${key}`, key === 'backup' ? { path: get('path') } : { directory: get('path') });
-  dialog.close(); notify(key === 'asset-delete' ? 'Assetを削除し、参照を解除しました。' : key === 'run' ? 'Runを開始しました。' : '保存しました。'); await refresh();
+  dialog.close(); notify(key === 'asset-delete' ? 'Assetを削除し、参照を解除しました。' : key === 'run' ? 'Runを開始しました。' : '保存しました。'); void refresh();
 }
 
 document.addEventListener('toggle', event => {

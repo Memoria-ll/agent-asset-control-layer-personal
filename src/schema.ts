@@ -190,6 +190,7 @@ export function parseJournal(raw: string) {
 
 export interface Stamp { id: string; revision: number; createdAt: string; updatedAt: string }
 export type Asset = z.infer<typeof assetSchema> & Stamp & { deletedAt?: string };
+export type AssetSummary = Omit<Asset, 'body' | 'supportingFiles'> & Partial<Pick<Asset, 'body' | 'supportingFiles'>>;
 export interface AssetDeletionPreview {
   asset: Pick<Asset, 'id' | 'name' | 'kind' | 'scope' | 'revision'>;
   bindings: { id: string; revision: number; scope: string; sourceId: string; sourceName: string; targetId: string; targetName: string; stageId?: string; stageName?: string; purpose: Binding['purpose']; direction: 'outgoing' | 'incoming' }[];
