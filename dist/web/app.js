@@ -1,4 +1,4 @@
-import { relatedWorkflows, stageModelBindingChanges, stageRoleBindingChanges, workflowDiagram } from './view-model.js';
+import { diagnosticAsset, diagnosticAssetId, relatedWorkflows, stageModelBindingChanges, stageRoleBindingChanges, workflowDiagram } from './view-model.js';
 import { localizeHtml } from './i18n.js';
 const app = document.querySelector('#app');
 const dialog = document.querySelector('#dialog');
@@ -104,6 +104,12 @@ function assetDetail(a) {
 function assetDrawer(a) {
     return `<div class="asset-drawer-backdrop" data-action="asset-close" aria-hidden="true"></div><aside class="asset-drawer" aria-label="${esc(a.name)}の詳細"><div class="asset-drawer-head"><span>資産の詳細</span>${button('asset-close', '×', 'icon-button')}</div>${assetDetail(a)}</aside>`;
 }
+function diagnosticAssetCard(evidence, catalog) {
+    const asset = diagnosticAsset(evidence, catalog);
+    if (!asset)
+        return '';
+    return `<a class="diagnostic-asset" href="#assets/${esc(asset.id)}"><span class="type-icon ${asset.kind}" aria-hidden="true">${symbols[asset.kind]}</span><span class="diagnostic-asset-info"><span class="diagnostic-asset-label">対象Asset</span><strong>${esc(asset.name)}</strong><small>${esc(kinds[asset.kind])} · rev. ${asset.revision}</small><span class="mono diagnostic-asset-id">${esc(asset.id)}</span></span><span class="diagnostic-asset-open">Assetを開く →</span></a>`;
+}
 function renderAssets() {
     const currentScroll = document.querySelector('.asset-scroll');
     if (currentScroll)
@@ -166,8 +172,11 @@ async function render() {
     }
     else if (page === 'diagnostics') {
         const data = await api('diagnostics.get');
+        const missingAssetIds = [...new Set(data.diagnostics.map(d => diagnosticAssetId(d.evidence)).filter((id) => Boolean(id) && !assets.some(asset => asset.id === id)))];
+        const diagnosticAssets = (await Promise.all(Array.from({ length: Math.ceil(missingAssetIds.length / 100) }, (_, index) => api('asset.get_many', { assetIds: missingAssetIds.slice(index * 100, index * 100 + 100), includeDeleted: true })))).flatMap(result => result.assets);
+        const diagnosticCatalog = [...assets, ...diagnosticAssets];
         screenData = data;
-        shell(pageHeading('診断', '参照の整合性、繰り返す遷移、実際のContext提供量を確認します。', button('refresh', '再診断')) + `<div class="glass card"><h2>整合性と実行の状態</h2>${data.diagnostics.length ? data.diagnostics.map(d => `<div class="insight"><div class="row">${badge(d.severity, d.severity === 'error' ? 'red' : 'amber')}<strong>${esc(d.code)}</strong></div><p>${esc(d.message)}</p>${details('対象と根拠', { target: d.target, evidence: d.evidence })}</div>`).join('') : '<div class="status-message">検出された問題はありません。</div>'}</div><div class="glass card section"><h2>Contextの提供量</h2><p>実際に提供した内容のUTF-8バイト数です。未取得のSkill本文は含みません。</p>${data.costs.length ? `<div class="table-wrap"><table class="table"><thead><tr><th>Run / Stage</th><th>対象</th><th>Role</th><th>Runtime</th><th>提供回数</th><th>bytes</th></tr></thead><tbody>${data.costs.map(c => `<tr><td><a href="#runs/${c.runId}" class="mono">${c.runId.slice(0, 8)}</a><p class="hint">${esc(c.stageId)}</p></td><td>${esc(assets.some(a => a.id === c.target) ? name(c.target) : c.target)}</td><td>${esc(c.roleIds.map(name).join(', ') || '—')}</td><td>${esc(c.runtime)}</td><td>${c.deliveries}</td><td class="mono">${c.bytes.toLocaleString()}</td></tr>`).join('')}</tbody></table></div>` : '<p class="hint">Workflow Runを開始すると提供量を確認できます。</p>'}</div>`);
+        shell(pageHeading('診断', '参照の整合性、繰り返す遷移、実際のContext提供量を確認します。', button('refresh', '再診断')) + `<div class="glass card"><h2>整合性と実行の状態</h2>${data.diagnostics.length ? data.diagnostics.map(d => `<div class="insight"><div class="row">${badge(d.severity, d.severity === 'error' ? 'red' : 'amber')}<strong>${esc(d.code)}</strong></div><p>${esc(d.message)}</p>${diagnosticAssetCard(d.evidence, diagnosticCatalog)}${details('対象と根拠', { target: d.target, evidence: d.evidence })}</div>`).join('') : '<div class="status-message">検出された問題はありません。</div>'}</div><div class="glass card section"><h2>Contextの提供量</h2><p>実際に提供した内容のUTF-8バイト数です。未取得のSkill本文は含みません。</p>${data.costs.length ? `<div class="table-wrap"><table class="table"><thead><tr><th>Run / Stage</th><th>対象</th><th>Role</th><th>Runtime</th><th>提供回数</th><th>bytes</th></tr></thead><tbody>${data.costs.map(c => `<tr><td><a href="#runs/${c.runId}" class="mono">${c.runId.slice(0, 8)}</a><p class="hint">${esc(c.stageId)}</p></td><td>${esc(assets.some(a => a.id === c.target) ? name(c.target) : c.target)}</td><td>${esc(c.roleIds.map(name).join(', ') || '—')}</td><td>${esc(c.runtime)}</td><td>${c.deliveries}</td><td class="mono">${c.bytes.toLocaleString()}</td></tr>`).join('')}</tbody></table></div>` : '<p class="hint">Workflow Runを開始すると提供量を確認できます。</p>'}</div>`);
     }
     else if (page === 'settings') {
         const [r, s, candidates] = await Promise.all([api('runtime.list'), api('settings.get'), api('runtime.discover')]);
