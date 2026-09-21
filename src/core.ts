@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { posix } from 'node:path';
 import { Store } from './store.ts';
 import { renderModelChoiceTemplate } from './model-template.ts';
-import { assetSchema, bindingSchema, parseJournal } from './schema.ts';
+import { assetPatchSchema, assetSchema, bindingSchema, parseJournal } from './schema.ts';
 import { journalSkillKey, journalSkillNames, journalSkillUseCases } from './canonical-assets.ts';
 import type { Asset, AssetDeletionPreview, Binding, Change, ChangeSet, Common, Context, ContextAsset, ContextStage, Decision, Delivery, Diagnostic, ExecutionPlan, History, Insight, Journal, Project, Proposal, Provenance, ReviewItem, Run, RunEvent, SkillCatalogEntry, SkillLoader, Snapshot, Stamp } from './schema.ts';
 
@@ -184,21 +184,35 @@ export class Core {
     }
   }
   applyChanges(changes: Change[], provenance: Provenance, proposalId?: string, approvalId?: string, restore?: { entityId: string; revision: number }[], restoresChangeSetId?: string, allowAssetDelete = false, allowJournalSkillSetup = false) {
-    if (!allowAssetDelete && changes.some(c => c.type === 'asset.delete')) throw new Error('Asset削除は影響一覧を確認した後、専用の削除操作から確定してください。');
-    for (const change of changes) {
+    const stagedAssets = new Map<string, ReturnType<Core['assetPayload']>>();
+    const resolvedChanges = changes.map(change => {
+      if (change.type !== 'asset.update') return change;
+      const current = stagedAssets.get(change.id) ?? this.assetPayload(this.asset(change.id));
+      const patch = assetPatchSchema.parse(change.asset);
+      const asset = assetSchema.parse({ ...current, ...patch });
+      stagedAssets.set(change.id, asset);
+      return {
+        type: 'asset.save' as const,
+        id: change.id,
+        expectedRevision: change.expectedRevision,
+        asset,
+      };
+    });
+    if (!allowAssetDelete && resolvedChanges.some(c => c.type === 'asset.delete')) throw new Error('Asset削除は影響一覧を確認した後、専用の削除操作から確定してください。');
+    for (const change of resolvedChanges) {
       if (change.type === 'asset.delete' && journalSkillKey(this.asset(change.id))) throw new Error('JournalとJournal Reviewの標準Skillは削除できません。');
     }
-    this.validateExpectedRevisions(changes);
-    for (const change of changes.filter((c): c is Extract<Change, { type: 'asset.delete' }> => c.type === 'asset.delete')) {
+    this.validateExpectedRevisions(resolvedChanges);
+    for (const change of resolvedChanges.filter((c): c is Extract<Change, { type: 'asset.delete' }> => c.type === 'asset.delete')) {
       const preview = this.assetDeletionPreview(change.id);
       const bindingRevisions = preview.bindings.map(({ id, revision }) => ({ id, revision }));
       const projectCommonRevisions = preview.projectCommons.map(({ id, revision }) => ({ id, revision }));
       if (!change.confirmed || preview.asset.revision !== change.expectedRevision || !sameRevisions(bindingRevisions, change.expectedBindingRevisions) || !sameRevisions(projectCommonRevisions, change.expectedProjectCommonRevisions)) {
         throw new Error('Assetまたは参照関係が変わりました。参照一覧を再取得し、削除を確認してください。');
       }
-      for (const reference of preview.bindings) if (!changes.some(c => c.type === 'binding.remove' && c.id === reference.id)) throw new Error('削除前に参照する紐づけを解除してください。');
+      for (const reference of preview.bindings) if (!resolvedChanges.some(c => c.type === 'binding.remove' && c.id === reference.id)) throw new Error('削除前に参照する紐づけを解除してください。');
       for (const reference of preview.projectCommons) {
-        const commonChange = changes.find(c => c.type === 'common.save' && c.projectId === reference.projectId);
+        const commonChange = resolvedChanges.find(c => c.type === 'common.save' && c.projectId === reference.projectId);
         if (!commonChange || commonChange.type !== 'common.save' || commonChange.ruleIds.includes(change.id)) throw new Error('削除前にProject CommonのRule参照を解除してください。');
       }
     }
@@ -217,7 +231,7 @@ export class Core {
       histories.push(this.store.put('history', { entityId: result.id, kind, before, after: result.revision, changeSetId, restoredFrom: restore?.find(r => r.entityId === result.id)?.revision }));
       return result;
     };
-    for (const change of changes) {
+    for (const change of resolvedChanges) {
       if (change.type === 'asset.create') {
         const a = assetSchema.parse(change.asset);
         this.assertScope(a.scope);
@@ -292,7 +306,7 @@ export class Core {
         this.assertStageRoles(workflow, scope);
       }
     }
-    const changeSet = this.store.put('changeset', { id: changeSetId, operations: changes, provenanceId: p.id, historyIds: histories.map(h => h.id), proposalId, approvalId, restoresChangeSetId });
+    const changeSet = this.store.put('changeset', { id: changeSetId, operations: resolvedChanges, provenanceId: p.id, historyIds: histories.map(h => h.id), proposalId, approvalId, restoresChangeSetId });
     return { changeSet, entities };
   }
   previewChanges(changes: Change[], provenance: Provenance) {

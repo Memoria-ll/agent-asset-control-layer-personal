@@ -3,7 +3,7 @@ import { Core, normalizeRoot } from './core.ts';
 import { RuntimeEntries } from './runtime.ts';
 import { installJournalSkills } from './journal-skills.ts';
 import { backupData, exportData } from './maintenance.ts';
-import { assetSchema, bindingSchema, changeSchema, id, journalTemplate, provenanceSchema, revision, scope, text } from './schema.ts';
+import { assetPatchSchema, assetSchema, bindingSchema, changeSchema, id, journalTemplate, provenanceSchema, revision, scope, text } from './schema.ts';
 import type { Asset, Binding, ChangeSet, Decision, History, Insight, Journal, Project, Proposal, Run, RuntimeFile, RuntimeTarget, Snapshot } from './schema.ts';
 
 export const bootstrap = `AACLはWorkflow・Skill・Role・Rule・Modelと、明示的なWorkflow実行・Journalによる改善を管理します。
@@ -19,7 +19,7 @@ Model名と呼び出し方には{{choice.<選択肢名>}}を埋め込めます�
 現在Stageから進む遷移のconditionを評価し、遷移判断の報告とaacl_run_getのversionを付けて許可された遷移を要求します。自己ループや差し戻しとRun全体のfailedは別です。
 ModelからSkill / Ruleへの参照にはchoiceConditionsを指定でき、同じ組み合わせ内はAND、複数の組み合わせはORとして、一致する参照だけをContextへ含めます。
 現在Stageから進む遷移のconditionを評価し、遷移判断の報告とaacl_run_getのversionを付けて許可された遷移を要求します。retry・returnと自己ループ・差し戻し、Run全体のfailedは別です。
-資産管理はまずaacl_asset_list（既定は概要のみ）またはaacl_asset_get_manyで対象を確かめ、Asset ID・scope・完全なAsset内容・理由・userRequestを明示して型付き操作を実行します。既存Asset・紐づけ・Project Commonの更新／解除とChange Set内の各変更には取得時点のexpectedRevisionを必ず付け、Conflictなら最新状態を再取得して変更全体を組み直します。asset.saveは差分更新ではなく全置換なのでbodyやsupportingFilesを省略しません。複数変更はまずaacl_changeset_previewでDry Runし、問題がなければaacl_changeset_applyを実行します。Assetを削除する前にaacl_asset_delete_previewの参照一覧をユーザーへ示し、削除と参照解除の明示承認を得てからaacl_asset_deleteを実行します。方針が曖昧なら具体案を示してユーザーへ確認します。認証情報は保存しません。
+    資産管理はまずaacl_asset_list（既定は概要のみ）またはaacl_asset_get_manyで対象を確かめ、Asset ID・scope・変更内容・理由・userRequestを明示して型付き操作を実行します。既存Asset・紐づけ・Project Commonの更新／解除とChange Set内の各変更には取得時点のexpectedRevisionを必ず付け、Conflictなら最新状態を再取得して変更全体を組み直します。asset.saveは完全な全置換なのでbodyやsupportingFilesを省略しません。既存Assetの一部fieldだけを変えるときはasset.updateへ変更するfieldだけを渡し、省略したfieldを保持します。複数変更はまずaacl_changeset_previewでDry Runし、問題がなければaacl_changeset_applyを実行します。Assetを削除する前にaacl_asset_delete_previewの参照一覧をユーザーへ示し、削除と参照解除の明示承認を得てからaacl_asset_deleteを実行します。方針が曖昧なら具体案を示してユーザーへ確認します。認証情報は保存しません。
 書き込みのoperationIdにはUUIDを使用し、同じ操作の再送だけで再利用します。
 気づきがあればaacl_journal_templateのMarkdownでaacl_journal_writeへ送ります。Core IDは本文に書かず、contextHandleまたは終了後のpostRunIdを操作入力に指定します。Run外のJournalにはTaskを指定します。
 Journal Reviewはユーザーが明示的に開始します。Review自体のRunを作らず、aacl_review_pendingで要約と関連IDを取得し、必要な対象だけaacl_review_item_get・aacl_proposal_getと関連するSnapshot・History・Provenanceを参照します。提案を伴わない判断はaacl_review_decideまたはaacl_review_decide_bulkで直接記録します。
@@ -55,6 +55,7 @@ export class Operations {
     read('asset.get', 'Assetの現在または過去revisionを取得', { assetId: id, revision: z.int().positive().optional() }, p => { const current = core.asset(p.assetId, true); return { asset: p.revision ? store.revision<Asset>(p.assetId, p.revision) : current }; });
     read('asset.get_many', '複数AssetをID順で取得。本文も返す。例: { assetIds: ["uuid", "uuid"] }', { assetIds: z.array(id).min(1).max(100), includeDeleted: z.boolean().default(false) }, p => ({ assets: p.assetIds.map(assetId => core.asset(assetId, p.includeDeleted)) }));
     write('asset.save', 'Assetを完全な内容で作成・更新する。既存Assetの更新は取得時点のexpectedRevisionを指定する。例: { id: "uuid", expectedRevision: 3, asset: { ... } }', { id: id.optional(), expectedRevision: revision.optional(), asset: assetSchema, provenance }, p => core.applyChanges([{ type: 'asset.save', id: p.id, expectedRevision: p.expectedRevision, asset: p.asset }], p.provenance), true);
+    write('asset.update', 'Assetの指定fieldだけを更新する。省略したfieldは現在値を保持する。既存Assetの更新には取得時点のexpectedRevisionが必要。例: { id: "uuid", expectedRevision: 3, asset: { body: "本文だけ変更" } }', { id, expectedRevision: revision, asset: assetPatchSchema, provenance }, p => core.applyChanges([{ type: 'asset.update', id: p.id, expectedRevision: p.expectedRevision, asset: p.asset }], p.provenance), true);
     read('asset.delete.preview', '削除対象Assetを参照する紐づけとProject Commonを確認', { assetId: id }, p => core.assetDeletionPreview(p.assetId));
     write('asset.delete', '影響一覧を確認したユーザーの明示承認後にAssetと参照を削除状態へ変更', { assetId: id, expectedRevision: z.int().positive(), expectedBindingRevisions: z.array(z.object({ id, revision: z.int().positive() }).strict()), expectedProjectCommonRevisions: z.array(z.object({ id, revision: z.int().positive() }).strict()), confirmed: z.literal(true), provenance }, p => core.deleteAsset(p, p.provenance), true);
     write('asset.restore', '過去revisionを新revisionとして復元。現在revisionが変わっていないことをexpectedRevisionで確認する', { assetId: id, revision, expectedRevision: revision }, p => core.restoreAsset(p.assetId, p.revision, p.expectedRevision), true);

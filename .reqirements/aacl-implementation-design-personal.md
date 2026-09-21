@@ -82,7 +82,7 @@ Claude Code / Codex (Windows または同一WSL内のLinux)
 - Coreが生成するUUIDをAsset IDとし、名前変更後も同じIDを使う。
 - Asset revisionは単調増加整数とし、現在値と不変の過去revisionを分離して保存する。
 - Revision recordにはAsset ID、revision、本文、更新時刻を含め、Run開始時の参照を再現できるindexを用意する。
-- Writeの適用とoperation IDの冪等記録を同一transactionに含める。既存Asset・Binding・Project Commonの更新・解除は`expectedRevision`を検証し、不一致ならChange Set全体をConflictとして保存しない。Asset payloadは完全な全置換として扱う。
+- Writeの適用とoperation IDの冪等記録を同一transactionに含める。既存Asset・Binding・Project Commonの更新・解除は`expectedRevision`を検証し、不一致ならChange Set全体をConflictとして保存しない。`asset.save`のAsset payloadは完全な全置換として扱う。`asset.update`は既存Assetの指定fieldだけを現在値へマージし、未指定fieldを保持した完全なpayloadとして同じ保存経路へ渡す。
 - 過去revisionの復元は、その内容を新revisionとして保存する。
 - ScopeはGlobal / Projectを共通record上で識別し、同名Assetの一意性を名前に依存させない。
 - Asset削除は物理削除を行わず、`deletedAt`を持つ新revisionとして保存する。削除済みAssetは通常のAsset検索・利用・紐づけ候補から除外し、過去revisionとRun Snapshotは保持する。

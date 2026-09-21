@@ -191,7 +191,7 @@ flowchart LR
 
 ## Revision、履歴、診断
 
-Assetの編集は新しいrevisionとして保存します。既存Asset・紐づけ・Project Commonの更新や解除には、取得時点の`expectedRevision`が必要です。不一致なら一括変更全体がConflictになり、保存されません。`asset.save`は差分更新ではなく全置換なので、bodyやsupporting filesを含む完全なAssetを送ります。Snapshot、提供記録、event、Journal、Provenanceは当時の状態を保持します。過去revisionの復元は新revisionを作成します。Asset削除は通常利用から外し、履歴は保持します。Change Setも記録された変更前の状態へ復元できますが、適用後revisionが変わっていない場合だけ実行されます。
+Assetの編集は新しいrevisionとして保存します。既存Asset・紐づけ・Project Commonの更新や解除には、取得時点の`expectedRevision`が必要です。不一致なら一括変更全体がConflictになり、保存されません。`asset.save`は完全な全置換なので、bodyやsupporting filesを含む完全なAssetを送ります。本文など一部fieldだけを変えるときは`asset.update`へ変更fieldだけを送り、省略したfield（大きな`supportingFiles`を含む）は保持します。Snapshot、提供記録、event、Journal、Provenanceは当時の状態を保持します。過去revisionの復元は新revisionを作成します。Asset削除は通常利用から外し、履歴は保持します。Change Setも記録された変更前の状態へ復元できますが、適用後revisionが変わっていない場合だけ実行されます。
 
 履歴画面ではAssetのrevisionを比較し、変更理由とProvenanceを確認できます。診断では、参照先の不整合、反復遷移、Runtime入口の失敗、提供Context量などを確認できます。これらは操作と利用報告の記録であり、AIの作業品質を測定するものではありません。
 

@@ -191,7 +191,7 @@ flowchart LR
 
 ## Revisions, history, and diagnostics
 
-Asset edits create revisions. Snapshots, delivery records, events, Journals, and Provenance preserve what happened at the time. Restoring an earlier Asset revision creates a new revision. Deleting an Asset removes it from normal use while preserving its history. Change Sets can also be restored to their recorded prior state.
+Asset edits create revisions. `asset.save` replaces the complete Asset payload; `asset.update` changes only the supplied fields and preserves omitted fields such as large supporting files. Snapshots, delivery records, events, Journals, and Provenance preserve what happened at the time. Restoring an earlier Asset revision creates a new revision. Deleting an Asset removes it from normal use while preserving its history. Change Sets can also be restored to their recorded prior state.
 
 The History view compares Asset revisions and shows reasons and Provenance. Diagnostics checks issues such as unresolved relationships, repeated transitions, Runtime-entry failures, and delivered Context size. These records describe operations and reported use; they do not measure the quality of the AI's work.
 

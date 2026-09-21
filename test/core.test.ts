@@ -285,6 +285,23 @@ test('Asset writes use optimistic revisions, Change Set preview is read-only, an
   assert.equal(f.core.asset(asset.id).body, '更新1');
 });
 
+test('asset.update preserves omitted fields such as supportingFiles', async t => {
+  const f = fixture(t), asset = await f.asset('skill', {
+    supportingFiles: { 'eval-viewer/viewer.html': 'viewer', 'references/guide.md': 'guide' },
+  });
+  const updated = await f.call<{ entities: Asset[]; changeSet: ChangeSet }>('asset.update', {
+    id: asset.id, expectedRevision: asset.revision, asset: { body: '本文だけ更新' }, provenance,
+  });
+  assert.equal(updated.entities[0]!.body, '本文だけ更新');
+  assert.deepEqual(updated.entities[0]!.supportingFiles, asset.supportingFiles);
+  assert.deepEqual(updated.changeSet.operations[0], {
+    type: 'asset.save', id: asset.id, expectedRevision: asset.revision,
+    asset: { ...f.core.assetPayload(asset), body: '本文だけ更新' },
+  });
+  assert.equal(f.core.asset(asset.id).revision, 2);
+  await assert.rejects(f.call('asset.update', { id: asset.id, expectedRevision: asset.revision, asset: {}, provenance }), /更新するAsset field/);
+});
+
 test('Change Set restore detects edits made after the original Change Set', async t => {
   const f = fixture(t), asset = await f.asset('skill');
   const edit = await f.call<{ changeSet: ChangeSet }>('asset.save', { id: asset.id, expectedRevision: asset.revision, asset: { ...f.core.assetPayload(asset), body: '変更後' }, provenance });

@@ -118,7 +118,7 @@ Asset削除は対象Assetへの影響を確認してから確定する。確定�
 
 Asset本体と、利用するAssetを示す紐づけを分けて管理する。ModelはSkill / Ruleを参照できるCanonical Assetとして管理する。Asset本体と紐づけはそれぞれrevisionで履歴を保持する。
 
-revisionは履歴、Run、Snapshotの再現に用いる。既存Asset・紐づけ・Project CommonのWriteは取得時点の`expectedRevision`を必須とし、現在revisionと一致しない場合はConflictとして変更全体を拒否する。同じoperation IDによる再送は同一Writeとして扱う。Asset Writeは差分更新ではなく完全なAssetの全置換とし、bodyやsupporting filesを省略しない。過去revisionの復元は、その内容を新しいrevisionとして保存する。
+revisionは履歴、Run、Snapshotの再現に用いる。既存Asset・紐づけ・Project CommonのWriteは取得時点の`expectedRevision`を必須とし、現在revisionと一致しない場合はConflictとして変更全体を拒否する。同じoperation IDによる再送は同一Writeとして扱う。`asset.save`は差分更新ではなく完全なAssetの全置換とし、bodyやsupporting filesを省略しない。既存Assetの一部fieldだけを変更する場合は`asset.update`を使い、指定したfieldだけを現在値へ上書きして、未指定fieldを保持する。過去revisionの復元は、その内容を新しいrevisionとして保存する。
 
 ---
 

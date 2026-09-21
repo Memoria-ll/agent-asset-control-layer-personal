@@ -83,6 +83,21 @@ const assetInputSchema = z.object({
     transitions: z.array(transitionSchema).default([]),
     entryStage: z.string().default(''),
 }).strict();
+export const assetPatchSchema = z.object({
+    kind: z.enum(['workflow', 'skill', 'role', 'rule', 'model']).optional(),
+    name: text.optional(), description: text.optional(), body: z.string().optional(),
+    responsibilities: z.string().optional(), scope: scope.optional(),
+    explanation: z.string().optional(), useCase: z.boolean().optional(),
+    modelName: z.string().optional(), invocationMethod: z.string().optional(),
+    choices: z.array(modelChoiceSchema).optional(),
+    metadata: z.record(z.string(), z.unknown()).optional(),
+    supportingFiles: z.record(z.string(), z.string()).optional(),
+    stages: z.array(stageSchema).optional(), transitions: z.array(transitionSchema).optional(),
+    entryStage: z.string().optional(),
+}).strict().superRefine((value, ctx) => {
+    if (Object.keys(value).length === 0)
+        ctx.addIssue({ code: 'custom', message: '更新するAsset fieldを1件以上指定してください。' });
+});
 export const assetSchema = z.preprocess(normalizeAssetRecord, assetInputSchema).superRefine((a, ctx) => {
     const fail = (message) => ctx.addIssue({ code: 'custom', message });
     if (a.kind === 'skill' && !a.body.trim())
@@ -165,6 +180,7 @@ export const provenanceSchema = z.object({
 export const changeSchema = z.discriminatedUnion('type', [
     z.object({ type: z.literal('asset.delete'), id, expectedRevision: revision, expectedBindingRevisions: z.array(z.object({ id, revision }).strict()), expectedProjectCommonRevisions: z.array(z.object({ id, revision }).strict()), confirmed: z.literal(true) }).strict(),
     z.object({ type: z.literal('asset.save'), id: id.optional(), expectedRevision: revision.optional(), asset: assetSchema }).strict(),
+    z.object({ type: z.literal('asset.update'), id, expectedRevision: revision, asset: assetPatchSchema }).strict(),
     z.object({ type: z.literal('asset.create'), id, asset: assetSchema }).strict(),
     z.object({ type: z.literal('binding.save'), id: id.optional(), expectedRevision: revision.optional(), binding: bindingSchema }).strict(),
     z.object({ type: z.literal('binding.remove'), id, expectedRevision: revision }).strict(),
