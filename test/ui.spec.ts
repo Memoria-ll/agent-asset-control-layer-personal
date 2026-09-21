@@ -60,8 +60,9 @@ test('C33: Chromium UI assigns existing and new Roles from Workflow editor, runs
   await page.locator('.asset-card').click();
   await expect(page.locator('.asset-drawer')).toBeVisible();
   await expect(page.getByText('実データを使う検証手順を選ぶ', { exact: true })).toBeVisible();
-  await page.getByRole('switch').click();
-  await expect(page.getByRole('switch')).toHaveAttribute('aria-checked', 'true');
+  const directUseCaseSwitch = page.locator('[data-action^="usecase:"]').first();
+  await directUseCaseSwitch.click();
+  await expect(directUseCaseSwitch).toHaveAttribute('aria-checked', 'true');
   await page.getByRole('button', { name: '＋ 資産を作成' }).click();
   await dialog.getByRole('button', { name: 'Role', exact: true }).click();
   await dialog.getByLabel('名前', { exact: true }).fill('検証担当');

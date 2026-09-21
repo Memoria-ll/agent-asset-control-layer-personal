@@ -661,21 +661,39 @@ test('Runtime entry names come from Workflow and direct Skill names, with IDs on
   assert.ok(!existsSync(join(claudeRoot, 'commands', `${internalSkill.id}.md`)));
 });
 
-test('Binding-referenced Skills are implicit Codex candidates without becoming direct use cases', async t => {
+test('Auto-invocable Skills are explicit Codex candidates without becoming direct use cases', async t => {
   const f = fixture(t), parent = await f.asset('skill', { name: 'setup-project-architecture', useCase: false }), child = await f.asset('skill', { name: 'setup-codegraph-project', description: 'CodeGraphを導入する', useCase: false });
   const root = mkdtempSync(join(tmpdir(), 'aacl-runtime-binding-'));
   await f.bind(parent, child);
   await f.call('runtime.register', { runtime: 'codex', platform: 'wsl', scope: 'global', path: root });
   const path = join(root, 'skills', child.name, 'SKILL.md'), policyPath = join(root, 'skills', child.name, 'agents', 'openai.yaml');
+  assert.equal(existsSync(path), false);
+  await f.call('skill.autoinvocation', { assetId: child.id, enabled: true, provenance });
   assert.equal(existsSync(path), true);
   assert.match(readFileSync(path, 'utf8'), /^description: "CodeGraphを導入する"$/m);
   assert.equal(readFileSync(policyPath, 'utf8'), 'policy:\n  allow_implicit_invocation: true\n');
   const entry = f.store.list<{ assetId: string; implicitInvocation?: boolean }>('runtime-entry').find(item => item.assetId === child.id)!;
   assert.equal(entry.implicitInvocation, true);
-  await f.call('binding.remove', { id: f.core.bindings().find(binding => binding.sourceId === parent.id && binding.targetId === child.id)!.id, expectedRevision: f.core.bindings().find(binding => binding.sourceId === parent.id && binding.targetId === child.id)!.revision, provenance });
-  await f.call('runtime.sync');
+  await f.call('skill.autoinvocation', { assetId: child.id, enabled: false, provenance });
+  assert.equal(f.core.asset(child.id).autoInvocation, false);
   assert.equal(existsSync(path), false);
   assert.equal(existsSync(policyPath), false);
+});
+
+test('Auto-invocable Skills keep their exact description in YAML and are omitted from Context candidates', async t => {
+  const f = fixture(t), parent = await f.asset('skill', { name: 'parent-skill', useCase: false }), child = await f.asset('skill', { name: 'auto-skill', description: 'この説明をそのまま自動発火判定に使う', autoInvocation: true }), grandchild = await f.asset('skill', { name: 'ordinary-child', useCase: false });
+  await f.bind(parent, child);
+  await f.bind(child, grandchild);
+  const loaded = await f.call<{ skillCatalog: { id: string }[] }>('skill.get', { assetId: parent.id });
+  assert.deepEqual(loaded.skillCatalog.map(skill => skill.id), [grandchild.id]);
+  const workflow = await f.workflow(); await f.bind(workflow, parent);
+  const run = await f.start(workflow);
+  assert.deepEqual(run.context.skillCatalog.map(skill => skill.id), [parent.id, grandchild.id]);
+  const root = mkdtempSync(join(tmpdir(), 'aacl-runtime-auto-description-'));
+  await f.call('runtime.register', { runtime: 'codex', platform: 'wsl', scope: 'global', path: root });
+  const content = readFileSync(join(root, 'skills', child.name, 'SKILL.md'), 'utf8');
+  assert.match(content, /^description: "この説明をそのまま自動発火判定に使う"$/m);
+  assert.equal(readFileSync(join(root, 'skills', child.name, 'agents', 'openai.yaml'), 'utf8'), 'policy:\n  allow_implicit_invocation: true\n');
 });
 
 test('Runtime sync moves an owned ID-named entry to its asset name', async t => {

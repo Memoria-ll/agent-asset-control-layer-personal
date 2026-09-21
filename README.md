@@ -117,14 +117,14 @@ The [migration guide](docs/skill-migration.md) (Japanese) covers classification,
 
 ## Generate Runtime entries
 
-Register a Claude Code or Codex Runtime target for the Global or Project scope where its Assets belong. AACL generates entries for Workflows, Skills enabled for direct invocation, and Skills reached through a `reference` binding. The latter are eligible for ordinary Codex description-based implicit invocation even when `useCase` is false:
+Register a Claude Code or Codex Runtime target for the Global or Project scope where its Assets belong. AACL generates entries for Workflows and Skills enabled for direct or automatic invocation. An automatically invocable Skill keeps its canonical `description` in the Codex YAML and is not repeated in Context candidates when a binding reaches it:
 
 | Runtime | Generated entry |
 | --- | --- |
 | Claude Code | `<target>/commands/<slug>.md` |
 | Codex | `<target>/skills/<slug>/SKILL.md` and `<target>/skills/<slug>/agents/openai.yaml` |
 
-The entry refers to the canonical Asset by ID and retrieves its instructions from AACL. The body stays in SQLite. On Windows targets, the generated entry invokes AACL through `wsl.exe`. If a managed entry has been changed after generation, synchronization records a diagnostic instead of replacing that content. Unregistering a Runtime target leaves its generated entries in place.
+The entry refers to the canonical Asset by ID and retrieves its instructions from AACL. The body stays in SQLite. On Windows targets, the generated entry invokes AACL through `wsl.exe`. Codex stores the automatic-invocation switch in `agents/openai.yaml` as `policy.allow_implicit_invocation`. If a managed entry has been changed after generation, synchronization records a diagnostic instead of replacing that content. Unregistering a Runtime target leaves its generated entries in place.
 
 ## Start a Workflow in the browser UI
 
@@ -167,7 +167,7 @@ Read the MCP tool definitions for each operation's current input schema. The Run
 
 ## Context and on-demand Skills
 
-At Run start, AACL pins the selected Workflow, choice-matching Assets, bindings, and Project Common settings in an immutable Snapshot. The initial Context includes the current stage, its Role, selected Model choices, the resolved Model name and invocation method, applicable Rule bodies, and candidate Skill names plus Runtime descriptions. Skills reached through `reference` bindings are ordinary candidates even when `useCase` is false. The host keeps their AACL asset/revision loader mapping separately and retrieves the selected body through `aacl_skill_get`; it does not resolve a same-named local Skill as a fallback. Skill bodies and supporting files are retrieved from the Snapshot's pinned revisions when needed.
+At Run start, AACL pins the selected Workflow, choice-matching Assets, bindings, and Project Common settings in an immutable Snapshot. The initial Context includes the current stage, its Role, selected Model choices, the resolved Model name and invocation method, applicable Rule bodies, and candidate Skill names plus Runtime descriptions. Automatically invocable Skills are already known by the Runtime, so a matching binding does not repeat them in the Context catalog or loader mapping. Other Skills keep their AACL asset/revision loader mapping and are retrieved through `aacl_skill_get`; the host does not resolve a same-named local Skill as a fallback. Skill bodies and supporting files are retrieved from the Snapshot's pinned revisions when needed.
 
 Context delivery and reported Skill use are stored separately. Retrieving a Skill for inspection does not by itself report that the AI used it. The execution view shows the current stage's Context and Skill candidates; Diagnostics reports the delivered Context size in UTF-8 bytes.
 

@@ -54,7 +54,7 @@ Claude Code / Codex (Windows または同一WSL内のLinux)
 - Runtime adapterはGlobal設定先を標準位置から列挙し、ユーザー登録先を同じ形式で保持する。Windows側とWSL側の設定先は個別のtargetとして扱う。
 - Runtime同期はAssetとRuntime targetのscopeが一致する入口だけを配置する。Project targetにはそのProjectのAssetだけを置き、Global targetにはGlobal Assetだけを置く。
 - Runtime entryは対象Canonical Assetの安定ID、Skillの`name`、`description`とMCP operationだけを格納する薄い生成物とし、Canonical本文やsupporting files、処理定義を含めない。
-- 配置名はAsset名をRuntimeで有効なslugへ整え、同一target内で衝突する場合だけAsset IDを末尾に付ける。Codex Skillではfrontmatterの`name`と親folder名を一致させ、同じSkill directoryの`agents/openai.yaml`に`policy.allow_implicit_invocation: false`を生成する。暗黙起動の制御を`SKILL.md`のfrontmatterへ記載しない。
+- 配置名はAsset名をRuntimeで有効なslugへ整え、同一target内で衝突する場合だけAsset IDを末尾に付ける。Skillは直接起動と自動発火を別々に切り替えられる。Codex Skillではfrontmatterの`name`と親folder名を一致させ、`description`をCanonical Skillの文のままYAMLへ出力し、同じSkill directoryの`agents/openai.yaml`に自動発火設定を生成する。
 - File writerは対象Runtime・scopeに応じた配置先へentryを生成し、部分失敗を個別に検出できる単位で処理する。
 - 生成状態とCanonical Stateの整合確認に失敗した場合、DB transactionを巻き戻さずDiagnosticsへ失敗結果を記録する。
 
@@ -98,7 +98,7 @@ Claude Code / Codex (Windows または同一WSL内のLinux)
 
 ### 5.3 Skill、Workflow、Stage
 
-- Skill recordの必須本文fieldはname、description、explanation、bodyとし、`description`はRuntime入口のYAML front matter、`explanation`はUIで人が呼び出し方を判断する説明として保存する。useCase設定をRuntime target生成処理へ渡す。
+- Skill recordの必須本文fieldはname、description、explanation、bodyとし、`description`はRuntime入口のYAML front matter、`explanation`はUIで人が呼び出し方を判断する説明として保存する。`useCase`と`autoInvocation`をRuntime target生成処理へ渡す。自動発火が有効なSkillは、紐づけが解決してもContextのSkill catalogとloaderへ重ねて渡さない。
 - Workflow recordはStage listとtransition定義を保持し、StageはWorkflow内の子recordとして保存する。
 - Model recordはModel名、呼び出し方、選択肢グループを保持する。Model名と呼び出し方には`{{choice.<選択肢名>}}`を埋め込め、RunのContextとExecution PlanではStageで選んだ値へ展開する。未定義または未選択の選択肢は拒否する。ModelからSkill / Ruleを参照でき、WorkflowのStageから`stage-model` purposeとstageIdでModelを1件まで指定できる。Model→Skill / Ruleの`reference` bindingには`choiceConditions`を保存でき、各条件内の選択値をAND、条件配列をORとして解決する。条件なしのbindingは無条件参照とする。
 - Workflow内の各Stageに`stage-role` purposeとstageIdで指定したRoleを1件割り当て、各transitionに遷移先へ進む必須`condition`を保存・検証する。担当Roleの責務をStageの基本とし、Stageの`additionalInstructions`は任意の追加指示として保存する。Modelを指定したStageはサブエージェント実行の指示とし、連続する同じRole・Modelでは同じsubagent IDをRunへ保持する。
@@ -157,7 +157,7 @@ Claude Code / Codex (Windows または同一WSL内のLinux)
 
 - Journal Review用のRead operationは`status`、Project、`limit`、`cursor`、関連データの`include`、本文・変更内容のinclude指定で一覧を絞り、ReviewItemの要約と`journalTaskId`・`insightId`・Proposal IDを返す。変更内容や履歴は`review.item.get`と`proposal.get`で対象を指定して取得し、関連するSnapshot、Run進行記録、Asset・紐づけの履歴、Provenanceを参照可能にする。保留中の気づきは次回のReadにも含める。
 - Journal ReviewそのもののRun、Snapshot、実行履歴recordは作らない。Reviewで扱ったJournal一覧はProposal作成時に渡して保存する。
-- 標準Skillの`journal`と`journal-review`はmetadataの識別子で管理し、名称変更と削除をCoreで拒否する。`journal`のuseCaseは常にfalse、`journal-review`は初期状態をtrueとして利用者がuseCaseを切り替えられる。`setup.skills`の既存Asset更新では本文・description・explanationを保持したまま`journal`を直接起動不可へ移行する。
+- 標準Skillの`journal`と`journal-review`はmetadataの識別子で管理し、名称変更と削除をCoreで拒否する。`journal`のuseCaseは常にfalse、`journal-review`は初期状態をtrueとして利用者がuseCaseを切り替えられる。両方のautoInvocationは初期状態をfalseとし、`setup.skills`の既存Asset更新では本文・description・explanationを保持したまま`journal`を直接起動不可へ移行する。
 - Proposalはobserved context、proposed change、reason、evidence Journal、affected assets、影響する紐づけとProjectを保持する。Proposalの対象変更、根拠、Reviewで扱ったJournal一覧を明示する。
 - Proposal、Proposalへのユーザー判断、ReviewItem、insight status、Journal task、Change Set relationは別recordとして保存する。提案の承認時は適用完了までReviewItemとInsightを`pending`のまま保ち、`proposal.apply`で変更適用と対象ReviewItem・Insight・Journal taskの更新を同じtransactionで行う。提案を伴わないReview判断はReviewItem単位の操作で3対象を同じtransactionで更新する。
 - 気づき単位で保留・処理済み・却下を更新できる。一部だけを処理した場合、未処理の気づきは`pending`のまま次回Reviewへ引き継ぐ。
@@ -166,7 +166,7 @@ Claude Code / Codex (Windows または同一WSL内のLinux)
 ## 8. UI、CLI、MCP
 
 - UI、CLI、MCPはCore Serviceのapplication APIだけを利用する。UIからの変更も同じvalidation・transaction pathへ送る。
-- UIは開発要求§33の視覚・操作要件を満たし、Workflow / Stage視点とAsset視点の紐づき確認・編集、通常Skillと`journal-review`のuseCase切替、Journal記録のON/OFF、許可遷移の図示を実装する。標準Skillの名称・削除と`journal`の固定された直接起動設定は編集対象にしない。
+- UIは開発要求§33の視覚・操作要件を満たし、Workflow / Stage視点とAsset視点の紐づき確認・編集、通常Skillと`journal-review`のuseCase切替、SkillのautoInvocation切替、Journal記録のON/OFF、許可遷移の図示を実装する。標準Skillの名称・削除と`journal`の固定された直接起動設定は編集対象にしない。
 - MCP adapterはpurpose-specific typed operationを登録し、generic action dispatchやSQL passthroughを実装しない。`changeset.preview`、`asset.get_many`を提供し、Asset一覧は概要を既定にする。Change Setの`changes`はasset.save / asset.create / binding.save / binding.remove / common.save等の具体的な判別unionとして公開する。共通Bootstrapは`bootstrap.get`へ分離し、個別tool説明へ長文案内を重複させない。
 - Request / Responseの型と内容schemaは内部契約として管理し、Skill、Journal、Workflow、Stageのpayloadを検証する。
 - CLI bootstrapはService起動、Project登録、health確認、診断、export / Backup commandを提供する。
@@ -183,7 +183,7 @@ Claude Code / Codex (Windows または同一WSL内のLinux)
 
 - `C03`、`C08`、`C17`、`C20`、`C24`、`C35`：Workflowを明示選択してRunを開始し、固定revisionでContextを提供・記録し、Journal Reviewの変更を次のRunで確認する。並行RunのContextと記録は混線しない。
 - `C08`、`C10`、`C16`：Workflow入口はRunを開始し、直接起動Skill入口は指定Assetの本文だけを取得する。後者にRun、Snapshot、実行記録、Journalを作らない。
-- `C33`：UIでStage / Assetの双方から紐づきを確認・変更し、SkillのuseCaseを切り替える。Workflow図に次工程、差し戻し、retry等の自己ループを含む許可遷移が表示され、リキッドグラス風の視覚表現を満たすことを受入確認する。
+- `C33`：UIでStage / Assetの双方から紐づきを確認・変更し、SkillのuseCaseとautoInvocationを切り替える。Workflow図に次工程、差し戻し、retry等の自己ループを含む許可遷移が表示され、リキッドグラス風の視覚表現を満たすことを受入確認する。
 - `C21`–`C24`、`C31`：解決理由、提供した情報、取得失敗理由、実際に提供した量を記録し、対象になっただけの情報や未取得本文を提供量へ数えない。
 - `C25`–`C27`：Task関連JournalをReviewでき、同一Journal内の保留分を次回へ残しながら選択した気づきと合意変更だけを処理済みにする。提案判断、Change Set適用、処理状態の整合を確認する。
 - `C01`–`C35`：§12の全確認条件を、対応する実装/API領域の試験で満たす。MCP toolの具体名はAPI契約確定時に確認IDへ対応づける。
@@ -196,7 +196,7 @@ Claude Code / Codex (Windows または同一WSL内のLinux)
 - MCP tool名、各payload、Bootstrap本文、HTTP endpointの構成
 - Run Context HandleをRun単位MCP operationのtyped inputへ含めるpayload field名と、Runtime別の起動方法
 - Runtime別標準設定先の検出方法、設定先追加画面、生成ファイル名と衝突回避
-- UI画面構成、部品配置、紐づけ・useCaseの編集操作、diff表示、エラー表示の具体形
+- UI画面構成、部品配置、紐づけ・useCase・autoInvocationの編集操作、diff表示、エラー表示の具体形
 - Journal見出しの確定文字列、Task参照のpayload表現、気づきの抽出単位とMarkdown構文処理の詳細
 - SnapshotおよびContext delivery recordの物理schema、提供内容の保持形式と保存先
 - Backup形式、オンライン取得時の整合性確保、復元フロー

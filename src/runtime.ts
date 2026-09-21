@@ -196,8 +196,7 @@ export class RuntimeEntries {
     const results: { targetId: string; assetId: string; ok: boolean; message?: string }[] = [];
     for (const target of this.core.store.list<RuntimeTarget>('runtime-target').filter(t => t.enabled)) {
       const allAssets = this.core.store.list<Asset>('asset');
-      const boundSkillIds = new Set(this.core.bindings(target.scope).filter(b => b.purpose === 'reference').map(b => b.targetId).filter(assetId => allAssets.some(a => a.id === assetId && a.kind === 'skill')));
-      const assets = allAssets.filter(a => !a.deletedAt && a.scope === target.scope && (a.kind === 'workflow' || a.kind === 'skill' && (a.useCase || boundSkillIds.has(a.id))));
+      const assets = allAssets.filter(a => !a.deletedAt && a.scope === target.scope && (a.kind === 'workflow' || a.kind === 'skill' && (a.useCase || a.autoInvocation)));
       const names = runtimeNames(assets);
       const previous = this.core.store.list<Entry>('runtime-entry').filter(e => e.targetId === target.id && e.active);
       const previousFiles = this.core.store.list<RuntimeFile>('runtime-file').filter(file => file.targetId === target.id);
@@ -227,7 +226,7 @@ export class RuntimeEntries {
           const desired = asset ? this.body(asset, target.runtime, entryName) : undefined;
           const oldImplicitInvocation = old?.implicitInvocation === true;
           const ownedPolicy = target.runtime === 'codex' ? this.policy(target.runtime, oldImplicitInvocation) : undefined;
-          const desiredPolicy = asset ? this.policy(target.runtime, asset.kind === 'skill' && boundSkillIds.has(asset.id)) : undefined;
+          const desiredPolicy = asset ? this.policy(target.runtime, asset.kind === 'skill' && asset.autoInvocation === true) : undefined;
           let oldPathExists = false;
           if (asset && old && old.path !== path && existsSync(old.path)) {
             safeDirectory(dirname(old.path));
@@ -268,7 +267,7 @@ export class RuntimeEntries {
               unlinkSync(oldPolicyPath!);
               removeEmptyCodexSkillDirectory(target.runtime, old!.path);
             }
-            const implicitInvocation = asset.kind === 'skill' && boundSkillIds.has(asset.id);
+            const implicitInvocation = asset.kind === 'skill' && asset.autoInvocation === true;
             if (!old || old.path !== path || old.hash !== hash(desired!) || old.implicitInvocation !== implicitInvocation) this.core.store.put('runtime-entry', { id: old?.id, targetId: target.id, assetId, path, hash: hash(desired!), active: true, implicitInvocation });
           } else if (old) {
             if (existing !== undefined) { unlinkSync(path); removeEmptyCodexSkillDirectory(target.runtime, path); }

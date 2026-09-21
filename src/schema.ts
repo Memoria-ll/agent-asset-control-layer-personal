@@ -71,7 +71,7 @@ const assetInputSchema = z.object({
   kind: z.enum(['workflow', 'skill', 'role', 'rule', 'model']),
   name: text, description: text, body: z.string().default(''),
   responsibilities: z.string().default(''), scope: scope.default('global'),
-  explanation: z.string().optional(), useCase: z.boolean().default(false),
+  explanation: z.string().optional(), useCase: z.boolean().default(false), autoInvocation: z.boolean().default(false),
   modelName: z.string().default(''), invocationMethod: z.string().default(''),
   choices: z.array(modelChoiceSchema).default([]),
   metadata: z.record(z.string(), z.unknown()).default({}),
@@ -101,6 +101,7 @@ export const assetSchema = z.preprocess(normalizeAssetRecord, assetInputSchema).
     }
   }
   if (a.kind !== 'skill' && a.useCase) fail('直接起動を設定できるのはSkillです。');
+  if (a.kind !== 'skill' && a.autoInvocation) fail('自動発火を設定できるのはSkillです。');
   if (a.kind === 'workflow') {
     const stages = new Set(a.stages.map(s => s.id));
     if (!stages.size || stages.size !== a.stages.length) fail('Stageは1件以上で、IDは重複できません。');

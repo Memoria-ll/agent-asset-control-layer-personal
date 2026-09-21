@@ -8,6 +8,7 @@ export const bootstrap = `AACLはWorkflow・Skill・Role・Rule・Modelと、明
 通常の会話にWorkflow選択を催促せず、未選択の資産を適用しません。ユーザーが選択したWorkflowだけをaacl_run_startで開始します。
 aacl_project_resolveへ開いているProject rootを渡して完全一致で確認します。未登録の場合はaacl initで登録します。
 aacl_usecase_searchでWorkflowと直接起動Skillを探します。Skillの直接利用はaacl_skill_getだけを使い、Runや実行記録を作成しません。
+Skillの直接起動と自動発火は別々に設定できます。自動発火が有効なSkillはRuntimeがdescriptionを認識するため、紐づけが一致してもWorkflow ContextのSkill catalogへ重ねて渡しません。
 Journal Skillは直接起動せず、Journal記録設定が有効な場合にタスク完了時の気づきをaacl_journal_writeへ記録します。気づきがなければ記録しません。設定状態はaacl_settings_getで確認できます。
 aacl_run_startとaacl_run_transitionは、Context本文ではなく次の実行計画（nextExecution）とcontextHandleを返します。実際に次のStageを実施するオーケストレーターまたはサブエージェントが、そのHandleでaacl_context_getを呼び出してください。別の会話のHandleを使わず、ユーザーへHandleの入力を求めません。
 ContextのSkill catalogから必要な本文・補助ファイルを、実際にStageを実施するAIがaacl_run_skill_getで取得します。Ruleを含むContextの取得と意味判断、開発操作は実施者側が行い、オーケストレーターへ本文を転送しません。
@@ -61,6 +62,12 @@ export class Operations {
             if (a.kind !== 'skill')
                 throw new Error('Skillを指定してください。');
             return core.applyChanges([{ type: 'asset.save', id: a.id, expectedRevision: a.revision, asset: { ...core.assetPayload(a), useCase: p.enabled } }], p.provenance);
+        }, true);
+        write('skill.autoinvocation', 'Skillの自動発火を切り替えRuntime入口を同期。ONのSkillはCodexの自動発火対象になり、Workflow ContextのSkill候補には渡さない', { assetId: id, enabled: z.boolean(), provenance }, p => {
+            const a = core.asset(p.assetId);
+            if (a.kind !== 'skill')
+                throw new Error('Skillを指定してください。');
+            return core.applyChanges([{ type: 'asset.save', id: a.id, expectedRevision: a.revision, asset: { ...core.assetPayload(a), autoInvocation: p.enabled } }], p.provenance);
         }, true);
         read('project.list', '登録済みProjectを取得', {}, () => ({ projects: store.list('project') }));
         read('project.resolve', '正規化したrootの完全一致でProjectを確認', { root: text }, p => ({ root: normalizeRoot(p.root), project: store.list('project').find(v => v.root === normalizeRoot(p.root)) ?? null }));

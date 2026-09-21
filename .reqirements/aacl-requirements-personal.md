@@ -183,7 +183,7 @@ Role
 
 Project Commonは空の一覧として作成する。そのProjectで共通して使うRuleは、Projectごとに既存のRuleから明示的に登録する。
 
-Runtime入口はAssetとRuntime設定先のscopeが一致する場合に生成する。Global Assetの入口はGlobal設定先へ、Project Assetの入口は対応するProject内の`.claude/commands/`または`.codex/skills/`へ配置する。Project内にはそのProject専用の入口だけを置き、Global入口は複製しない。入口はCanonical Assetの複製ではなく、対象Use Caseを特定してAACLへ処理を渡すためのRuntime固有の生成物とする。Codexの入口は`SKILL.md`と同じSkill directoryに`agents/openai.yaml`を生成し、暗黙起動を禁止するpolicyをそこへ記載する。
+Runtime入口はAssetとRuntime設定先のscopeが一致する場合に生成する。Global Assetの入口はGlobal設定先へ、Project Assetの入口は対応するProject内の`.claude/commands/`または`.codex/skills/`へ配置する。Project内にはそのProject専用の入口だけを置き、Global入口は複製しない。入口はCanonical Assetの複製ではなく、対象Use Caseを特定してAACLへ処理を渡すためのRuntime固有の生成物とする。Skillは直接起動と自動発火をそれぞれON/OFFできる。Codexの入口は`SKILL.md`のYAML front matterへSkillの`description`をそのまま出力し、自動発火の設定を`agents/openai.yaml`の`policy.allow_implicit_invocation`へ記載する。
 
 ```text
 グローバルの紐づけ
@@ -244,12 +244,15 @@ Skillは次を保持する。
 - body
 - supporting files
 - useCase
+- autoInvocation
 
 別のSkillを使う関係は、Skill → Skillの紐づけで定義する。Workflow RunのContext Resolutionでは明示参照を再帰的に辿る。
 
 本文とsupporting filesは、AIが必要時に取得する。利用対象になったことと、本文を取得したこと、実際に使ったことを区別する。
 
 `useCase=true`のSkillは、直接起動できるSkillであることを示す。Runtime入口はAsset IDを指定し、Coreから取得したCanonical Skill本文をAIへ渡す。直接利用ではRunを作成せず、実行内容、結果、完了判断、Journalとの関連づけはCoreの管理対象にしない。
+
+`autoInvocation=true`のSkillは、Runtimeのdescription一致で自動発火できるSkillであることを示す。Codexの`agents/openai.yaml`へ発火設定を出力し、Skillの`description`はYAML front matterへその文のまま渡す。紐づけが解決してもRuntimeが既に認識しているため、ContextのSkill catalogとloaderへ重ねて渡さない。
 
 ---
 
@@ -343,13 +346,13 @@ Bootstrapは繰り返し取得しても同じ案内として扱う。通常会�
 
 初期導入する`journal`と`journal-review`は標準Skillとして扱い、どちらも名称変更と削除を禁止する。本文、description、explanationは利用者が編集できる。`journal`は`useCase=false`としてRuntimeの直接起動入口を作らず、`journal-review`だけをユーザーが明示的に起動する入口とする。
 
-Runtime設定先には、そのscopeに属する各Workflowと`useCase=true`のSkillだけを入口として配置する。Claude Codeでは`.claude/commands/`配下に起動用Commandを、Codexでは`.codex/skills/`配下に起動用Skillを生成する。Global scopeの入口はGlobal設定先に、Project scopeの入口は該当Project内に配置する。入口名は対象Asset名をRuntimeで使える形式に整えて生成し、同一設定先で名前が衝突する場合だけAsset IDを末尾に付ける。Codexの`SKILL.md`には`name`と`description`を記載し、SkillはCanonical Skillの`description`を、Workflowは`<Asset名>をAACLから起動する`をdescriptionへ渡す。いずれもAsset IDとMCP operationを記載する。暗黙起動の制御は`agents/openai.yaml`の`policy.allow_implicit_invocation: false`で行う。配置単位はWorkflow全体または直接起動Skillとし、StageやWorkflow内で参照する通常SkillはWorkflowの構成要素として扱う。初期導入時に作成し、対象の追加・解除・名称変更等で入口との対応関係が変わる場合は、Canonical Stateと一致するよう更新する。
+Runtime設定先には、そのscopeに属する各Workflowと`useCase=true`または`autoInvocation=true`のSkillを入口として配置する。Claude Codeでは`.claude/commands/`配下に起動用Commandを、Codexでは`.codex/skills/`配下に起動用Skillを生成する。Global scopeの入口はGlobal設定先に、Project scopeの入口は該当Project内に配置する。入口名は対象Asset名をRuntimeで使える形式に整えて生成し、同一設定先で名前が衝突する場合だけAsset IDを末尾に付ける。Codexの`SKILL.md`には`name`と`description`を記載し、SkillはCanonical Skillの`description`を、Workflowは`<Asset名>をAACLから起動する`をdescriptionへ渡す。いずれもAsset IDとMCP operationを記載する。自動発火の制御は`agents/openai.yaml`の`policy.allow_implicit_invocation`で行う。配置単位はWorkflow全体または直接起動・自動発火Skillとし、StageやWorkflow内で参照する自動発火でない通常SkillはWorkflowの構成要素として扱う。初期導入時に作成し、対象の追加・解除・名称変更等で入口との対応関係が変わる場合は、Canonical Stateと一致するよう更新する。
 
 Runtime入口にはSkillの`name`、`description`、AACL Asset IDと対応するMCP operationの呼び出し方法だけを記載し、Canonical本文やsupporting files、Service起動用のshell commandを含めない。発火後はAACLのSkill取得operationから本文を取得する。WSL上のServiceはWindowsログオン時にタスクスケジューラから起動する。自動起動はCLIで有効・無効・状態確認でき、アンインストール時に登録を解除する。
 
 `journal`はJournal記録の設定対象であり、Runtimeの直接起動入口ではない。`journal-review`はユーザーが明示的に開始する直接起動Skillである。標準Skillの名称変更・削除・`journal`の直接起動化はCoreで拒否する。
 
-Global設定先はRuntimeの標準位置から検出し、UIから追加できる。Windows側とWSL側のGlobal設定先は別々に扱う。各設定先にはscopeが一致するUse Case入口を配置する。設定先を管理対象から外す場合は既存ファイルを残し、以後Coreの管理対象から外す。SkillのuseCaseをfalseに変更した場合は、そのSkillのRuntime入口を解除する。
+Global設定先はRuntimeの標準位置から検出し、UIから追加できる。Windows側とWSL側のGlobal設定先は別々に扱う。各設定先にはscopeが一致するUse Case入口を配置する。設定先を管理対象から外す場合は既存ファイルを残し、以後Coreの管理対象から外す。Skillの`useCase`と`autoInvocation`をそれぞれfalseに変更した場合、他方もfalseであればそのSkillのRuntime入口を解除する。
 
 Workflow入口は対象Workflowを安定したAsset IDで特定し、MCP経由でRunを開始する。Skill入口は対象Skillの安定したAsset IDだけを指定し、MCP経由で取得したCanonical本文をAIへ渡す。Skill入口からRunを開始しない。いずれの入口にもCanonical本文やContext解決ロジックを複製しない。
 
@@ -695,7 +698,7 @@ UIはAsset、Global / Projectの紐づけ、Project Common、Workflow Run、Snap
 UIの視覚表現はリキッドグラス風とする。画面構成や個別の操作部品などの詳細は実装に委ね、次の操作性を備える。
 
 - Workflow / StageごとにRole、Skill、Rule、Modelの紐づきを一覧でき、各Assetからも関連するWorkflow / Stageを確認できる。Stageへの直接参照と担当Role経由の参照を区別して示す。
-- UIから紐づけを追加・解除・付け替えでき、SkillのuseCase設定を有効・無効に簡単に切り替えられる。現在の設定状態を見分けられる。
+- UIから紐づけを追加・解除・付け替えでき、SkillのuseCaseとautoInvocationをそれぞれ有効・無効に簡単に切り替えられる。現在の設定状態を見分けられる。
 - Workflow編集画面でStageごとに既存Roleを必ず1件選ぶか、新しいRoleをGlobal Assetとして作成して割り当てられる。担当Roleの責務がStageの基本となり、追加指示は任意で記入できる。作成したRoleは他のWorkflow / Stageでも再利用できる。
 - Workflow編集画面でStageごとにModelを任意に指定できる。Modelを指定したStageはサブエージェント実行の指示になり、連続する同じRole・ModelのStageでは同じサブエージェントへ依頼する。
 - WorkflowのStage間の許可された遷移を図で表示する。各遷移の遷移元・遷移先・condition・表示名が分かり、自己ループや差し戻しも確認できる。

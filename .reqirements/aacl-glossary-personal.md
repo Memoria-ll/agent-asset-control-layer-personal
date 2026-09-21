@@ -157,7 +157,7 @@ Claude Code / Codexの実行環境。モデル起動、filesystem、shell、Git�
 
 ### Skill
 
-再利用する手順、専門知識、範囲の定まった作業を表すCanonical Asset。必須情報はname、description、body。`useCase`設定で直接起動対象にするかを切り替える。
+再利用する手順、専門知識、範囲の定まった作業を表すCanonical Asset。必須情報はname、description、body。`useCase`で直接起動を、`autoInvocation`でRuntimeからの自動発火をそれぞれ切り替える。
 
 ### Snapshot
 
@@ -179,7 +179,7 @@ Workflow上のTaskはStageに対応し、独立したTaskエンティティは�
 
 ### Skillのdescriptionとexplanation
 
-Skillの`description`はRuntime入口のYAML front matterへ渡す短い説明であり、`explanation`はUIで人がSkillを呼び出すか判断するための説明である。Workflow、Stage、Role、Rule、Modelには作業分類を保存しない。
+Skillの`description`はRuntime入口のYAML front matterへそのまま渡す説明であり、`explanation`はUIで人がSkillを呼び出すか判断するための説明である。自動発火が有効なSkillは、紐づけが解決しても既にRuntimeが認識しているためContextのSkill候補として再度渡さない。Workflow、Stage、Role、Rule、Modelには作業分類を保存しない。
 
 ### transition
 
@@ -189,11 +189,15 @@ Workflowの現在Stageから別のStageまたは終端状態へ進む定義。`f
 
 ### Use Case
 
-ユーザーが明示的に選択する起動対象。WorkflowはRunを開始し、`useCase=true`のSkillはRunを伴わずCanonical本文を直接取得する。
+ユーザーが明示的に選択する起動対象。WorkflowはRunを開始し、`useCase=true`のSkillはRunを伴わずCanonical本文を直接取得する。`autoInvocation=true`のSkillはRuntimeのdescription一致で自動発火できる。
 
 ### useCase
 
-Skillが直接起動可能なUse Caseであることを示す設定値。trueへの切り替えでRuntime入口を生成し、falseへの切り替えで入口を解除する。
+Skillが直接起動可能なUse Caseであることを示す設定値。trueへの切り替えでRuntime入口を生成し、falseへの切り替えで入口を解除する。自動発火の設定とは独立している。
+
+### autoInvocation
+
+SkillをRuntimeのdescription一致による自動発火対象にする設定値。Codexの`agents/openai.yaml`へ`policy.allow_implicit_invocation`として出力し、有効なSkillはContextのSkill catalogとloaderへ重ねて渡さない。
 
 ## W
 

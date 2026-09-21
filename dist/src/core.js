@@ -56,13 +56,15 @@ export class Core {
                 if (!target || target.kind !== 'skill' || visited.has(target.id))
                     continue;
                 visited.add(target.id);
-                entries.push({ id: target.id, name: target.name, description: target.description });
-                loaders.push({
-                    catalogKey: `aacl:${target.id}:${target.revision}`,
-                    name: target.name,
-                    source: 'aacl',
-                    loader: { type: 'aacl-asset', assetId: target.id, revision: target.revision },
-                });
+                if (!target.autoInvocation) {
+                    entries.push({ id: target.id, name: target.name, description: target.description });
+                    loaders.push({
+                        catalogKey: `aacl:${target.id}:${target.revision}`,
+                        name: target.name,
+                        source: 'aacl',
+                        loader: { type: 'aacl-asset', assetId: target.id, revision: target.revision },
+                    });
+                }
                 walk(target.id);
             }
         };
@@ -447,8 +449,8 @@ export class Core {
             ...(model ? { modelSelections } : {}),
             roles: [...chosen.values()].filter(a => a.kind === 'role').map(contextAsset),
             rules: [...chosen.values()].filter(a => a.kind === 'rule').map(contextAsset),
-            skillCatalog: [...chosen.values()].filter(a => a.kind === 'skill').map(({ id, name, description }) => ({ id, name, description })),
-            skillLoaders: [...chosen.values()].filter(a => a.kind === 'skill').map(({ id, name, revision }) => ({
+            skillCatalog: [...chosen.values()].filter(a => a.kind === 'skill' && !a.autoInvocation).map(({ id, name, description }) => ({ id, name, description })),
+            skillLoaders: [...chosen.values()].filter(a => a.kind === 'skill' && !a.autoInvocation).map(({ id, name, revision }) => ({
                 catalogKey: `aacl:${id}:${revision}`,
                 name,
                 source: 'aacl',
