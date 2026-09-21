@@ -1,3 +1,13 @@
+export function diagnosticAssetId(evidence) {
+    if (!evidence || typeof evidence !== 'object' || Array.isArray(evidence))
+        return undefined;
+    const assetId = evidence.assetId;
+    return typeof assetId === 'string' ? assetId : undefined;
+}
+export function diagnosticAsset(evidence, assets) {
+    const assetId = diagnosticAssetId(evidence);
+    return assetId ? assets.find(asset => asset.id === assetId) : undefined;
+}
 export function relatedWorkflows(assetId, assets, bindings) {
     const result = [];
     const walk = (target, via, visited, attachment) => {

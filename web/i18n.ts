@@ -146,6 +146,8 @@ const english: Record<string, string> = {
   '資産や紐づけを保存すると、履歴と変更理由を確認できます。': 'Save an asset or binding to see its history and reason for change.',
   '再診断': 'Run diagnostics again',
   '整合性と実行の状態': 'Integrity and execution status',
+  '対象Asset': 'Affected Asset',
+  'Assetを開く →': 'Open Asset →',
   '検出された問題はありません。': 'No problems detected.',
   'Contextの提供量': 'Context delivery volume',
   '実際に提供した内容のUTF-8バイト数です。未取得のSkill本文は含みません。': 'UTF-8 bytes of content actually delivered. Unfetched Skill bodies are excluded.',

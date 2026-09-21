@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { mkdtempSync } from 'node:fs';
+import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
@@ -326,6 +326,40 @@ test('C33: Chromium UI assigns existing and new Roles from Workflow editor, runs
   await page.getByRole('searchbox').fill('検証手順');
   await expect(page.locator('.asset-row')).toHaveCount(0);
   expect(errors).toEqual([]);
+});
+
+test('Diagnostics identifies the concrete Asset behind a Runtime failure', async ({ page }) => {
+  const assetResponse = await page.request.post(`http://127.0.0.1:${app.port}/api/asset.save`, {
+    data: {
+      operationId: randomUUID(),
+      provenance: { origin: 'ui', userRequest: 'diagnostic asset display' },
+      asset: {
+        kind: 'skill',
+        name: '診断対象Skill',
+        description: 'Runtime診断の表示確認',
+        explanation: 'Runtime診断の表示確認',
+        body: '診断表示を確認する。',
+        useCase: true,
+      },
+    },
+  });
+  expect(assetResponse.ok()).toBeTruthy();
+  const asset = (await assetResponse.json()).entities[0];
+  const runtimePath = join(mkdtempSync(join(tmpdir(), 'aacl-diagnostic-')), 'codex-target');
+  writeFileSync(runtimePath, '既存ファイル');
+  const runtimeResponse = await page.request.post(`http://127.0.0.1:${app.port}/api/runtime.register`, {
+    data: { operationId: randomUUID(), runtime: 'codex', scope: 'global', path: runtimePath, platform: 'wsl' },
+  });
+  expect(runtimeResponse.ok()).toBeTruthy();
+
+  await page.addInitScript(() => localStorage.setItem('aacl-language', 'ja'));
+  await page.goto(`http://127.0.0.1:${app.port}/#diagnostics`);
+  const diagnosticAsset = page.locator('.diagnostic-asset').filter({ hasText: asset.name });
+  await expect(diagnosticAsset).toBeVisible();
+  await expect(diagnosticAsset).toContainText('Skill');
+  await expect(diagnosticAsset).toContainText(asset.id);
+  await diagnosticAsset.click();
+  await expect(page.getByRole('heading', { name: asset.name, exact: true })).toBeVisible();
 });
 
 test('Asset Library keeps the list position while opening and closing the detail drawer', async ({ page }) => {
