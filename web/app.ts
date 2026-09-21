@@ -18,6 +18,8 @@ let selectedScope = 'global', filter = 'all', search = '', loading = false;
 let journalReportCount = 0;
 let assetScrollTop = 0;
 let language: Language = localStorage.getItem('aacl-language') === 'ja' ? 'ja' : 'en';
+type Theme = 'light' | 'dark';
+let theme: Theme = localStorage.getItem('aacl-theme') === 'dark' ? 'dark' : 'light';
 let screenData: Record<string, unknown> = {};
 let toastTimer: ReturnType<typeof setTimeout>;
 const htmlText = (value: unknown) => String(value ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]!));
@@ -41,6 +43,21 @@ const assetSelect = (label: string, key: string, options: string, required = fal
 const formEnd = (label = '保存する') => `<p class="form-error" role="alert"></p><div class="form-footer">${button('close', 'キャンセル')}<button class="primary" type="submit">${htmlText(label)}</button></div>`;
 const provenance = (request: string): Provenance => ({ origin: 'ui', userRequest: request, reason: '', sources: [], proposedBy: '', decision: '' });
 const route = () => (location.hash.slice(1) || 'assets').split('/');
+function applyTheme() {
+  document.documentElement.dataset.theme = theme;
+  document.documentElement.style.colorScheme = theme;
+  document.querySelector('meta[name="theme-color"]')?.setAttribute('content', theme === 'dark' ? '#101c24' : '#edf3f8');
+}
+function syncThemeControl() {
+  const control = document.querySelector<HTMLButtonElement>('#theme-toggle');
+  if (!control) return;
+  const dark = theme === 'dark';
+  control.setAttribute('aria-pressed', String(dark));
+  control.setAttribute('aria-label', localizeHtml(dark ? 'ライトモードに切り替え' : 'ダークモードに切り替え', language));
+  control.title = localizeHtml(dark ? 'ライトモードに切り替え' : 'ダークモードに切り替え', language);
+  control.querySelector<HTMLElement>('.theme-toggle-thumb')!.textContent = dark ? '☾' : '☀';
+  control.querySelector<HTMLElement>('.theme-toggle-value')!.textContent = localizeHtml(dark ? 'ダーク' : 'ライト', language);
+}
 const recordPageSize = 20;
 type JournalSummary = Omit<Journal, 'raw' | 'parsed'> & { insightCount?: number; pendingInsightCount?: number };
 type ReviewSummary = Omit<ReviewItem, 'body'>;
@@ -101,8 +118,9 @@ function pageHeading(title: string, description: string, action = '') { return `
 function shell(content: string, contentClass = '') {
   const [page] = route();
   const journalBadge = journalReportCount >= 10 ? `<span class="nav-notification" aria-hidden="true" title="${esc(`${journalReportCount}件のJournal報告`)}">${journalReportCount > 99 ? '99+' : journalReportCount}</span>` : '';
-  app.innerHTML = localizeHtml(`<div class="shell"><aside class="sidebar"><a class="brand" href="#assets"><span class="brand-mark">Λ</span><div><div class="brand-name">AACL</div><small>AGENT ASSET CONTROL LAYER</small></div></a><div class="nav-label">ワークスペース</div><nav>${navs.slice(0, 4).map(([key, title, path]) => `<a href="#${key}" class="nav-item ${page === key ? 'active' : ''}"${page === key ? ' aria-current="page"' : ''}>${icon(path)}${title}${key === 'journals' ? journalBadge : ''}</a>`).join('')}</nav><div class="nav-label">管理</div><nav>${navs.slice(4, 6).map(([key, title, path]) => `<a href="#${key}" class="nav-item ${page === key ? 'active' : ''}">${icon(path)}${title}</a>`).join('')}</nav><div class="sidebar-bottom"><a class="nav-item ${page === 'settings' ? 'active' : ''}" href="#settings">${icon(navs[6][2])}設定・接続</a><div class="connection"><span class="dot"></span>ローカルに接続済み</div></div></aside><main class="main"><div class="topbar"><div class="breadcrumb">ワークスペース &nbsp; / &nbsp; <span>${esc(labelScope(selectedScope))}</span></div><div class="topbar-controls"><label class="scope-select"><span class="mono">SCOPE</span><select id="scope-select" aria-label="管理先" translate="no">${opt('global', 'Global', selectedScope)}${projects.map(p => opt(p.id, p.name, selectedScope)).join('')}</select></label><label class="language-select"><span class="mono">言語</span><select id="language-select" aria-label="言語" translate="no"><option value="en"${language === 'en' ? ' selected' : ''}>英語</option><option value="ja"${language === 'ja' ? ' selected' : ''}>日本語</option></select></label></div></div><div class="main-content ${contentClass}">${content}<div class="footer-note">AACL · あなたの開発方法を、あなたの手で。</div></div></main></div>`, language);
+  app.innerHTML = localizeHtml(`<div class="shell"><aside class="sidebar"><a class="brand" href="#assets"><span class="brand-mark">Λ</span><div><div class="brand-name">AACL</div><small>AGENT ASSET CONTROL LAYER</small></div></a><div class="nav-label">ワークスペース</div><nav>${navs.slice(0, 4).map(([key, title, path]) => `<a href="#${key}" class="nav-item ${page === key ? 'active' : ''}"${page === key ? ' aria-current="page"' : ''}>${icon(path)}${title}${key === 'journals' ? journalBadge : ''}</a>`).join('')}</nav><div class="nav-label">管理</div><nav>${navs.slice(4, 6).map(([key, title, path]) => `<a href="#${key}" class="nav-item ${page === key ? 'active' : ''}">${icon(path)}${title}</a>`).join('')}</nav><div class="sidebar-bottom"><a class="nav-item ${page === 'settings' ? 'active' : ''}" href="#settings">${icon(navs[6][2])}設定・接続</a><div class="connection"><span class="dot"></span>ローカルに接続済み</div></div></aside><main class="main"><div class="topbar"><div class="breadcrumb">ワークスペース &nbsp; / &nbsp; <span>${esc(labelScope(selectedScope))}</span></div><div class="topbar-controls"><label class="scope-select"><span class="mono">SCOPE</span><select id="scope-select" aria-label="管理先" translate="no">${opt('global', 'Global', selectedScope)}${projects.map(p => opt(p.id, p.name, selectedScope)).join('')}</select></label><label class="language-select"><span class="mono">言語</span><select id="language-select" aria-label="言語" translate="no"><option value="en"${language === 'en' ? ' selected' : ''}>英語</option><option value="ja"${language === 'ja' ? ' selected' : ''}>日本語</option></select></label><div class="theme-control"><span class="mono">テーマ</span><button type="button" id="theme-toggle" class="theme-toggle" aria-pressed="${theme === 'dark'}" aria-label="${theme === 'dark' ? 'ライトモードに切り替え' : 'ダークモードに切り替え'}" title="${theme === 'dark' ? 'ライトモードに切り替え' : 'ダークモードに切り替え'}"><span class="theme-toggle-track"><span class="theme-toggle-thumb" aria-hidden="true">${theme === 'dark' ? '☾' : '☀'}</span></span><span class="theme-toggle-value">${theme === 'dark' ? 'ダーク' : 'ライト'}</span></button></div></div></div><div class="main-content ${contentClass}">${content}<div class="footer-note">AACL · あなたの開発方法を、あなたの手で。</div></div></main></div>`, language);
   document.documentElement.lang = language;
+  syncThemeControl();
 }
 async function refresh() {
   if (loading) return;
@@ -696,6 +714,14 @@ document.addEventListener('toggle', event => {
   if (panel?.open && panel.dataset.lazyKind) void loadRecordPanel(panel);
 }, true);
 document.addEventListener('click', event => {
+  const themeToggle = (event.target as HTMLElement).closest<HTMLButtonElement>('#theme-toggle');
+  if (themeToggle) {
+    theme = theme === 'dark' ? 'light' : 'dark';
+    localStorage.setItem('aacl-theme', theme);
+    applyTheme();
+    syncThemeControl();
+    return;
+  }
   const templateButton = (event.target as HTMLElement).closest<HTMLButtonElement>('[data-template]');
   if (templateButton) {
     const form = templateButton.closest('form') as HTMLFormElement | null;
@@ -772,4 +798,5 @@ document.addEventListener('input', event => {
 });
 function errorMessage(error: unknown) { return error instanceof Error ? error.message : String(error); }
 window.addEventListener('hashchange', () => { if (!loading) void render().catch(e => notify(errorMessage(e))); });
+applyTheme();
 void refresh();

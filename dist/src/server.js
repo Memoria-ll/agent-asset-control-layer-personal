@@ -53,6 +53,7 @@ export async function serve(directory, port = 4318) {
     const staticFiles = new Map([
         ['/', { path: join(packageRoot, 'web/index.html'), type: 'text/html; charset=utf-8' }],
         ['/styles.css', { path: join(packageRoot, 'web/styles.css'), type: 'text/css; charset=utf-8' }],
+        ['/theme-init.js', { path: join(packageRoot, 'web/theme-init.js'), type: 'text/javascript; charset=utf-8' }],
         ['/i18n.js', { path: join(packageRoot, 'dist/web/i18n.js'), type: 'text/javascript; charset=utf-8' }],
         ['/view-model.js', { path: join(packageRoot, 'dist/web/view-model.js'), type: 'text/javascript; charset=utf-8' }],
         ['/app.js', { path: join(packageRoot, 'dist/web/app.js'), type: 'text/javascript; charset=utf-8' }],

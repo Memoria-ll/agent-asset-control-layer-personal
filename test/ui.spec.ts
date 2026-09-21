@@ -31,6 +31,22 @@ test('UI defaults to English and switches the rendered interface to Japanese', a
   await expect(page.getByRole('link', { name: 'Asset Library', exact: true })).toBeVisible();
 });
 
+test('UI toggles Deep Ocean dark mode beside the language selector and persists it', async ({ page }) => {
+  await page.goto(`http://127.0.0.1:${app.port}`);
+  const toggle = page.locator('#theme-toggle');
+  await expect(page.locator('html')).toHaveAttribute('data-theme', 'light');
+  await expect(toggle).toHaveAttribute('aria-pressed', 'false');
+  await toggle.click();
+  await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark');
+  await expect(toggle).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.locator('meta[name="theme-color"]')).toHaveAttribute('content', '#101c24');
+  await page.reload();
+  await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark');
+  await expect(page.locator('#theme-toggle')).toHaveAttribute('aria-pressed', 'true');
+  await page.locator('#theme-toggle').click();
+  await expect(page.locator('html')).toHaveAttribute('data-theme', 'light');
+});
+
 test('C33: Chromium UI assigns existing and new Roles from Workflow editor, runs a Workflow, records and reviews Journal', async ({ page }) => {
   const errors: string[] = [];
   page.on('pageerror', e => errors.push(e.message));
