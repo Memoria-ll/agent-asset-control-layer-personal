@@ -183,7 +183,7 @@ Role
 
 Project Commonは空の一覧として作成する。そのProjectで共通して使うRuleは、Projectごとに既存のRuleから明示的に登録する。
 
-Runtime入口はAssetとRuntime設定先のscopeが一致する場合に生成する。Global Assetの入口はGlobal設定先へ、Project Assetの入口は対応するProject内の`.claude/commands/`または`.codex/skills/`へ配置する。Project内にはそのProject専用の入口だけを置き、Global入口は複製しない。入口はCanonical Assetの複製ではなく、対象Use Caseを特定してAACLへ処理を渡すためのRuntime固有の生成物とする。Codexの入口は`SKILL.md`と同じSkill directoryに`agents/openai.yaml`を生成し、暗黙起動を禁止するpolicyをそこへ記載する。
+Runtime入口はAssetとRuntime設定先のscopeが一致する場合に生成する。Global Assetの入口はGlobal設定先へ、Project Assetの入口は対応するProject内の`.claude/commands/`または`.codex/skills/`へ配置する。Project内にはそのProject専用の入口だけを置き、Global入口は複製しない。入口はCanonical Assetの複製ではなく、対象Use Caseを特定してAACLへ処理を渡すためのRuntime固有の生成物とする。Codexの入口は`SKILL.md`と同じSkill directoryに、Assetが持つ`agents/openai.yaml`へAACLのpolicyを合成したYAMLを生成する。`policy.allow_implicit_invocation`はAsset側の値を使わず、暗黙起動の状態から決めたAACLの値で上書きする。
 
 ```text
 グローバルの紐づけ
@@ -343,7 +343,7 @@ Bootstrapは繰り返し取得しても同じ案内として扱う。通常会�
 
 初期導入する`journal`と`journal-review`は標準Skillとして扱い、どちらも名称変更と削除を禁止する。本文、description、explanationは利用者が編集できる。`journal`は`useCase=false`としてRuntimeの直接起動入口を作らず、`journal-review`だけをユーザーが明示的に起動する入口とする。
 
-Runtime設定先には、そのscopeに属する各Workflowと`useCase=true`のSkillだけを入口として配置する。Claude Codeでは`.claude/commands/`配下に起動用Commandを、Codexでは`.codex/skills/`配下に起動用Skillを生成する。Global scopeの入口はGlobal設定先に、Project scopeの入口は該当Project内に配置する。入口名は対象Asset名をRuntimeで使える形式に整えて生成し、同一設定先で名前が衝突する場合だけAsset IDを末尾に付ける。Codexの`SKILL.md`には`name`と`description`を記載し、SkillはCanonical Skillの`description`を、Workflowは`<Asset名>をAACLから起動する`をdescriptionへ渡す。いずれもAsset IDとMCP operationを記載する。暗黙起動の制御は`agents/openai.yaml`の`policy.allow_implicit_invocation: false`で行う。配置単位はWorkflow全体または直接起動Skillとし、StageやWorkflow内で参照する通常SkillはWorkflowの構成要素として扱う。初期導入時に作成し、対象の追加・解除・名称変更等で入口との対応関係が変わる場合は、Canonical Stateと一致するよう更新する。
+Runtime設定先には、そのscopeに属する各Workflowと`useCase=true`のSkillだけを入口として配置する。Claude Codeでは`.claude/commands/`配下に起動用Commandを、Codexでは`.codex/skills/`配下に起動用Skillを生成する。Global scopeの入口はGlobal設定先に、Project scopeの入口は該当Project内に配置する。入口名は対象Asset名をRuntimeで使える形式に整えて生成し、同一設定先で名前が衝突する場合だけAsset IDを末尾に付ける。Codexの`SKILL.md`には`name`と`description`を記載し、SkillはCanonical Skillの`description`を、Workflowは`<Asset名>をAACLから起動する`をdescriptionへ渡す。いずれもAsset IDとMCP operationを記載する。暗黙起動の制御は`agents/openai.yaml`の`policy.allow_implicit_invocation`で行い、値はAsset側の記載ではなくAACLがbinding状態から決めた値を使う。配置単位はWorkflow全体または直接起動Skillとし、StageやWorkflow内で参照する通常SkillはWorkflowの構成要素として扱う。初期導入時に作成し、対象の追加・解除・名称変更等で入口との対応関係が変わる場合は、Canonical Stateと一致するよう更新する。
 
 Runtime入口にはSkillの`name`、`description`、AACL Asset IDと対応するMCP operationの呼び出し方法だけを記載し、Canonical本文やsupporting files、Service起動用のshell commandを含めない。発火後はAACLのSkill取得operationから本文を取得する。WSL上のServiceはWindowsログオン時にタスクスケジューラから起動する。自動起動はCLIで有効・無効・状態確認でき、アンインストール時に登録を解除する。
 

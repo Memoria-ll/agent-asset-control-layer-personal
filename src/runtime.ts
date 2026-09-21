@@ -2,14 +2,33 @@ import { createHash } from 'node:crypto';
 import { existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, renameSync, rmdirSync, unlinkSync, writeFileSync, chmodSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, isAbsolute, join, parse, relative } from 'node:path';
+import { parse as parseYaml, stringify as stringifyYaml } from 'yaml';
 import { Core, normalizeRoot } from './core.ts';
 import { supportingFilePathError } from './schema.ts';
 import type { Asset, Diagnostic, RuntimeFile, RuntimeTarget, Stamp } from './schema.ts';
 
 type Entry = Stamp & { targetId: string; assetId: string; path: string; hash: string; active: boolean; implicitInvocation?: boolean };
+const codexPolicyRelativePath = 'agents/openai.yaml';
 const hash = (text: string) => createHash('sha256').update(text).digest('hex');
 const fileMode = (path: string) => path.toLowerCase().endsWith('.sh') ? 0o700 : 0o600;
 const runtimeSlug = (name: string) => name.normalize('NFKD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+
+export function synthesizeCodexPolicy(source: string | undefined, implicitInvocation = false) {
+  let parsed: unknown = {};
+  try {
+    if (source?.trim()) parsed = parseYaml(source);
+  } catch (error) {
+    throw new Error(`agents/openai.yamlのYAMLを解釈できません: ${error instanceof Error ? error.message : String(error)}`);
+  }
+  if (!isRecord(parsed)) throw new Error('agents/openai.yamlのYAMLルートはマッピングで指定してください。');
+  if (parsed.policy !== undefined && !isRecord(parsed.policy)) throw new Error('agents/openai.yamlのpolicyはマッピングで指定してください。');
+  const policy = isRecord(parsed.policy) ? parsed.policy : {};
+  return stringifyYaml({ ...parsed, policy: { ...policy, allow_implicit_invocation: implicitInvocation } }, { lineWidth: 0 });
+}
 
 function runtimeNames(assets: Asset[]) {
   const names = new Map(assets.map(asset => [asset.id, runtimeSlug(asset.name)]));
@@ -32,10 +51,6 @@ function removeEmptyCodexSkillDirectory(runtime: string, path: string) {
   const directory = dirname(path), agents = join(directory, 'agents');
   if (existsSync(agents) && readdirSync(agents).length === 0) rmdirSync(agents);
   if (existsSync(directory) && readdirSync(directory).length === 0) rmdirSync(directory);
-}
-
-function codexPolicyPath(path: string) {
-  return join(dirname(path), 'agents', 'openai.yaml');
 }
 
 function supportRoot(runtime: RuntimeTarget['runtime'], entryPath: string) {
@@ -133,10 +148,10 @@ export class RuntimeEntries {
       : `---\nname: ${entryName}\n---`;
     return `${frontmatter}\n\n<!-- aacl-entry:${asset.id} -->\n\nMCPの aacl_${operation} に ${input} を渡す。\n${asset.kind === 'workflow' ? '現在開いているProject rootをrootへ渡し、operationIdに新しいUUIDを使う。返されたnextExecutionのexecutorを確認し、実施主体がcontextHandleでaacl_context_getを呼び出してからStageを実施する。遷移後も返されたnextExecutionに従い、Skill・Rule本文をオーケストレーターへ転送しない。\n' : '取得したCanonical本文に従う。\n'}`;
   }
-  policy(runtime: string, implicitInvocation = false) {
-    return runtime === 'codex' ? `policy:\n  allow_implicit_invocation: ${implicitInvocation ? 'true' : 'false'}\n` : undefined;
+  policy(runtime: string, implicitInvocation = false, source?: string) {
+    return runtime === 'codex' ? synthesizeCodexPolicy(source, implicitInvocation) : undefined;
   }
-  private syncSupportingFiles(target: RuntimeTarget, asset: Asset | undefined, oldEntry: Entry | undefined, entryPath: string | undefined, previous: RuntimeFile[]) {
+  private syncSupportingFiles(target: RuntimeTarget, asset: Asset | undefined, oldEntry: Entry | undefined, entryPath: string | undefined, previous: RuntimeFile[], implicitInvocation = false, legacyPolicy?: string) {
     const oldRoot = oldEntry ? supportRoot(target.runtime, oldEntry.path) : undefined;
     const currentRoot = asset && entryPath ? supportRoot(target.runtime, entryPath) : undefined;
     const desired = new Map<string, string>();
@@ -146,8 +161,9 @@ export class RuntimeEntries {
         if (error) throw new Error(error);
         const path = join(currentRoot, relativePath);
         assertWithin(currentRoot, path);
-        desired.set(relativePath, content);
+        if (target.runtime !== 'codex' || relativePath !== codexPolicyRelativePath) desired.set(relativePath, content);
       }
+      if (target.runtime === 'codex') desired.set(codexPolicyRelativePath, this.policy(target.runtime, implicitInvocation, asset.supportingFiles[codexPolicyRelativePath])!);
       if (desired.size) safeDirectory(currentRoot);
     }
     const paths = new Set([...previous.map(file => file.relativePath), ...desired.keys()]);
@@ -155,19 +171,22 @@ export class RuntimeEntries {
       const prior = previous.find(file => file.relativePath === relativePath);
       const content = desired.get(relativePath);
       const currentPath = content === undefined || !currentRoot ? undefined : join(currentRoot, relativePath);
-      const oldPath = prior?.path;
+      const oldPath = target.runtime === 'codex' && relativePath === codexPolicyRelativePath && oldEntry
+        ? join(oldRoot!, relativePath)
+        : prior?.path;
       if (currentPath && currentRoot) assertWithin(currentRoot, currentPath);
       if (oldPath && oldRoot) assertWithin(oldRoot, oldPath);
       let oldContent: string | undefined;
       if (oldPath && oldPath !== currentPath) {
         safeExistingDirectory(dirname(oldPath));
         oldContent = readRegularFile(oldPath);
-        if (oldContent !== undefined && (!oldRoot || !prior || hash(oldContent) !== prior.hash)) throw new Error(`以前のRuntime補助ファイルがAACL生成後に変更されています。内容を確認してください: ${oldPath}`);
+        if (oldContent !== undefined && (!oldRoot || (!prior && oldContent !== legacyPolicy) || (prior && hash(oldContent) !== prior.hash))) throw new Error(`以前のRuntime補助ファイルがAACL生成後に変更されています。内容を確認してください: ${oldPath}`);
       }
       if (content !== undefined && currentPath && asset) {
         safeDirectory(dirname(currentPath));
         const existing = readRegularFile(currentPath);
-        if (existing !== undefined && (!prior || prior.path !== currentPath)) throw new Error(`Runtime補助ファイルが既存ファイルと衝突しています: ${currentPath}`);
+        const acceptsLegacyPolicy = target.runtime === 'codex' && relativePath === codexPolicyRelativePath && existing === legacyPolicy;
+        if (existing !== undefined && (!prior || prior.path !== currentPath) && !acceptsLegacyPolicy) throw new Error(`Runtime補助ファイルが既存ファイルと衝突しています: ${currentPath}`);
         if (existing !== undefined && prior && hash(existing) !== prior.hash) throw new Error(`Runtime補助ファイルがAACL生成後に変更されています。内容を確認してください: ${currentPath}`);
         if (existing !== content) writeOwnedFile(currentPath, content);
         else chmodSync(currentPath, fileMode(currentPath));
@@ -212,22 +231,14 @@ export class RuntimeEntries {
           if (asset && !entryName) throw new Error('Asset名からRuntime入口名を作れません。英小文字・数字を含む名前にしてください。');
           const path = asset ? target.runtime === 'claude' ? join(target.path, 'commands', `${entryName}.md`) : join(target.path, 'skills', entryName!, 'SKILL.md') : old?.path;
           if (!path) throw new Error('以前のRuntime入口の配置先を取得できません。');
-          const policyPath = target.runtime === 'codex' ? codexPolicyPath(path) : undefined;
           safeDirectory(dirname(path));
-          if (policyPath) safeDirectory(dirname(policyPath));
-          let existing: string | undefined, existingPolicy: string | undefined;
+          let existing: string | undefined;
           if (existsSync(path)) {
             if (lstatSync(path).isSymbolicLink()) throw new Error('入口がsymlinkのため更新できません。');
             existing = readFileSync(path, 'utf8');
           }
-          if (policyPath && existsSync(policyPath)) {
-            if (lstatSync(policyPath).isSymbolicLink()) throw new Error('Codex Skill policyがsymlinkのため更新できません。');
-            existingPolicy = readFileSync(policyPath, 'utf8');
-          }
           const desired = asset ? this.body(asset, target.runtime, entryName) : undefined;
           const oldImplicitInvocation = old?.implicitInvocation === true;
-          const ownedPolicy = target.runtime === 'codex' ? this.policy(target.runtime, oldImplicitInvocation) : undefined;
-          const desiredPolicy = asset ? this.policy(target.runtime, asset.kind === 'skill' && boundSkillIds.has(asset.id)) : undefined;
           let oldPathExists = false;
           if (asset && old && old.path !== path && existsSync(old.path)) {
             safeDirectory(dirname(old.path));
@@ -235,49 +246,29 @@ export class RuntimeEntries {
             if (hash(readFileSync(old.path, 'utf8')) !== old.hash) throw new Error('以前の入口がAACL生成後に変更されています。内容を確認してください。');
             oldPathExists = true;
           }
-          let oldPolicyPath: string | undefined, oldPolicyExists = false;
-          if (asset && old && target.runtime === 'codex' && old.path !== path) {
-            oldPolicyPath = codexPolicyPath(old.path);
-            if (existsSync(oldPolicyPath)) {
-              safeDirectory(dirname(oldPolicyPath));
-              if (lstatSync(oldPolicyPath).isSymbolicLink()) throw new Error('以前のCodex Skill policyがsymlinkのため移動できません。');
-              if (readFileSync(oldPolicyPath, 'utf8') !== ownedPolicy) throw new Error('以前のCodex Skill policyがAACL生成後に変更されています。内容を確認してください。');
-              oldPolicyExists = true;
-            }
-          }
           if (existing !== undefined && existing !== desired && (!old || old.path !== path || hash(existing) !== old.hash)) throw new Error('既存ファイルがAACL生成後に変更されています。内容を確認してください。');
-          if (existingPolicy !== undefined && existingPolicy !== (old ? ownedPolicy : desiredPolicy)) throw new Error('Codex Skill policyがAACL生成後に変更されています。内容を確認してください。');
           if (asset) {
             if (existing !== desired) {
               const temp = `${path}.${process.pid}.tmp`;
               writeFileSync(temp, desired!, { mode: 0o600, flag: 'wx' });
               renameSync(temp, path);
             }
-            if (policyPath && existingPolicy !== desiredPolicy) {
-              const temp = `${policyPath}.${process.pid}.tmp`;
-              writeFileSync(temp, desiredPolicy!, { mode: 0o600, flag: 'wx' });
-              renameSync(temp, policyPath);
-            }
             if (oldPathExists) {
               if (lstatSync(old!.path).isSymbolicLink() || hash(readFileSync(old!.path, 'utf8')) !== old!.hash) throw new Error('以前の入口がAACL生成後に変更されています。内容を確認してください。');
               unlinkSync(old!.path);
-              removeEmptyCodexSkillDirectory(target.runtime, old!.path);
-            }
-            if (oldPolicyExists) {
-              if (lstatSync(oldPolicyPath!).isSymbolicLink() || readFileSync(oldPolicyPath!, 'utf8') !== ownedPolicy) throw new Error('以前のCodex Skill policyがAACL生成後に変更されています。内容を確認してください。');
-              unlinkSync(oldPolicyPath!);
               removeEmptyCodexSkillDirectory(target.runtime, old!.path);
             }
             const implicitInvocation = asset.kind === 'skill' && boundSkillIds.has(asset.id);
             if (!old || old.path !== path || old.hash !== hash(desired!) || old.implicitInvocation !== implicitInvocation) this.core.store.put('runtime-entry', { id: old?.id, targetId: target.id, assetId, path, hash: hash(desired!), active: true, implicitInvocation });
           } else if (old) {
             if (existing !== undefined) { unlinkSync(path); removeEmptyCodexSkillDirectory(target.runtime, path); }
-            if (policyPath && existingPolicy !== undefined) { unlinkSync(policyPath); removeEmptyCodexSkillDirectory(target.runtime, path); }
             removeEmptyCodexSkillDirectory(target.runtime, path);
             this.core.store.put('runtime-entry', { ...old, active: false });
           }
           phase = 'runtime-file';
-          this.syncSupportingFiles(target, asset, old, asset ? path : old?.path, previousFiles.filter(file => file.assetId === assetId));
+          const implicitInvocation = asset ? asset.kind === 'skill' && boundSkillIds.has(asset.id) : oldImplicitInvocation;
+          const legacyPolicy = target.runtime === 'codex' ? this.policy(target.runtime, oldImplicitInvocation) : undefined;
+          this.syncSupportingFiles(target, asset, old, asset ? path : old?.path, previousFiles.filter(file => file.assetId === assetId), implicitInvocation, legacyPolicy);
           if (prior && !prior.resolvedAt) this.core.store.put('diagnostic', { ...prior, resolvedAt: new Date().toISOString() });
           if (priorFile && !priorFile.resolvedAt) this.core.store.put('diagnostic', { ...priorFile, resolvedAt: new Date().toISOString() });
           results.push({ targetId: target.id, assetId, ok: true });

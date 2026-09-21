@@ -771,7 +771,7 @@ test('Runtime sync places Skill supporting files independently for Codex and Cla
     assert.equal(statSync(path).mode & 0o777, 0o700);
   }
   const files = f.store.list<{ targetId: string; assetId: string; assetRevision: number; relativePath: string; hash: string; active: boolean; executable: boolean }>('runtime-file');
-  assert.equal(files.filter(file => file.assetId === skill.id && file.active).length, 4);
+  assert.equal(files.filter(file => file.assetId === skill.id && file.active).length, 5);
   assert.ok(files.filter(file => file.assetId === skill.id).every(file => file.assetRevision === skill.revision));
   assert.ok(files.some(file => file.relativePath === 'scripts/browser-api.sh' && file.executable));
 
@@ -795,7 +795,30 @@ test('Runtime sync places Skill supporting files independently for Codex and Cla
   assert.ok(sync.runtimeSync.failureCount > 0);
   assert.equal(readFileSync(editedPath, 'utf8'), 'user edit');
   assert.ok(f.core.diagnostics().diagnostics.some(d => d.code === 'runtime-file' && d.message.includes('変更')));
-  assert.throws(() => assetSchema.parse({ kind: 'skill', name: 'reserved', description: '説明', body: '本文', explanation: '説明', supportingFiles: { 'agents/openai.yaml': '衝突' } }), /予約パス/);
+  assert.doesNotThrow(() => assetSchema.parse({ kind: 'skill', name: 'openai-policy', description: '説明', body: '本文', explanation: '説明', supportingFiles: { 'agents/openai.yaml': 'interface:\n  display_name: Example\n' } }));
+});
+
+test('Codex openai.yaml keeps custom YAML and overrides only AACL policy', async t => {
+  const f = fixture(t), skill = await f.asset('skill', {
+    name: 'custom-openai-policy', useCase: true,
+    supportingFiles: { 'agents/openai.yaml': 'interface:\n  display_name: "Custom Skill"\npolicy:\n  custom_flag: true\n  allow_implicit_invocation: true\n' },
+  });
+  const root = mkdtempSync(join(tmpdir(), 'aacl-openai-yaml-'));
+  await f.call('runtime.register', { runtime: 'codex', platform: 'wsl', scope: 'global', path: root });
+  const policyPath = join(root, 'skills', skill.name, 'agents', 'openai.yaml');
+  const content = readFileSync(policyPath, 'utf8');
+  assert.match(content, /display_name: Custom Skill/);
+  assert.match(content, /custom_flag: true/);
+  assert.match(content, /allow_implicit_invocation: false/);
+  assert.equal((content.match(/allow_implicit_invocation:/g) ?? []).length, 1);
+  assert.ok(f.store.list<{ assetId: string; relativePath: string; active: boolean }>('runtime-file').some(file => file.assetId === skill.id && file.relativePath === 'agents/openai.yaml' && file.active));
+  await f.call('asset.save', {
+    id: skill.id, expectedRevision: skill.revision,
+    asset: { ...f.core.assetPayload(skill), supportingFiles: { 'agents/openai.yaml': 'interface:\n  display_name: "Changed Skill"\npolicy:\n  allow_implicit_invocation: true\n' } }, provenance,
+  });
+  const changed = readFileSync(policyPath, 'utf8');
+  assert.match(changed, /display_name: Changed Skill/);
+  assert.match(changed, /allow_implicit_invocation: false/);
 });
 
 test('Runtime supporting files follow the collision-safe Claude entry name', async t => {

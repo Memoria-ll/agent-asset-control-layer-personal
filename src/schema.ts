@@ -137,7 +137,7 @@ export const assetSchema = z.preprocess(normalizeAssetRecord, assetInputSchema).
 export function supportingFilePathError(path: string) {
   if (path.startsWith('/') || /^[A-Za-z]:[\\/]/.test(path) || path.includes('\\') || path.includes('\0')) return '補助ファイルには安全な相対名を指定してください。';
   if (path.split('/').some(part => part === '..' || part === '.' || !part)) return '補助ファイルには安全な相対名を指定してください。';
-  if (path === 'SKILL.md' || path === 'agents/openai.yaml') return `補助ファイルの予約パスは使用できません: ${path}`;
+  if (path === 'SKILL.md') return `補助ファイルの予約パスは使用できません: ${path}`;
   return undefined;
 }
 

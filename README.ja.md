@@ -124,7 +124,7 @@ Assetの管理先に対応するGlobalまたはProject scopeへ、Claude Codeま
 | Claude Code | `<target>/commands/<slug>.md` |
 | Codex | `<target>/skills/<slug>/SKILL.md` と `<target>/skills/<slug>/agents/openai.yaml` |
 
-入口は`name`、`description`、Asset IDを参照し、指示本文は発火後にAACLから取得します。本文の正本はSQLiteにあります。Windowsの設定先では生成入口から`wsl.exe`を呼び出します。生成後に管理対象の入口が編集された場合、同期はその内容を上書きせず診断へ記録します。Runtime設定先の管理を解除しても、生成済み入口は残ります。
+入口は`name`、`description`、Asset IDを参照し、指示本文は発火後にAACLから取得します。本文の正本はSQLiteにあります。Codex Assetの`agents/openai.yaml`は入力として保持し、出力時にAACLのpolicyを合成します。`policy.allow_implicit_invocation`だけはbinding状態から決まるAACLの値で上書きし、その他のYAML項目は保持します。Windowsの設定先では生成入口から`wsl.exe`を呼び出します。生成後に管理対象の入口が編集された場合、同期はその内容を上書きせず診断へ記録します。Runtime設定先の管理を解除しても、生成済み入口は残ります。
 
 ## ブラウザーUIからWorkflowを開始する
 

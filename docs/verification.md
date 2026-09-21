@@ -12,7 +12,7 @@
 | C09、C19 | `asset.save`、`run.transition` | Stage完了条件必須、遷移元・先・種別、許可されていない遷移の拒否、完了報告 |
 | C11、C12、C13 | `context.get`、`context.handoff` | Role責務と明示Rule、指定Modelの固定情報とサブエージェント継続、分類、Capabilityを入力契約へ追加しない |
 | C14、C15、C28 | `asset.save`、`changeset.preview`、`changeset.apply`、`history.get` | 依頼・理由の保存、完全Assetの全置換、expectedRevisionによる一括Conflict、UI／MCPの共通処理、通常利用をRunにしない |
-| C16、C34 | `runtime.*`、`setup.skills` | Skillのname・description・IDだけを持つ入口、supportingFilesのRuntime別相対配置・hash管理・owner-only権限・削除／改名・ユーザー編集／symlink／予約パス衝突の診断、通常Skillの名称変更、標準Journal Skillの名称変更・削除拒否、journalの直接起動除外、useCase解除、衝突検出、設定先管理解除後のファイル保持、ユーザー所有の定義 |
+| C16、C34 | `runtime.*`、`setup.skills` | Skillのname・description・IDだけを持つ入口、supportingFilesのRuntime別相対配置・hash管理・owner-only権限・削除／改名・ユーザー編集／symlink／SKILL.md予約パス衝突の診断、Codex `agents/openai.yaml`の合成とAACL policy上書き、通常Skillの名称変更、標準Journal Skillの名称変更・削除拒否、journalの直接起動除外、useCase解除、衝突検出、設定先管理解除後のファイル保持、ユーザー所有の定義 |
 | C17 | `run.start`とRun単位の各操作 | 異なるHandle、並行HTTP／MCP要求のContextと状態の分離 |
 | C18 | `run.get`、`run.transition`、`run.cancel`、`run.fail` | duplicate／stale、自己ループ、終端状態、読み取りによる活動時刻、timeout |
 | C20〜C24 | `context.*`、`run.skill.get`、`run.inspect`、`review.run.inspect`、`run.report` | 不変Snapshot、更新後も固定revision、明示参照のみ、取得失敗の理由、提供と使用報告の区別。Workflow実行主体向けMCPから全Snapshot inspectionを除外し、Journalに紐づく完了Runだけbody-lessに参照する |

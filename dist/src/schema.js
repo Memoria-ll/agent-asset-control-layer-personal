@@ -158,7 +158,7 @@ export function supportingFilePathError(path) {
         return '補助ファイルには安全な相対名を指定してください。';
     if (path.split('/').some(part => part === '..' || part === '.' || !part))
         return '補助ファイルには安全な相対名を指定してください。';
-    if (path === 'SKILL.md' || path === 'agents/openai.yaml')
+    if (path === 'SKILL.md')
         return `補助ファイルの予約パスは使用できません: ${path}`;
     return undefined;
 }
