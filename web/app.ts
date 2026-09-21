@@ -37,6 +37,17 @@ const assetSelect = (label: string, key: string, options: string, required = fal
 const formEnd = (label = '保存する') => `<p class="form-error" role="alert"></p><div class="form-footer">${button('close', 'キャンセル')}<button class="primary" type="submit">${htmlText(label)}</button></div>`;
 const provenance = (request: string): Provenance => ({ origin: 'ui', userRequest: request, reason: '', sources: [], proposedBy: '', decision: '' });
 const route = () => (location.hash.slice(1) || 'assets').split('/');
+const recordPageSize = 20;
+type JournalSummary = Omit<Journal, 'raw' | 'parsed'> & { insightCount?: number; pendingInsightCount?: number };
+type ReviewSummary = Omit<ReviewItem, 'body'>;
+type ChangeSetSummary = Omit<ChangeSet, 'operations'>;
+let recordRouteKey = '';
+let recordGeneration = 0;
+let recordLoading = false;
+let recordObserver: IntersectionObserver | undefined;
+let journalListState: { journals: JournalSummary[]; insights: Omit<Insight, 'body'>[]; nextCursor: string | null } = { journals: [], insights: [], nextCursor: null };
+let reviewListState: { reviewItems: ReviewSummary[]; journals: JournalSummary[]; insights: Omit<Insight, 'body'>[]; nextCursor: string | null } = { reviewItems: [], journals: [], insights: [], nextCursor: null };
+let historyListState: { histories: History[]; changeSets: ChangeSetSummary[]; provenance: (Provenance & { id: string })[]; nextCursor: string | null } = { histories: [], changeSets: [], provenance: [], nextCursor: null };
 function notify(message: string) { const t = document.querySelector('#toast')!; t.textContent = message; t.classList.add('visible'); clearTimeout(toastTimer); toastTimer = setTimeout(() => t.classList.remove('visible'), 5000); }
 async function api<T>(operation: string, input: object = {}, write = false): Promise<T> {
   const response = await fetch(`/api/${operation}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(write ? { ...input, operationId: crypto.randomUUID() } : input) });
@@ -56,6 +67,10 @@ function shell(content: string, contentClass = '') {
 async function refresh() {
   if (loading) return;
   loading = true;
+  recordObserver?.disconnect();
+  recordObserver = undefined;
+  recordRouteKey = '';
+  recordGeneration += 1;
   try {
     const [a, p, b, j] = await Promise.all([api<{ assets: Asset[] }>('asset.list', { includeBody: true }), api<{ projects: Project[] }>('project.list'), api<{ bindings: Binding[] }>('binding.list', { scope: selectedScope }), api<{ total: number }>('journal.list', { ...(selectedScope !== 'global' ? { projectId: selectedScope } : {}) })]);
     assets = a.assets; projects = p.projects; bindings = b.bindings;
@@ -115,6 +130,120 @@ function renderAssets() {
   document.querySelector<HTMLElement>('.asset-scroll')?.scrollTo({ top: assetScrollTop });
 }
 
+function recordRoute(page: string) {
+  const key = `${page}:${selectedScope}`;
+  if (recordRouteKey === key) return;
+  recordObserver?.disconnect();
+  recordObserver = undefined;
+  recordRouteKey = key;
+  recordGeneration += 1;
+  recordLoading = false;
+  journalListState = { journals: [], insights: [], nextCursor: null };
+  reviewListState = { reviewItems: [], journals: [], insights: [], nextCursor: null };
+  historyListState = { histories: [], changeSets: [], provenance: [], nextCursor: null };
+}
+function loadMoreMarkup(page: 'journals' | 'review' | 'history', nextCursor: string | null) {
+  return `<div class="record-load-more" data-record-load-more="${page}"${nextCursor ? '' : ' hidden'}><button type="button" class="ghost" data-action="record-load:${page}">過去を読み込む</button><span class="hint">${nextCursor ? 'スクロールすると過去の記録を読み込みます。' : ''}</span></div>`;
+}
+function setupRecordObserver(page: 'journals' | 'review' | 'history') {
+  recordObserver?.disconnect();
+  const sentinel = document.querySelector<HTMLElement>(`[data-record-load-more="${page}"]`);
+  if (!sentinel || sentinel.hidden) return;
+  recordObserver = new IntersectionObserver(entries => {
+    if (entries.some(entry => entry.isIntersecting)) void loadMoreRecords(page);
+  }, { root: document.querySelector('.main-content'), rootMargin: '240px' });
+  recordObserver.observe(sentinel);
+}
+function recordInsightsMarkup(insights: Insight[], review = false) {
+  return insights.map(insight => `<div class="insight"><div class="row spread"><strong>${esc(insight.heading)}</strong>${status(insight.status)}</div><p>${esc(insight.body)}</p>${review ? '' : `<div class="insight-actions">${['pending', 'processed', 'rejected'].filter(value => value !== insight.status).map(value => button(`insight:${insight.id}:${value}`, states[value])).join('')}</div>`}</div>`).join('');
+}
+function journalRecordMarkup(journal: JournalSummary) {
+  const insights = journalListState.insights.filter(insight => insight.journalId === journal.id);
+  const pending = journal.pendingInsightCount ?? insights.filter(insight => insight.status === 'pending').length;
+  return `<details class="glass record-panel" data-lazy-kind="journal" data-id="${esc(journal.id)}"><summary><span class="record-summary-title"><span class="mono">${date(journal.createdAt)}</span><strong>${esc(journal.task || (journal.runId ? 'Runの振り返り' : 'Journal'))}</strong></span><span class="record-summary-meta">${journal.insightCount ?? insights.length}件の気づき${pending ? ` · ${badge(`${pending}件レビュー待ち`, 'amber')}` : ''}<span class="record-chevron" aria-hidden="true">⌄</span></span></summary><div class="record-panel-body"><div class="loading">開くと本文を読み込みます。</div></div></details>`;
+}
+function reviewRecordMarkup(item: ReviewSummary) {
+  const journal = reviewListState.journals.find(value => value.id === item.journalId);
+  return `<details class="glass record-panel" data-lazy-kind="review" data-id="${esc(item.id)}"><summary><span class="record-summary-title"><span class="mono">${journal ? date(journal.createdAt) : ''}</span><strong>${esc(item.heading)}</strong><small>${esc(journal?.task || (journal?.runId ? 'Runの振り返り' : 'Journal'))}</small></span><span class="record-summary-meta">${status(item.status)}<span class="record-chevron" aria-hidden="true">⌄</span></span></summary><div class="record-panel-body"><div class="loading">開くと内容を読み込みます。</div></div></details>`;
+}
+function historyRecordMarkup(changeSet: ChangeSetSummary) {
+  const provenance = historyListState.provenance.find(value => value.id === changeSet.provenanceId);
+  const count = historyListState.histories.filter(history => history.changeSetId === changeSet.id).length;
+  return `<details class="glass record-panel" data-lazy-kind="history" data-id="${esc(changeSet.id)}"><summary><span class="record-summary-title"><span class="mono">${date(changeSet.createdAt)}</span><strong>${esc(provenance?.userRequest || provenance?.reason || (provenance?.origin === 'restore' ? '過去の内容を復元' : '資産・構成の更新'))}</strong></span><span class="record-summary-meta">${count}件の変更${provenance ? ` · ${badge(provenance.origin)}` : ''}<span class="record-chevron" aria-hidden="true">⌄</span></span></summary><div class="record-panel-body"><div class="loading">開くと変更内容を読み込みます。</div></div></details>`;
+}
+function journalDetailMarkup(journal: Journal, insights: Insight[]) {
+  return `<div class="record-detail-head"><div class="badge-row">${badge(journal.runId ? 'Runに関連' : 'Taskに関連')}${status(journal.reviewStatus)}</div><span class="mono">${date(journal.createdAt)}</span></div><section class="record-detail-section"><h3>気づき</h3>${insights.length ? recordInsightsMarkup(insights) : '<p class="hint">気づきはありません。</p>'}</section>${details('Journal原文', journal.raw)}${journal.runId ? `<p class="hint"><a href="#runs/${journal.runId}">関連Run・Snapshot・実行記録を見る →</a></p>` : ''}`;
+}
+function reviewDetailMarkup(item: ReviewItem, journal: Journal, insight: Insight) {
+  const decisions = (['approved', 'deferred', 'rejected'] as const).filter(decision => decision !== item.lastDecision || item.status === 'pending');
+  return `<div class="record-detail-head"><div><div class="badge-row">${status(item.status)}${badge(journal.task || 'Journal')}</div><p class="hint">${date(journal.createdAt)}</p></div></div><p class="prose">${esc(insight.body || item.body)}</p><div class="insight-actions">${decisions.map(decision => button(`review-decide:${item.id}:${decision}`, reviewDecisionLabels[decision], 'small')).join('')}</div>`;
+}
+function historyDetailMarkup(changeSet: ChangeSet, histories: History[], provenance: Provenance & { id: string }) {
+  return `${histories.map(history => `<div class="relation"><div>${esc(name(history.entityId))}<small>${history.before ? `rev. ${history.before} → ${history.after}` : `新規作成 · rev. ${history.after}`}${history.restoredFrom ? ` · 復元元 rev. ${history.restoredFrom}` : ''}</small></div>${history.kind === 'asset' ? button(`history-asset:${history.entityId}`, '差分・復元', 'small') : ''}</div>`).join('')}${details('変更内容', changeSet)}${details('Provenance', provenance)}<footer><span class="mono">${changeSet.id.slice(0, 8)}</span>${changeSet.operations.length ? button(`changeset-restore:${changeSet.id}`, '変更前の状態へ復元', 'small') : ''}</footer>`;
+}
+async function loadRecordPanel(panel: HTMLElement) {
+  const kind = panel.dataset.lazyKind, id = panel.dataset.id, generation = recordGeneration;
+  if (!kind || !id || panel.dataset.loaded === 'true' || panel.dataset.loading === 'true') return;
+  panel.dataset.loading = 'true';
+  try {
+    let html = '';
+    if (kind === 'journal') {
+      const data = await api<{ journal: Journal; insights: Insight[] }>('journal.get', { journalId: id });
+      html = journalDetailMarkup(data.journal, data.insights);
+    } else if (kind === 'review') {
+      const data = await api<{ reviewItem: ReviewItem; journalTask: Journal; insight: Insight }>('review.item.get', { reviewItemId: id });
+      html = reviewDetailMarkup(data.reviewItem, data.journalTask, data.insight);
+    } else if (kind === 'history') {
+      const data = await api<{ changeSets: ChangeSet[]; histories: History[]; provenance: (Provenance & { id: string })[] }>('history.get', { changeSetId: id, includeDetails: true });
+      const changeSet = data.changeSets[0];
+      if (!changeSet) throw new Error('変更履歴が見つかりません。');
+      html = historyDetailMarkup(changeSet, data.histories, data.provenance[0]!);
+    }
+    if (generation === recordGeneration && panel.isConnected) {
+      panel.querySelector<HTMLElement>('.record-panel-body')!.innerHTML = html;
+      panel.dataset.loaded = 'true';
+    }
+  } catch (error) {
+    if (generation === recordGeneration && panel.isConnected) panel.querySelector<HTMLElement>('.record-panel-body')!.innerHTML = `<p class="form-error" role="alert">${esc(errorMessage(error))}</p>`;
+  } finally {
+    delete panel.dataset.loading;
+  }
+}
+async function loadMoreRecords(page: 'journals' | 'review' | 'history') {
+  if (recordLoading || route()[0] !== page) return;
+  const cursor = page === 'journals' ? journalListState.nextCursor : page === 'review' ? reviewListState.nextCursor : historyListState.nextCursor;
+  if (!cursor) return;
+  recordLoading = true;
+  const generation = recordGeneration;
+  const button = document.querySelector<HTMLButtonElement>(`[data-action="record-load:${page}"]`);
+  if (button) { button.disabled = true; button.textContent = '読み込み中…'; }
+  try {
+    if (page === 'journals') {
+      const data = await api<{ journals: JournalSummary[]; insights: Omit<Insight, 'body'>[]; nextCursor: string | null }>('journal.list', { limit: recordPageSize, cursor, ...(selectedScope !== 'global' ? { projectId: selectedScope } : {}) });
+      if (generation !== recordGeneration) return;
+      journalListState.journals.push(...data.journals); journalListState.insights.push(...data.insights); journalListState.nextCursor = data.nextCursor;
+      screenData = { ...screenData, journals: journalListState.journals, insights: journalListState.insights };
+      document.querySelector<HTMLElement>('[data-record-list="journals"]')?.insertAdjacentHTML('beforeend', data.journals.map(journalRecordMarkup).join(''));
+    } else if (page === 'review') {
+      const data = await api<{ reviewItems: ReviewSummary[]; journals: JournalSummary[]; insights: Omit<Insight, 'body'>[]; nextCursor: string | null }>('review.pending', { limit: recordPageSize, cursor, include: ['journalTask', 'insights'], includeBodies: false, ...(selectedScope !== 'global' ? { projectId: selectedScope } : {}) });
+      if (generation !== recordGeneration) return;
+      reviewListState.reviewItems.push(...data.reviewItems); reviewListState.journals.push(...data.journals); reviewListState.insights.push(...data.insights); reviewListState.nextCursor = data.nextCursor;
+      screenData = { ...screenData, reviewItems: reviewListState.reviewItems, journals: reviewListState.journals, insights: reviewListState.insights };
+      document.querySelector<HTMLElement>('[data-record-list="review"]')?.insertAdjacentHTML('beforeend', data.reviewItems.map(reviewRecordMarkup).join(''));
+    } else {
+      const data = await api<{ histories: History[]; changeSets: ChangeSetSummary[]; provenance: (Provenance & { id: string })[]; nextCursor: string | null }>('history.get', { limit: recordPageSize, cursor });
+      if (generation !== recordGeneration) return;
+      historyListState.histories.push(...data.histories); historyListState.changeSets.push(...data.changeSets); historyListState.provenance.push(...data.provenance); historyListState.nextCursor = data.nextCursor;
+      screenData = { ...screenData, ...historyListState };
+      document.querySelector<HTMLElement>('[data-record-list="history"]')?.insertAdjacentHTML('beforeend', data.changeSets.map(historyRecordMarkup).join(''));
+    }
+    const next = page === 'journals' ? journalListState.nextCursor : page === 'review' ? reviewListState.nextCursor : historyListState.nextCursor;
+    const sentinel = document.querySelector<HTMLElement>(`[data-record-load-more="${page}"]`);
+    if (sentinel) { sentinel.hidden = !next; sentinel.querySelector('button')!.textContent = '過去を読み込む'; sentinel.querySelector('.hint')!.textContent = next ? 'スクロールすると過去の記録を読み込みます。' : ''; }
+    setupRecordObserver(page);
+  } catch (error) { notify(errorMessage(error)); }
+  finally { recordLoading = false; if (button) button.disabled = false; }
+}
 async function render() {
   const [page, selectedId] = route();
   if (page === 'assets') { renderAssets(); return; }
@@ -134,23 +263,33 @@ async function render() {
       shell(pageHeading(esc(name(run.workflowId)), `${esc(run.instruction)} · rev. ${run.workflowRevision}`, `<a href="#runs" class="badge">← Run一覧</a>`) + `<div class="glass card"><div class="row spread"><div class="badge-row">${status(run.status)}${badge(run.runtime)}${badge(labelScope(run.projectId ?? 'global'))}</div><span class="mono">${date(run.createdAt)}</span></div>${diagram(detail.snapshot.workflow)}<div class="row spread"><div><h3>現在の工程: ${esc(currentStage.name)}</h3><p class="hint">担当Role: ${esc(currentRoleName)}</p><p class="hint">Model: ${currentModel ? `${esc(currentModel.name)} / ${esc(currentModel.modelName)}（サブエージェント実行）${currentModel.choices?.length ? `<br>選択肢: ${esc(selectedChoiceSummary(currentModel, currentModelSelections))}` : ''}` : 'Runtimeの通常実行'}</p>${currentStage.additionalInstructions ? `<section class="section"><strong>追加指示</strong><p class="prose">${esc(currentStage.additionalInstructions)}</p></section>` : ''}</div>${run.status === 'active' ? button(`run-cancel:${run.id}`, 'Runを中止', 'danger small') : ''}</div><div class="row wrap">${transitions.map(t => `<div class="transition-option">${button(`run-transition:${run.id}:${t.id}`, t.label, 'primary small')}<small>条件: ${esc(t.condition)}</small></div>`).join('')}${button(`journal-new:${run.id}`, 'Journalを記録')}</div><div class="statline"><span><strong>${detail.deliveries.length}</strong>提供記録</span><span><strong>${detail.deliveries.reduce((s, d) => s + d.bytes, 0).toLocaleString()}</strong>bytes 提供</span><span><strong>${detail.journals.length}</strong>Journal</span></div></div><div class="grid-two section"><article class="glass card"><h3>進行記録</h3><div class="timeline">${detail.events.map(e => `<article><small>${date(e.createdAt)}</small><strong>${esc(e.type)}</strong>${details('報告・根拠', e.data)}</article>`).join('')}</div></article><article class="glass card"><h3>Contextの提供</h3>${detail.deliveries.map(d => `<div class="relation"><div>${esc(d.target)}<small>${esc(d.stageId)} · ${d.bytes.toLocaleString()} bytes${d.assetRevision ? ` · rev. ${d.assetRevision}` : ''}</small></div>${badge(d.success ? '提供済み' : '取得失敗', d.success ? '' : 'red')}</div>`).join('')}${details('固定Snapshot・参照経路', detail.snapshot)}${details('提供内容・取得失敗の理由', detail.deliveries)}</article></div>`);
     } else shell(pageHeading('Workflow Run', '実行ごとに資産の版を固定し、進行と提供したContextを記録します。', button('run-new', '＋ Runを開始', 'primary')) + `<div class="glass">${data.runs.length ? `<table class="table"><thead><tr><th>Workflow / 依頼</th><th>状態</th><th>工程</th><th>Runtime</th><th>開始</th></tr></thead><tbody>${data.runs.map(r => `<tr><td><a href="#runs/${r.id}"><strong>${esc(name(r.workflowId))}</strong><p class="hint">${esc(r.instruction)}</p></a></td><td>${status(r.status)}</td><td>${esc(r.stageId)}</td><td>${esc(r.runtime)}</td><td class="mono">${date(r.createdAt)}</td></tr>`).join('')}</tbody></table>` : empty('まだ実行記録はありません', '使うWorkflowを明示して、最初のRunを開始します。', button('run-new', 'Workflowを選ぶ'))}</div>`);
   } else if (page === 'journals' || page === 'review') {
-    const data = await api<{ journals: Journal[]; insights: Insight[]; reviewItems?: ReviewItem[] }>(page === 'review' ? 'review.pending' : 'journal.list', page === 'review' ? { ...(selectedScope !== 'global' ? { projectId: selectedScope } : {}), include: ['journalTask', 'insights', 'proposalRefs'], includeBodies: true } : {});
-    const proposals = page === 'review' ? await api<{ proposals: Proposal[]; decisions: Decision[]; changeSets: ChangeSet[] }>('proposal.list', { includeChanges: true }) : { proposals: [], decisions: [], changeSets: [] };
-    const journals = data.journals.filter(j => selectedScope === 'global' || j.projectId === selectedScope || !j.projectId);
-    screenData = { ...data, ...proposals };
-    shell(pageHeading(page === 'review' ? 'Journal Review' : 'Journal', page === 'review' ? '気づきを読み、具体的な改善を判断して、次の開発へ。' : 'どう進め、道具や指示がどう働いたかを残します。', page === 'review' ? button('proposal-new', '＋ 改善を提案', 'primary') : button('journal-new', '＋ Journalを記録', 'primary')) + (page === 'review' && proposals.proposals.length ? `<div class="stack">${proposals.proposals.map(p => {
-      const d = proposals.decisions.find(d => d.proposalId === p.id), applied = proposals.changeSets.some(c => c.proposalId === p.id);
-      return `<article class="glass card"><div class="row spread"><h2>${esc(p.title)}</h2>${applied ? badge('適用済み', 'green') : d ? status(d.choice) : badge('判断待ち', 'amber')}</div><p class="prose">${esc(p.proposedChange)}</p><p>理由: ${esc(p.reason)}</p><p class="hint">根拠Journal ${p.evidenceJournalIds.length}件 · 対象の気づき ${p.insightIds.length}件</p>${details('変更内容・影響する資産・管理先', p)}${applied ? '' : `<footer><div class="row">${button(`proposal-decide:${p.id}:approved`, '承認', 'small')}${button(`proposal-decide:${p.id}:deferred`, '保留', 'small')}${button(`proposal-decide:${p.id}:rejected`, '却下', 'small')}</div>${d?.choice === 'approved' ? button(`proposal-apply:${p.id}`, '承認した変更を適用', 'primary') : ''}</footer>`}</article>`;
-    }).join('')}</div><div class="spacer"></div>` : '') + `<div class="stack">${journals.length ? journals.map(j => {
-      const reviewCards = page === 'review' && data.reviewItems ? data.reviewItems.filter(item => item.journalId === j.id).map(item => `<div class="insight"><div class="row spread"><strong>${esc(item.heading)}</strong>${status(item.status)}</div><p>${esc(item.body)}</p><div class="insight-actions">${(['approved', 'deferred', 'rejected'] as const).filter(decision => decision !== item.lastDecision || item.status === 'pending').map(decision => button(`review-decide:${item.id}:${decision}`, reviewDecisionLabels[decision], 'small')).join('')}</div></div>`).join('') : data.insights.filter(i => i.journalId === j.id).map(i => `<div class="insight"><div class="row spread"><strong>${esc(i.heading)}</strong>${status(i.status)}</div><p>${esc(i.body)}</p><div class="insight-actions">${['pending', 'processed', 'rejected'].filter(s => s !== i.status).map(s => button(`insight:${i.id}:${s}`, states[s])).join('')}</div></div>`).join('');
-      return `<article class="glass card"><div class="row spread"><div><span class="mono">${date(j.createdAt)}</span><h2>${esc(j.task || (j.runId ? 'Runの振り返り' : 'Journal'))}</h2></div>${badge(j.runId ? 'Runに関連' : 'Taskに関連')}</div>${reviewCards}${details('Journal原文', j.raw)}${j.runId ? `<p class="hint"><a href="#runs/${j.runId}">関連Run・Snapshot・実行記録を見る →</a></p>` : ''}</article>`;
-    }).join('') : `<div class="glass">${empty(page === 'review' ? 'レビュー待ちの気づきはありません' : '気づきを、次の改善へ', '書き残したい発見や摩擦があるときに、Journalを記録してください。', button('journal-new', 'Journalを記録'))}</div>`}</div>`);
+    recordRoute(page);
+    if (page === 'journals') {
+      const data = await api<{ journals: JournalSummary[]; insights: Omit<Insight, 'body'>[]; nextCursor: string | null }>('journal.list', { limit: recordPageSize, ...(selectedScope !== 'global' ? { projectId: selectedScope } : {}) });
+      journalListState = data;
+      screenData = { journals: data.journals, insights: data.insights };
+      shell(pageHeading('Journal', 'タイトルを一覧し、必要な記録だけ開いて本文を読み込みます。', button('journal-new', '＋ Journalを記録', 'primary')) + `<div class="record-intro"><span>${data.journals.length}件を表示中</span><span class="hint">本文は開いた項目だけ読み込みます。</span></div><div class="stack record-list" data-record-list="journals">${data.journals.length ? data.journals.map(journalRecordMarkup).join('') : `<div class="glass">${empty('気づきを、次の改善へ', '書き残したい発見や摩擦があるときに、Journalを記録してください。', button('journal-new', 'Journalを記録'))}</div>`}</div>${loadMoreMarkup('journals', data.nextCursor)}`);
+      setupRecordObserver('journals');
+    } else {
+      const [data, proposals] = await Promise.all([
+        api<{ reviewItems: ReviewSummary[]; journals: JournalSummary[]; insights: Omit<Insight, 'body'>[]; nextCursor: string | null }>('review.pending', { ...(selectedScope !== 'global' ? { projectId: selectedScope } : {}), include: ['journalTask', 'insights'], includeBodies: false, limit: recordPageSize }),
+        api<{ proposals: Proposal[]; decisions: Decision[]; changeSets: ChangeSetSummary[] }>('proposal.list', { includeChanges: false }),
+      ]);
+      reviewListState = data;
+      screenData = { ...data, ...proposals };
+      const proposalMarkup = proposals.proposals.length ? `<div class="stack">${proposals.proposals.map(p => {
+        const d = proposals.decisions.find(d => d.proposalId === p.id), applied = proposals.changeSets.some(c => c.proposalId === p.id);
+        return `<article class="glass card"><div class="row spread"><h2>${esc(p.title)}</h2>${applied ? badge('適用済み', 'green') : d ? status(d.choice) : badge('判断待ち', 'amber')}</div><p class="prose">${esc(p.proposedChange)}</p><p>理由: ${esc(p.reason)}</p><p class="hint">根拠Journal ${p.evidenceJournalIds.length}件 · 対象の気づき ${p.insightIds.length}件</p>${details('変更内容・影響する資産・管理先', p)}${applied ? '' : `<footer><div class="row">${button(`proposal-decide:${p.id}:approved`, '承認', 'small')}${button(`proposal-decide:${p.id}:deferred`, '保留', 'small')}${button(`proposal-decide:${p.id}:rejected`, '却下', 'small')}</div>${d?.choice === 'approved' ? button(`proposal-apply:${p.id}`, '承認した変更を適用', 'primary') : ''}</footer>`}</article>`;
+      }).join('')}</div><div class="spacer"></div>` : '';
+      shell(pageHeading('Journal Review', '気づきのタイトルを一覧し、必要な内容だけ開いて判断します。', button('proposal-new', '＋ 改善を提案', 'primary')) + proposalMarkup + `<div class="record-intro"><span>${data.reviewItems.length}件を表示中</span><span class="hint">本文・判断操作は開いた項目だけ読み込みます。</span></div><div class="stack record-list" data-record-list="review">${data.reviewItems.length ? data.reviewItems.map(reviewRecordMarkup).join('') : `<div class="glass">${empty('レビュー待ちの気づきはありません', 'Journalを記録すると、ここで改善の判断ができます。', button('journal-new', 'Journalを記録'))}</div>`}</div>${loadMoreMarkup('review', data.nextCursor)}`);
+      setupRecordObserver('review');
+    }
   } else if (page === 'history') {
-    const data = await api<{ histories: History[]; changeSets: ChangeSet[]; provenance: (Provenance & { id: string })[] }>('history.get'); screenData = data;
-    shell(pageHeading('変更履歴', '何を変えたかと、なぜ変えたかをたどります。') + `<div class="stack">${data.changeSets.length ? data.changeSets.map(c => {
-      const p = data.provenance.find(p => p.id === c.provenanceId);
-      return `<article class="glass card"><div class="row spread"><div><span class="mono">${date(c.createdAt)}</span><h3>${esc(p?.userRequest || p?.reason || (p?.origin === 'restore' ? '過去の内容を復元' : '資産・構成の更新'))}</h3></div>${badge(p?.origin ?? '')}</div>${data.histories.filter(h => h.changeSetId === c.id).map(h => `<div class="relation"><div>${esc(name(h.entityId))}<small>${h.before ? `rev. ${h.before} → ${h.after}` : `新規作成 · rev. ${h.after}`}${h.restoredFrom ? ` · 復元元 rev. ${h.restoredFrom}` : ''}</small></div>${h.kind === 'asset' ? button(`history-asset:${h.entityId}`, '差分・復元', 'small') : ''}</div>`).join('')}${details('変更内容', c)}${details('Provenance', p)}<footer><span class="mono">${c.id.slice(0, 8)}</span>${c.operations.length ? button(`changeset-restore:${c.id}`, '変更前の状態へ復元', 'small') : ''}</footer></article>`;
-    }).join('') : `<div class="glass">${empty('変更はまだありません', '資産や紐づけを保存すると、履歴と変更理由を確認できます。')}</div>`}</div>`);
+    recordRoute(page);
+    const data = await api<{ histories: History[]; changeSets: ChangeSetSummary[]; provenance: (Provenance & { id: string })[]; nextCursor: string | null }>('history.get', { limit: recordPageSize });
+    historyListState = data; screenData = data;
+    shell(pageHeading('変更履歴', '変更のタイトルを一覧し、必要なChange Setだけ開いて詳細を読み込みます。') + `<div class="record-intro"><span>${data.changeSets.length}件を表示中</span><span class="hint">変更内容とProvenanceは開いた項目だけ読み込みます。</span></div><div class="stack record-list" data-record-list="history">${data.changeSets.length ? data.changeSets.map(historyRecordMarkup).join('') : `<div class="glass">${empty('変更はまだありません', '資産や紐づけを保存すると、履歴と変更理由を確認できます。')}</div>`}</div>${loadMoreMarkup('history', data.nextCursor)}`);
+    setupRecordObserver('history');
   } else if (page === 'diagnostics') {
     const data = await api<{ diagnostics: Diagnostic[]; costs: { runId: string; stageId: string; roleIds: string[]; target: string; bytes: number; deliveries: number; runtime: string }[] }>('diagnostics.get');
     const missingAssetIds = [...new Set(data.diagnostics.map(d => diagnosticAssetId(d.evidence)).filter((id): id is string => Boolean(id) && !assets.some(asset => asset.id === id)))];
@@ -303,6 +442,7 @@ async function action(value: string, target: HTMLElement) {
   if (key === 'close') { dialog.close(); return; }
   if (key === 'asset-close') { location.hash = 'assets'; return; }
   if (key === 'refresh') { await refresh(); return; }
+  if (key === 'record-load') { await loadMoreRecords(id as 'journals' | 'review' | 'history'); return; }
   if (key === 'filter') { filter = id; renderAssets(); return; }
   if (key === 'asset-new' || key === 'new-kind') { assetEditor(undefined, (id as Asset['kind']) || 'skill'); return; }
   if (key === 'asset-edit') { assetEditor(a); return; }
@@ -401,7 +541,12 @@ async function action(value: string, target: HTMLElement) {
     modal('資産の履歴と復元', `<p>${esc(current.name)} · 現在 rev. ${current.revision}</p><div class="stack">${data.revisions.map(r => `<div class="editor-row"><div class="row spread"><strong>rev. ${r.revision}</strong><span class="mono">${date(r.updatedAt)}</span>${r.revision !== current.revision ? button(`asset-restore:${id}:${r.revision}`, 'この版を復元', 'small') : badge('現在')}</div><div class="diff"><div><small>この版</small><pre>${esc(JSON.stringify(r, null, 2))}</pre></div><div><small>現在</small><pre>${esc(JSON.stringify(current, null, 2))}</pre></div></div></div>`).join('')}</div>`); return;
   }
   if (key === 'asset-restore') { await api('asset.restore', { assetId: id, revision: Number(extra), expectedRevision: a!.revision }, true); dialog.close(); notify('選択した版を新しいrevisionとして復元しました。'); await refresh(); return; }
-  if (key === 'changeset-restore') { const c = (screenData.changeSets as ChangeSet[]).find(c => c.id === id)!; modal('変更前の状態へ復元', `<p>対象の変更前の内容を、新しいrevisionとして保存します。</p>${details('対象の変更', c)}<form data-form="changeset-restore" data-id="${id}">${formEnd('復元する')}</form>`); return; }
+  if (key === 'changeset-restore') {
+    const loaded = await api<{ changeSets: ChangeSet[] }>('history.get', { changeSetId: id, includeDetails: true });
+    const c = loaded.changeSets[0];
+    if (!c) throw new Error('変更履歴が見つかりません。');
+    modal('変更前の状態へ復元', `<p>対象の変更前の内容を、新しいrevisionとして保存します。</p>${details('対象の変更', c)}<form data-form="changeset-restore" data-id="${id}">${formEnd('復元する')}</form>`); return;
+  }
   if (key === 'project-new') { modal('Projectを登録', `<form data-form="project" class="form-stack">${field('Project名', 'name')}${field('Project root（絶対パス）', 'root')}<p class="hint">Globalの紐づけをコピーし、Claude Code / Codexの入口を作成します。</p>${formEnd('Projectを登録')}</form>`); return; }
   if (key === 'common-edit') { const common = screenData.common as Common, rules = assets.filter(a => a.kind === 'rule' && (a.scope === 'global' || a.scope === selectedScope)); modal('Project共通のRule', `<form data-form="common" class="form-stack">${rules.length ? assetCheckboxPicker('Rule', 'ruleIds', rules, common.ruleIds) : '<p>先にRuleを作成してください。</p>'}${formEnd()}</form>`); return; }
   if (key === 'runtime-new') {
@@ -488,6 +633,10 @@ async function submit(form: HTMLFormElement) {
   dialog.close(); notify(key === 'asset-delete' ? 'Assetを削除し、参照を解除しました。' : key === 'run' ? 'Runを開始しました。' : '保存しました。'); await refresh();
 }
 
+document.addEventListener('toggle', event => {
+  const panel = event.target instanceof HTMLDetailsElement ? event.target : null;
+  if (panel?.open && panel.dataset.lazyKind) void loadRecordPanel(panel);
+}, true);
 document.addEventListener('click', event => {
   const templateButton = (event.target as HTMLElement).closest<HTMLButtonElement>('[data-template]');
   if (templateButton) {

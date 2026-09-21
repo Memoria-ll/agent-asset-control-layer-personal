@@ -275,6 +275,7 @@ test('C33: Chromium UI assigns existing and new Roles from Workflow editor, runs
   await dialog.getByRole('button', { name: 'Journalを保存' }).click();
   await expect(dialog).not.toBeVisible();
   await page.getByRole('link', { name: 'Journal Review', exact: true }).click();
+  await page.locator('[data-record-list="review"] .record-panel').last().locator('summary').click();
   await expect(page.getByText('改善候補の説明が不足した', { exact: true })).toBeVisible();
   await page.getByRole('button', { name: '＋ 改善を提案' }).click();
   await dialog.getByLabel('提案名', { exact: true }).fill('報告を具体化');
@@ -294,6 +295,7 @@ test('C33: Chromium UI assigns existing and new Roles from Workflow editor, runs
   await expect(dialog).not.toBeVisible();
   await page.getByRole('button', { name: '承認した変更を適用' }).click();
   await expect(page.getByText('適用済み', { exact: true })).toBeVisible();
+  await page.locator('[data-record-list="review"] .record-panel').first().locator('summary').click();
   await expect(page.getByText('次回に保留する観測', { exact: true })).toBeVisible();
   await page.getByRole('link', { name: '資産ライブラリ', exact: true }).click();
   await page.getByRole('searchbox').fill('検証手順');

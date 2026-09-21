@@ -104,7 +104,7 @@ export class Operations {
       return { report: core.event(run, 'usage-reported', { body: p.body, usedAssets: p.usedAssetIds.map(id => ({ id, revision: snapshot.assets.find(a => a.id === id)!.revision })), evidence: p.evidence }) };
     });
     read('journal.template', '固定見出しMarkdownテンプレートを取得', {}, () => ({ template: journalTemplate }));
-    read('journal.list', 'Journalを一覧', { projectId: id.optional() }, p => core.journalList(p.projectId));
+    read('journal.list', 'Journalを概要一覧。本文はjournal.getで必要な対象だけ取得する', { projectId: id.optional(), limit: z.int().positive().max(100).default(20), cursor: z.string().nullable().optional(), includeBodies: z.boolean().default(false) }, p => core.journalList(p));
     read('journal.get', 'Journalと関連する気づきを取得', { journalId: id }, p => ({ journal: store.get<Journal>(p.journalId, 'journal'), insights: store.list<Insight>('insight').filter(i => i.journalId === p.journalId) }));
     write('journal.write', '有効なJournal記録設定のもとでMarkdown原文をRunまたはTaskへ関連づけ', { body: z.string().min(1).refine(s => s.trim().length > 0), contextHandle: id.optional(), postRunId: id.optional(), task: text.optional() }, p => core.writeJournal(p));
     read('review.pending', 'Review項目を関連ID中心で取得。必要に応じて本文・変更内容を含める', {
@@ -120,7 +120,11 @@ export class Operations {
       if (p.includeChanges) return proposal;
       const { changes: _changes, ...summary } = proposal;
       return summary;
-    }), decisions: store.list<Decision>('decision'), changeSets: store.list<ChangeSet>('changeset').filter(c => c.proposalId) }));
+    }), decisions: store.list<Decision>('decision'), changeSets: store.list<ChangeSet>('changeset').filter(c => c.proposalId).map(changeSet => {
+      if (p.includeChanges) return changeSet;
+      const { operations: _operations, ...summary } = changeSet;
+      return summary;
+    }) }));
     read('proposal.get', '改善提案を関連判断・適用結果とともに取得', { proposalId: id, includeChanges: z.boolean().default(false) }, p => core.proposalGet(p.proposalId, p.includeChanges));
     write('proposal.save', '具体的な変更と根拠を含む改善提案を保存', {
       id: id.optional(), title: text, observedContext: text, proposedChange: text, reason: text,
@@ -131,7 +135,7 @@ export class Operations {
     read('changeset.preview', 'Change Setを保存せず検証するDry Run。各更新・解除にはexpectedRevisionを含め、valid=falseなら全体を適用しない', { changes: z.array(changeSchema).min(1), provenance: provenance.optional() }, p => core.previewChanges(p.changes, p.provenance ?? { origin: 'ui', reason: 'Change SetのDry Run', userRequest: '', sources: [], proposedBy: '', decision: '' }));
     write('changeset.apply', 'expectedRevision付きの具体的なasset.save / asset.create / binding.save / binding.remove / common.saveを一括適用する。1件でもConflictなら全体を適用しない', { changes: z.array(changeSchema).min(1), provenance }, p => core.applyChanges(p.changes, p.provenance), true);
     write('changeset.restore', 'Change Set適用前の内容を新revisionとして復元する。適用後revisionから変更されていればConflictとして中止する', { changeSetId: id }, p => core.restoreChangeSet(p.changeSetId), true);
-    read('history.get', '変更履歴・revision・由来・Change Setを確認', { entityId: id.optional() }, p => ({ histories: store.list<History>('history').filter(h => !p.entityId || h.entityId === p.entityId), revisions: p.entityId ? store.revisions(p.entityId) : [], changeSets: store.list<ChangeSet>('changeset'), provenance: store.list('provenance') }));
+    read('history.get', '変更履歴を概要一覧。Change Setの詳細はchangeSetIdで取得する', { entityId: id.optional(), changeSetId: id.optional(), limit: z.int().positive().max(100).default(20), cursor: z.string().nullable().optional(), includeDetails: z.boolean().default(false) }, p => core.history(p));
     read('diagnostics.get', '参照・状態・反復遷移と実提供量を診断', {}, () => core.diagnostics());
     read('costs.get', '実際のContext提供量をRun・Stage・Role・対象別に比較', {}, () => ({ costs: core.costs() }));
     read('runtime.list', 'Runtime設定先と入口・補助ファイルの状態を確認', {}, () => ({ targets: store.list<RuntimeTarget>('runtime-target'), entries: store.list('runtime-entry'), files: store.list<RuntimeFile>('runtime-file') }));
