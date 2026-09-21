@@ -165,7 +165,30 @@ export const changeSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('common.save'), projectId: id, expectedRevision: revision, ruleIds: z.array(id) }).strict(),
 ]);
 export const journalHeadings = ['Task', '実際に使ったもの', '良かった点', '困った点', '改善の種', '根拠・確かさ', '日付', 'Project', 'Branch', 'Type'] as const;
-export const journalTemplate = journalHeadings.map(h => `## ${h}\n`).join('\n');
+export const journalTemplate = [
+  '## Task',
+  '',
+  '## 実際に使ったもの',
+  'tools: []',
+  'skills: []',
+  'rules: []',
+  '',
+  '## 良かった点',
+  '',
+  '## 困った点',
+  '',
+  '## 改善の種',
+  '',
+  '## 根拠・確かさ',
+  '',
+  '## 日付',
+  '',
+  '## Project',
+  '',
+  '## Branch',
+  '',
+  '## Type',
+].join('\n');
 export function parseJournal(raw: string) {
   const sections: Record<string, string> = {};
   const fragments: { heading: string; body: string }[] = [];
