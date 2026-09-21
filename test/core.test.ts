@@ -544,6 +544,8 @@ test('C25: Markdown raw, duplicate headings, unknown fragments, fences, independ
   assert.ok(parsed.fragments.some(f => f.heading === '未知' && f.body.includes('コードの中')));
   const result = await f.call<{ journal: Journal; insights: Insight[] }>('journal.write', { body: raw });
   assert.equal(result.journal.raw, raw); assert.equal(result.journal.task, 'タスク');
+  const journalList = await f.call<{ journals: Journal[]; insights: Insight[]; total: number }>('journal.list');
+  assert.equal(journalList.total, 1); assert.equal(journalList.journals.length, 1); assert.equal(journalList.insights.length, 3);
   await f.call('insight.status', { insightId: result.insights[0].id, status: 'processed' });
   assert.equal((await f.call<{ insights: Insight[] }>('review.pending')).insights.length, 2);
   await assert.rejects(f.call('journal.write', { body: '関連づけなし' }), /Task/);

@@ -309,6 +309,19 @@ pre {
   box-shadow:0 3px 12px #30577909;
   color:#245e83
 }
+.nav-notification {
+  display:grid;
+  place-items:center;
+  min-width:20px;
+  height:20px;
+  padding:0 4px;
+  margin-left:auto;
+  border-radius:999px;
+  background:#bd5d70;
+  box-shadow:0 2px 7px #bd5d7040, inset 0 1px #fff5;
+  color:#fff;
+  font:700 9px/1 ui-monospace,monospace
+}
 .nav-icon {
   width:19px;
   height:19px;
