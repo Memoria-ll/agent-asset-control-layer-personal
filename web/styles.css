@@ -309,6 +309,19 @@ pre {
   box-shadow:0 3px 12px #30577909;
   color:#245e83
 }
+.nav-notification {
+  display:grid;
+  place-items:center;
+  min-width:20px;
+  height:20px;
+  padding:0 4px;
+  margin-left:auto;
+  border-radius:999px;
+  background:#bd5d70;
+  box-shadow:0 2px 7px #bd5d7040, inset 0 1px #fff5;
+  color:#fff;
+  font:700 9px/1 ui-monospace,monospace
+}
 .nav-icon {
   width:19px;
   height:19px;
@@ -945,6 +958,39 @@ pre {
   display:grid;
   gap:18px
 }
+.asset-picker {
+  display:grid;
+  gap:6px;
+  min-width:0
+}
+.asset-picker-search {
+  margin-top:0;
+  padding:8px 10px;
+  background:#ffffff8c;
+  font-size:11px
+}
+.asset-picker select {
+  margin-top:0
+}
+.asset-picker-empty {
+  margin:0
+}
+.asset-picker-items {
+  display:grid;
+  gap:7px;
+  max-height:220px;
+  overflow:auto;
+  padding:2px 0
+}
+.asset-picker-item {
+  padding:7px 9px;
+  border:1px solid transparent;
+  border-radius:9px
+}
+.asset-picker-item:hover {
+  border-color:#c3d8e1;
+  background:#ffffff85
+}
 .hint {
   font-size:11px;
   line-height:1.8;
@@ -1346,6 +1392,53 @@ pre {
   white-space:pre-wrap;
   font-size:12px;
   margin:10px 0
+}
+.diagnostic-asset {
+  display:flex;
+  align-items:center;
+  gap:10px;
+  margin:12px 0 2px;
+  padding:10px 12px;
+  border:1px solid #c6dbe5;
+  border-radius:10px;
+  background:#ffffffa8;
+  color:var(--ink)
+}
+.diagnostic-asset:hover {
+  background:#fff;
+  box-shadow:0 3px 12px #31526312
+}
+.diagnostic-asset .type-icon {
+  width:31px;
+  height:31px
+}
+.diagnostic-asset-info {
+  display:grid;
+  min-width:0;
+  flex:1
+}
+.diagnostic-asset-label {
+  color:#6f8794;
+  font-size:10px;
+  line-height:1.4
+}
+.diagnostic-asset-info strong {
+  overflow:hidden;
+  text-overflow:ellipsis;
+  white-space:nowrap;
+  font-size:13px
+}
+.diagnostic-asset-info small {
+  margin-top:2px
+}
+.diagnostic-asset-id {
+  overflow-wrap:anywhere
+}
+.diagnostic-asset-open {
+  flex:none;
+  color:var(--blue);
+  font-size:11px;
+  font-weight:650
 }
 .insight-actions {
   display:flex;

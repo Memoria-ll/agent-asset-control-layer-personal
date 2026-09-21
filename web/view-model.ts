@@ -1,5 +1,16 @@
 import type { Asset, Binding, Change } from '../src/schema.ts';
 
+export function diagnosticAssetId(evidence: unknown) {
+  if (!evidence || typeof evidence !== 'object' || Array.isArray(evidence)) return undefined;
+  const assetId = (evidence as { assetId?: unknown }).assetId;
+  return typeof assetId === 'string' ? assetId : undefined;
+}
+
+export function diagnosticAsset(evidence: unknown, assets: Asset[]) {
+  const assetId = diagnosticAssetId(evidence);
+  return assetId ? assets.find(asset => asset.id === assetId) : undefined;
+}
+
 export function relatedWorkflows(assetId: string, assets: Asset[], bindings: Binding[]) {
   const result: { workflow: Asset; stageId?: string; via: string[]; binding: Binding }[] = [];
   const walk = (target: string, via: string[], visited: Set<string>, attachment?: Binding) => {

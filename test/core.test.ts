@@ -9,7 +9,7 @@ import { Core, normalizeRoot } from '../src/core.ts';
 import { Operations } from '../src/operations.ts';
 import { assetSchema, parseJournal } from '../src/schema.ts';
 import { backupData, exportData, restoreBackup } from '../src/maintenance.ts';
-import { relatedWorkflows, stageRoleBindingChanges, workflowDiagram } from '../web/view-model.ts';
+import { diagnosticAsset, diagnosticAssetId, relatedWorkflows, stageRoleBindingChanges, workflowDiagram } from '../web/view-model.ts';
 import type { Asset, Binding, ChangeSet, Context, Delivery, ExecutionPlan, Insight, Journal, Project, ReviewItem, Run, RuntimeTarget, Snapshot } from '../src/schema.ts';
 
 const provenance = { origin: 'ai', userRequest: 'テスト用の明示依頼', reason: '挙動の確認' };
@@ -55,6 +55,15 @@ test('Skill metadata separates the human explanation from Runtime description an
   assert.deepEqual(run.context.skillCatalog, [{ id: skill.id, name: skill.name, description: skill.description }]);
   assert.equal('revision' in run.context.skillCatalog[0]!, false);
   assert.equal('taskType' in run.run, false);
+});
+
+test('Diagnostic evidence resolves the concrete Asset from its assetId', async t => {
+  const f = fixture(t);
+  const skill = await f.asset('skill', { name: '具体的な診断対象' });
+  assert.equal(diagnosticAssetId({ assetId: skill.id }), skill.id);
+  assert.equal(diagnosticAsset({ assetId: skill.id }, [skill]), skill);
+  assert.equal(diagnosticAssetId({ target: skill.id }), undefined);
+  assert.equal(diagnosticAsset({ assetId: randomUUID() }, [skill]), undefined);
 });
 
 test('Journal Skills are protected, journal is not a direct entry, and recording can be disabled', async t => {
@@ -535,6 +544,8 @@ test('C25: Markdown raw, duplicate headings, unknown fragments, fences, independ
   assert.ok(parsed.fragments.some(f => f.heading === '未知' && f.body.includes('コードの中')));
   const result = await f.call<{ journal: Journal; insights: Insight[] }>('journal.write', { body: raw });
   assert.equal(result.journal.raw, raw); assert.equal(result.journal.task, 'タスク');
+  const journalList = await f.call<{ journals: Journal[]; insights: Insight[]; total: number }>('journal.list');
+  assert.equal(journalList.total, 1); assert.equal(journalList.journals.length, 1); assert.equal(journalList.insights.length, 3);
   await f.call('insight.status', { insightId: result.insights[0].id, status: 'processed' });
   assert.equal((await f.call<{ insights: Insight[] }>('review.pending')).insights.length, 2);
   await assert.rejects(f.call('journal.write', { body: '関連づけなし' }), /Task/);
