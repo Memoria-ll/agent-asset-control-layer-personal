@@ -833,6 +833,39 @@ pre {
   display:grid;
   gap:18px
 }
+.asset-picker {
+  display:grid;
+  gap:6px;
+  min-width:0
+}
+.asset-picker-search {
+  margin-top:0;
+  padding:8px 10px;
+  background:#ffffff8c;
+  font-size:11px
+}
+.asset-picker select {
+  margin-top:0
+}
+.asset-picker-empty {
+  margin:0
+}
+.asset-picker-items {
+  display:grid;
+  gap:7px;
+  max-height:220px;
+  overflow:auto;
+  padding:2px 0
+}
+.asset-picker-item {
+  padding:7px 9px;
+  border:1px solid transparent;
+  border-radius:9px
+}
+.asset-picker-item:hover {
+  border-color:#c3d8e1;
+  background:#ffffff85
+}
 .hint {
   font-size:11px;
   line-height:1.8;
