@@ -749,6 +749,11 @@ export class Core {
         }
         return { updates: results };
     }
+    journalList(projectId) {
+        const journals = this.store.list('journal').filter(journal => !projectId || journal.projectId === projectId || !journal.projectId);
+        const journalIds = new Set(journals.map(journal => journal.id));
+        return { journals, insights: this.store.list('insight').filter(insight => journalIds.has(insight.journalId)), total: journals.length };
+    }
     review(input = {}) {
         const include = input.include ?? ['journalTask', 'insights', 'proposalRefs'], includeBodies = input.includeBodies ?? false;
         const allInsights = this.store.list('insight'), journalsById = new Map(this.store.list('journal').map(journal => [journal.id, journal])), insightItems = new Map(this.store.list('review-item').map(item => [item.insightId, item]));

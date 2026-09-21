@@ -644,6 +644,11 @@ export class Core {
     }
     return { updates: results };
   }
+  journalList(projectId?: string) {
+    const journals = this.store.list<Journal>('journal').filter(journal => !projectId || journal.projectId === projectId || !journal.projectId);
+    const journalIds = new Set(journals.map(journal => journal.id));
+    return { journals, insights: this.store.list<Insight>('insight').filter(insight => journalIds.has(insight.journalId)), total: journals.length };
+  }
   review(input: { status?: ReviewItem['status']; projectId?: string; include?: ('journalTask' | 'insights' | 'proposalRefs')[]; includeBodies?: boolean; includeChanges?: boolean; limit?: number; cursor?: string | null } = {}) {
     const include = input.include ?? ['journalTask', 'insights', 'proposalRefs'], includeBodies = input.includeBodies ?? false;
     const allInsights = this.store.list<Insight>('insight'), journalsById = new Map(this.store.list<Journal>('journal').map(journal => [journal.id, journal])), insightItems = new Map(this.store.list<ReviewItem>('review-item').map(item => [item.insightId, item]));

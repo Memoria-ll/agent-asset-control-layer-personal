@@ -104,7 +104,7 @@ export class Operations {
       return { report: core.event(run, 'usage-reported', { body: p.body, usedAssets: p.usedAssetIds.map(id => ({ id, revision: snapshot.assets.find(a => a.id === id)!.revision })), evidence: p.evidence }) };
     });
     read('journal.template', '固定見出しMarkdownテンプレートを取得', {}, () => ({ template: journalTemplate }));
-    read('journal.list', 'Journalを一覧', {}, () => ({ journals: store.list<Journal>('journal'), insights: store.list<Insight>('insight') }));
+    read('journal.list', 'Journalを一覧', { projectId: id.optional() }, p => core.journalList(p.projectId));
     read('journal.get', 'Journalと関連する気づきを取得', { journalId: id }, p => ({ journal: store.get<Journal>(p.journalId, 'journal'), insights: store.list<Insight>('insight').filter(i => i.journalId === p.journalId) }));
     write('journal.write', '有効なJournal記録設定のもとでMarkdown原文をRunまたはTaskへ関連づけ', { body: z.string().min(1).refine(s => s.trim().length > 0), contextHandle: id.optional(), postRunId: id.optional(), task: text.optional() }, p => core.writeJournal(p));
     read('review.pending', 'Review項目を関連ID中心で取得。必要に応じて本文・変更内容を含める', {

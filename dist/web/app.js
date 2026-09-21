@@ -9,6 +9,7 @@ const reviewDecisionLabels = { approved: '処理済み', deferred: '保留', rej
 const navs = [['assets', '資産ライブラリ', 'M4 4h6v6H4zM14 4h6v6h-6zM4 14h6v6H4zM14 14h6v6h-6z'], ['runs', 'Workflow Run', 'M5 5h5v5H5zM14 14h5v5h-5zM10 7h6v7'], ['journals', 'Journal', 'M5 4h14v16H5zM8 8h8M8 12h8M8 16h5'], ['review', 'Journal Review', 'M4 12a8 8 0 1 0 3-6M4 4v5h5M9 12l2 2 4-4'], ['history', '変更履歴', 'M4 12a8 8 0 1 0 3-6M4 4v5h5M12 7v5l3 2'], ['diagnostics', '診断', 'M3 12h4l3-7 4 14 3-7h4'], ['settings', '設定・接続', 'M4 7h16M4 17h16M8 4v6M16 14v6']];
 let assets = [], projects = [], bindings = [];
 let selectedScope = 'global', filter = 'all', search = '', loading = false;
+let journalReportCount = 0;
 let assetScrollTop = 0;
 let language = localStorage.getItem('aacl-language') === 'ja' ? 'ja' : 'en';
 let screenData = {};
@@ -48,7 +49,8 @@ function modal(title, html, layout = '') { dialog.dataset.layout = layout; dialo
 function pageHeading(title, description, action = '') { return `<header class="page-heading"><div><h1>${title}</h1><p>${description}</p></div>${action}</header>`; }
 function shell(content, contentClass = '') {
     const [page] = route();
-    app.innerHTML = localizeHtml(`<div class="shell"><aside class="sidebar"><a class="brand" href="#assets"><span class="brand-mark">Λ</span><div><div class="brand-name">AACL</div><small>AGENT ASSET CONTROL LAYER</small></div></a><div class="nav-label">ワークスペース</div><nav>${navs.slice(0, 4).map(([key, title, path]) => `<a href="#${key}" class="nav-item ${page === key ? 'active' : ''}"${page === key ? ' aria-current="page"' : ''}>${icon(path)}${title}</a>`).join('')}</nav><div class="nav-label">管理</div><nav>${navs.slice(4, 6).map(([key, title, path]) => `<a href="#${key}" class="nav-item ${page === key ? 'active' : ''}">${icon(path)}${title}</a>`).join('')}</nav><div class="sidebar-bottom"><a class="nav-item ${page === 'settings' ? 'active' : ''}" href="#settings">${icon(navs[6][2])}設定・接続</a><div class="connection"><span class="dot"></span>ローカルに接続済み</div></div></aside><main class="main"><div class="topbar"><div class="breadcrumb">ワークスペース &nbsp; / &nbsp; <span>${esc(labelScope(selectedScope))}</span></div><div class="topbar-controls"><label class="scope-select"><span class="mono">SCOPE</span><select id="scope-select" aria-label="管理先" translate="no">${opt('global', 'Global', selectedScope)}${projects.map(p => opt(p.id, p.name, selectedScope)).join('')}</select></label><label class="language-select"><span class="mono">言語</span><select id="language-select" aria-label="言語" translate="no"><option value="en"${language === 'en' ? ' selected' : ''}>英語</option><option value="ja"${language === 'ja' ? ' selected' : ''}>日本語</option></select></label></div></div><div class="main-content ${contentClass}">${content}<div class="footer-note">AACL · あなたの開発方法を、あなたの手で。</div></div></main></div>`, language);
+    const journalBadge = journalReportCount >= 10 ? `<span class="nav-notification" aria-hidden="true" title="${esc(`${journalReportCount}件のJournal報告`)}">${journalReportCount > 99 ? '99+' : journalReportCount}</span>` : '';
+    app.innerHTML = localizeHtml(`<div class="shell"><aside class="sidebar"><a class="brand" href="#assets"><span class="brand-mark">Λ</span><div><div class="brand-name">AACL</div><small>AGENT ASSET CONTROL LAYER</small></div></a><div class="nav-label">ワークスペース</div><nav>${navs.slice(0, 4).map(([key, title, path]) => `<a href="#${key}" class="nav-item ${page === key ? 'active' : ''}"${page === key ? ' aria-current="page"' : ''}>${icon(path)}${title}${key === 'journals' ? journalBadge : ''}</a>`).join('')}</nav><div class="nav-label">管理</div><nav>${navs.slice(4, 6).map(([key, title, path]) => `<a href="#${key}" class="nav-item ${page === key ? 'active' : ''}">${icon(path)}${title}</a>`).join('')}</nav><div class="sidebar-bottom"><a class="nav-item ${page === 'settings' ? 'active' : ''}" href="#settings">${icon(navs[6][2])}設定・接続</a><div class="connection"><span class="dot"></span>ローカルに接続済み</div></div></aside><main class="main"><div class="topbar"><div class="breadcrumb">ワークスペース &nbsp; / &nbsp; <span>${esc(labelScope(selectedScope))}</span></div><div class="topbar-controls"><label class="scope-select"><span class="mono">SCOPE</span><select id="scope-select" aria-label="管理先" translate="no">${opt('global', 'Global', selectedScope)}${projects.map(p => opt(p.id, p.name, selectedScope)).join('')}</select></label><label class="language-select"><span class="mono">言語</span><select id="language-select" aria-label="言語" translate="no"><option value="en"${language === 'en' ? ' selected' : ''}>英語</option><option value="ja"${language === 'ja' ? ' selected' : ''}>日本語</option></select></label></div></div><div class="main-content ${contentClass}">${content}<div class="footer-note">AACL · あなたの開発方法を、あなたの手で。</div></div></main></div>`, language);
     document.documentElement.lang = language;
 }
 async function refresh() {
@@ -56,10 +58,11 @@ async function refresh() {
         return;
     loading = true;
     try {
-        const [a, p, b] = await Promise.all([api('asset.list', { includeBody: true }), api('project.list'), api('binding.list', { scope: selectedScope })]);
+        const [a, p, b, j] = await Promise.all([api('asset.list', { includeBody: true }), api('project.list'), api('binding.list', { scope: selectedScope }), api('journal.list', { ...(selectedScope !== 'global' ? { projectId: selectedScope } : {}) })]);
         assets = a.assets;
         projects = p.projects;
         bindings = b.bindings;
+        journalReportCount = j.total;
         await render();
     }
     catch (error) {
