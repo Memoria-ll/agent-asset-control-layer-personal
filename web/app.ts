@@ -507,7 +507,8 @@ function bindingEditor(sourceId: string, stageId?: string, existing?: Binding) {
   modal(existing ? '紐づけを付け替え' : '資産を紐づける', `<form data-form="binding" data-id="${existing?.id ?? ''}" data-source="${sourceId}" data-stage="${esc(stageId ?? '')}" class="form-stack"><p>${esc(a.name)}${stageId ? ` / ${esc(a.stages.find(s => s.id === stageId)?.name)}` : ''} → 参照先</p>${assetSelect('参照する資産', 'targetId', targets.map(t => opt(t.id, `${kinds[t.kind]} / ${t.name}${t.kind === 'model' && modelChoiceSummary(t) ? ` · ${modelChoiceSummary(t)}` : ''}`, existing?.targetId)).join(''))}${purpose}<div class="binding-model-choice-fields">${target?.kind === 'model' && existing?.purpose === 'stage-model' ? modelChoiceFields(target.id, existing.selectedChoices ?? {}) : ''}</div>${conditionFields}<p class="hint">管理先: ${esc(labelScope(selectedScope))}</p>${formEnd('紐づけを保存')}</form>`);
 }
 function journalEditor(run?: Run) {
-  modal('Journalを記録', `<form data-form="journal" data-run="${run?.id ?? ''}" class="form-stack">${field('Task（作業名）', 'task', '', !run)}${area('Journal（Markdown）', 'body', '## Task\n\n## 実際に使ったもの\n\n## 良かった点\n\n## 困った点\n\n## 改善の種\n\n## 根拠・確かさ\n', true, true)}<p class="hint">書くことのない項目は省略できます。気づきは空行で区切ると個別に扱えます。</p>${formEnd('Journalを保存')}</form>`);
+  const template = '## Task\n\n## 実際に使ったもの\ntools: []\nskills: []\nrules: []\n\n## 良かった点\n\n## 困った点\n\n## 改善の種\n\n## 根拠・確かさ\n\n## 日付\n\n## Project\n\n## Branch\n\n## Type\n';
+  modal('Journalを記録', `<form data-form="journal" data-run="${run?.id ?? ''}" class="form-stack">${field('Task（作業名）', 'task', '', !run)}${area('Journal（Markdown）', 'body', template, true, true)}<p class="hint">Tool・Skill・Ruleを分けて記録できます。書くことのない項目は省略し、気づきは空行で区切ると個別に扱えます。</p>${formEnd('Journalを保存')}</form>`);
 }
 
 async function action(value: string, target: HTMLElement) {
