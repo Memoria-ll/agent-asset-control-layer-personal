@@ -2,218 +2,116 @@
 
 [English](README.md) | [日本語](README.ja.md)
 
-AACL is a local application for organizing reusable AI development methods, running them through connected AI clients, and improving them from work records. It stores canonical assets and execution state in SQLite, exposes the same operations through a browser UI and MCP over HTTP, and provides a CLI for setup and maintenance.
+AACL is a local control layer for turning AI development know-how into reusable, inspectable methods. It lets you organize instructions, run them through connected AI clients such as Claude Code and Codex, record what happened, and improve the method from those records.
 
-The user selects and starts a Workflow for a task. AACL supplies the assigned instructions and records reported progress; the connected AI Runtime performs the actual development work and tool calls.
+The purpose of AACL is to separate method management from execution:
 
 ```mermaid
 flowchart LR
-    User[User] -->|selects a Workflow and task| AI[Connected AI / Runtime]
-    AI <-->|gets context and reports results| Core[AACL Core]
-    Core <--> DB[(SQLite)]
-    User <-->|reviews and manages| UI[Browser UI]
-    UI <--> Core
+    User[User] -->|selects a method and task| AACL[AACL]
+    AACL -->|delivers the required context| Runtime[Connected AI Runtime]
+    Runtime -->|performs work and reports results| AACL
+    AACL -->|records history and evidence| Records[Records]
+    User -->|reviews and approves changes| AACL
 ```
 
-## Interfaces and environment
+## What AACL is for
 
-| Interface | What it does |
+- Save development methods as reusable assets instead of scattering them across prompt files.
+- Describe work as a Workflow with stages, responsibilities, outputs, and allowed return paths.
+- Reuse Roles, Skills, Rules, Task Types, and Capabilities where they are needed.
+- Start a Workflow for a concrete task and let the connected Runtime perform the actual work.
+- Deliver only the Context required for the current stage, while retrieving Skill bodies and supporting files when needed.
+- Keep the selected revisions, delivered Context, execution reports, and actual Skill use traceable.
+- Bring existing instructions into AACL with provenance, classification, verification, and a safe restore path.
+- Capture useful observations from real work and turn them into reviewable improvement proposals.
+- Apply approved changes as new revisions while preserving history, snapshots, and decisions.
+- Export a consistent set of assets for connected or standalone use.
+
+## Assets express a development method
+
+An Asset is reusable instruction or knowledge with an ID, revision, applicability conditions, and relationships to other assets.
+
+| Asset | Purpose |
 | --- | --- |
-| Browser UI | Manage assets, start and inspect Workflow Runs, review Journals, proposals, history, and diagnostics. The UI defaults to English; use the language selector to switch to Japanese. |
-| HTTP MCP | Lets connected AI clients read and update AACL state through the MCP endpoint at `/mcp`. |
-| CLI | Installs and starts the local service, registers Projects, connects clients, and performs maintenance. |
+| Workflow | Defines stages, responsibilities, transitions, outputs, and completion criteria. |
+| Role | Defines who is responsible for a stage and what it should produce. |
+| Skill | Provides procedures, knowledge, and optional supporting files when needed. |
+| Rule | Provides instructions that apply when their conditions match. |
+| Task Type | Describes a work objective, quality criteria, and constraints. |
+| Capability | Describes an external tool connection and permission information. |
+| Other assets | Preserve project knowledge, policies, templates, and unclassified material. |
 
-The app is for local, single-user operation. The installed service listens on `127.0.0.1:4319`; the development and test service uses `127.0.0.1:4318`. The supported environment is WSL with Node.js 24 and a JavaScript-enabled Chromium-based browser.
-
-## Install and start
-
-Run the CLI from the public GitHub repository once, then set up the local app:
-
-```bash
-npm exec --yes --package=github:Memoria-ll/agent-asset-control-layer-personal -- aacl setup
-```
-
-The repository includes the compiled CLI, so no build script needs to run during installation. npm 12 blocks Git dependencies by default; on npm 12 or newer, allow this command's Git source explicitly:
-
-```bash
-npm exec --yes --allow-git=all --package=github:Memoria-ll/agent-asset-control-layer-personal -- aacl setup
-```
-
-`setup` copies the built app into the managed directory (`$XDG_DATA_HOME/aacl`, or `~/.local/share/aacl` by default).
-Run the same command again to update the app files in that managed directory; the SQLite data and generated Runtime entries are preserved.
-
-If an existing installation still uses port `4318`, stop that service once before moving it to the new production port:
-
-```bash
-npm exec --yes --prefer-online --package=github:Memoria-ll/agent-asset-control-layer-personal -- aacl --port 4318 stop
-npm exec --yes --prefer-online --package=github:Memoria-ll/agent-asset-control-layer-personal -- aacl setup
-```
-
-The default managed directory is `$XDG_DATA_HOME/aacl`, or `~/.local/share/aacl` when `XDG_DATA_HOME` is unset. Add its `bin` directory to `PATH`, then check the service and open the UI:
-
-```bash
-export PATH="$HOME/.local/share/aacl/bin:$PATH"
-aacl health
-```
-
-Open [http://127.0.0.1:4319](http://127.0.0.1:4319). Run `aacl connect` to print MCP registration commands for Codex and Claude Code. The command prints the setup steps; run the command for the client you use. Its endpoint is `http://127.0.0.1:4319/mcp`.
-
-`setup` also installs the editable `journal` and `journal-review` Skill assets. Their names and deletion state are fixed; `journal` is controlled by the Journal recording setting rather than a direct Runtime entry, while `journal-review` remains an explicitly launched Skill. To manage a project, run `aacl init` from its root. It registers that Project and prepares Project-scoped Runtime targets.
-
-On WSL, `setup` also registers a Windows logon task that starts the matching WSL distribution and AACL service. Runtime entries contain only the MCP operation and Asset ID. Use `aacl autostart enable`, `aacl autostart disable`, and `aacl autostart status` to manage the task.
-
-Common CLI commands:
-
-| Command | Purpose |
-| --- | --- |
-| `aacl ensure` | Start the service if it is not running. |
-| `aacl autostart <action>` | Use `enable`, `disable`, or `status` to manage Windows logon startup for the WSL service. |
-| `aacl connect` | Ensure the service is running and print MCP client setup commands. |
-| `aacl init` | Register the current directory as a Project. |
-| `aacl diagnostics` | Show reference, Run state, and delivered Context diagnostics. |
-| `aacl export DIRECTORY` | Export Markdown files and `records.json` to a new directory. |
-| `aacl backup FILE` | Create a consistent SQLite backup at a new file path. |
-| `aacl restore FILE --dir NEW_DIRECTORY` | Restore a compatible backup into a new managed directory. |
-
-See the [setup and operating guide](docs/setup.md) (Japanese) for complete installation, connection, use, and recovery instructions.
-
-## Register Projects and organize scope
-
-Run `aacl init` in the project root you want AACL to recognize. Project identity and its root are registered in the Core. The operation copies Global bindings into the new Project scope and registers that Project's Claude Code and Codex Runtime targets. Running `aacl init` again for an already registered root returns the existing Project.
-
-Assets can be managed globally or for a specific Project. Project Common stores the selected Rules for that Project. Runtime targets are registered for a scope, so a Global target receives Global entries and a Project target receives entries for its Project scope.
-
-## Assets and relationships
-
-An Asset holds reusable instructions or knowledge. Each Asset has an ID, kind, revision, and Global or Project scope. Bindings explicitly connect Assets and Workflow stages.
-
-| Kind | Purpose |
-| --- | --- |
-| Workflow | Defines stages, allowed transitions and conditions, and assigned Roles. |
-| Role | Defines the responsibility and expected output for a Workflow stage. |
-| Skill | Holds reusable procedures or knowledge, with optional supporting files. |
-| Rule | Holds instructions shared by the Assets or stages to which it is bound. |
-| Model | Holds a model name, invocation method, and choices, and can conditionally reference Skills and Rules. |
-
-Each Workflow stage has one assigned Role and can optionally bind one Model. A Model-bound stage is an instruction to execute through that subagent; consecutive stages with the same Role and Model reuse the same subagent. Model names and invocation methods can contain `{{choice.<choice name>}}`, which resolves to the value selected for the stage. Model-to-Skill and Model-to-Rule references can be conditioned on the selected choice combination for that stage. Skills and Rules are bound where they are needed. A Skill can also be enabled for direct Runtime invocation; the built-in `journal` Skill is controlled by Journal recording ON/OFF instead. Asset kind and scope are fixed when it is created; to change either, create an Asset with the desired values and update its relationships.
+The Workflow owns delegation and stage control. A Skill provides the method used by the current actor; it does not decide who acts or which stage comes next.
 
 ```mermaid
 flowchart TD
-    W[Workflow] --> S1[Stage: implement]
-    W --> S2[Stage: review]
-    S1 --> R1[Role: implementer]
-    S2 --> R2[Role: reviewer]
-    S1 -. subagent .-> M1[Model: configured model]
-    S1 -. uses .-> K1[Skill: implementation procedure]
-    S2 -. uses .-> K2[Skill: review procedure]
-    W -. shared instruction .-> Rule[Rule]
+    W[Workflow] --> S1[Implementation stage]
+    W --> S2[Review stage]
+    S1 --> R1[Implementer Role]
+    S2 --> R2[Reviewer Role]
+    S1 -. uses .-> K1[Implementation Skill]
+    S2 -. uses .-> K2[Review Skill]
+    W -. shared constraints .-> Rule[Rule]
 ```
 
-## Move existing instructions into AACL
+## Execute with the right Context
 
-The current application supports registering and organizing Assets in the UI or through MCP. It does not provide a folder-wide import wizard. During migration, compare same-named instructions by their actual responsibilities and procedures, classify each as a Workflow, Role, Skill, Rule, or Model, and recreate only relationships present in the source method. Keep the originals until the registered Assets and generated Runtime entries have been checked.
+When a Workflow starts, AACL fixes the selected asset revisions and conditions in a Snapshot. The connected Runtime receives the current stage, Role, applicable Rules, and Skill candidates. It retrieves a pinned Skill body or supporting file only when it needs one.
 
-The [migration guide](docs/skill-migration.md) (Japanese) covers classification, registration, Runtime entries, and post-migration checks.
-
-## Generate Runtime entries
-
-Register a Claude Code or Codex Runtime target for the Global or Project scope where its Assets belong. AACL generates entries for Workflows, Skills enabled for direct invocation, and Skills reached through a `reference` binding. The latter are eligible for ordinary Codex description-based implicit invocation even when `useCase` is false:
-
-| Runtime | Generated entry |
-| --- | --- |
-| Claude Code | `<target>/commands/<slug>.md` |
-| Codex | `<target>/skills/<slug>/SKILL.md` and `<target>/skills/<slug>/agents/openai.yaml` |
-
-The entry refers to the canonical Asset by ID and retrieves its instructions from AACL. The body stays in SQLite. A Codex Asset may provide `agents/openai.yaml`; AACL composes that YAML at output time and overwrites only `policy.allow_implicit_invocation` with the value determined by its binding state. On Windows targets, the generated entry invokes AACL through `wsl.exe`. If a managed entry has been changed after generation, synchronization records a diagnostic instead of replacing that content. Unregistering a Runtime target leaves its generated entries in place.
-
-## Start a Workflow in the browser UI
-
-1. Select a Workflow in the Asset Library and choose **Run**.
-2. Enter the task instruction and any Project or Runtime details, then start the Run.
-3. In the prepared Run view, copy the request for the connected AI and send it to that client.
-4. Inspect reported progress, delivered Context, results, and the next allowed transition in the Run view.
-
-Starting a Run creates its prepared state and Snapshot in AACL. It does not launch an AI automatically. The connected Runtime performs the work and reports its start and results back to AACL.
-
-## Use a Workflow through MCP
-
-After connecting a client, read the AACL bootstrap instructions and use the registered Asset IDs. For example, `aacl_usecase_search` finds Workflows and directly invocable Skills such as `journal-review`; the built-in `journal` Skill is not a direct Runtime entry. Starting a Workflow requires an explicit selection:
-
-```json
-{
-  "workflowId": "registered-workflow-id",
-  "instruction": "Fix the login failure",
-  "runtime": "codex"
-}
-```
-
-Pass these fields to `aacl_run_start`. If the Run should use a Project, include its `projectId`. The response contains a `contextHandle`; pass that same handle to later operations for this Run.
+Context delivery and reported use are separate records: retrieving a Skill for inspection is not treated as using it. A Run is identified by its Context Handle so that later reads, reports, and transitions stay attached to the correct execution.
 
 ```mermaid
 sequenceDiagram
-    participant AI as Connected AI / Runtime
-    participant Core as AACL Core
-    AI->>Core: aacl_run_start: selected Workflow and task
-    Core-->>AI: contextHandle and prepared Run
-    AI->>Core: aacl_context_get: current stage Context
-    Core-->>AI: Role, Rules, and Skill catalog
-    AI->>Core: aacl_run_skill_get: needed pinned Skill
-    AI->>AI: Perform and verify the work
-    AI->>Core: aacl_run_report: result and actual use
-    AI->>Core: aacl_run_transition: allowed transition and evidence
+    participant User
+    participant AACL
+    participant Runtime as Connected AI Runtime
+    User->>AACL: Start a Workflow for a task
+    AACL-->>Runtime: Context Handle and stage Context
+    Runtime->>AACL: Retrieve needed Skills and files
+    Runtime->>Runtime: Perform and verify the work
+    Runtime->>AACL: Report start, results, and actual use
+    AACL-->>User: Show state, evidence, and next transition
 ```
 
-Read the MCP tool definitions for each operation's current input schema. The Run view and `aacl_run_get` expose its current state and allowed transitions. A Skill started directly uses `aacl_skill_get` and does not create a Workflow Run.
+AACL manages the method, Context, state, and records. The Runtime performs model invocation, tool use, and development work. Starting a Run prepares the execution; it does not silently launch an AI or invent a result.
 
-## Context and on-demand Skills
+## Improve methods from real work
 
-At Run start, AACL pins the selected Workflow, choice-matching Assets, bindings, and Project Common settings in an immutable Snapshot. The initial Context includes the current stage, its Role, selected Model choices, the resolved Model name and invocation method, applicable Rule bodies, and candidate Skill names plus Runtime descriptions. Skills reached through `reference` bindings are ordinary candidates even when `useCase` is false. The host keeps their AACL asset/revision loader mapping separately and retrieves the selected body through `aacl_skill_get`; it does not resolve a same-named local Skill as a fallback. Skill bodies and supporting files are retrieved from the Snapshot's pinned revisions when needed.
-
-Context delivery and reported Skill use are stored separately. Retrieving a Skill for inspection does not by itself report that the AI used it. The execution view shows the current stage's Context and Skill candidates; Diagnostics reports the delivered Context size in UTF-8 bytes.
-
-## Journals and improvement proposals
-
-A Journal records observations from a task or Run. When Journal recording is enabled, record a short Journal at task completion only when there is a useful result, difficulty, or improvement idea. It preserves the original Markdown and parsed insights, and can be linked to a Run or recorded as a standalone task.
-
-Journal Review examines pending insights with related Run Snapshots, History, and Provenance. It starts only when requested and does not create a separate Workflow Run. A review can save concrete proposals that identify changes, reasons, supporting Journals, affected Assets or Projects, and insights to process.
-
-The user decides whether to approve, defer, or reject a proposal. An approved proposal can apply its Asset, binding, and Project setting changes together; the decision and applied Change Set are recorded. Deferred insights remain pending.
+A Journal records a useful result, difficulty, or improvement idea from an actual task. A requested review connects those observations with the relevant Run Snapshot, history, and provenance, then produces a concrete proposal.
 
 ```mermaid
 flowchart LR
-    Run[Workflow Run] --> Journal[Journal and insights]
-    Journal --> Review[Requested Journal Review]
+    Work[Actual work] --> Journal[Journal and observations]
+    Journal --> Review[User-requested review]
     Review --> Proposal[Proposal with changes and evidence]
     Proposal --> Decision{User decision}
-    Decision -->|Approve| Apply[Apply and record changes]
-    Decision -->|Defer or reject| Record[Record decision]
+    Decision -->|Approve| Revision[New revision]
+    Decision -->|Reject or defer| History[Decision recorded]
+    Revision --> Next[Next execution]
 ```
 
-## Revisions, history, and diagnostics
+The user decides whether a proposal is approved, deferred, or rejected. Past Snapshots, execution records, provenance, and decisions remain available for comparison. Restoring an earlier state creates a new revision rather than rewriting history.
 
-Asset edits create revisions. `asset.save` replaces the complete Asset payload; `asset.update` changes only the supplied fields and preserves omitted fields such as large supporting files. Snapshots, delivery records, events, Journals, and Provenance preserve what happened at the time. Restoring an earlier Asset revision creates a new revision. Deleting an Asset removes it from normal use while preserving its history. Change Sets can also be restored to their recorded prior state.
+## Move and reuse existing instructions
 
-The History view compares Asset revisions and shows reasons and Provenance. Diagnostics checks issues such as unresolved relationships, repeated transitions, Runtime-entry failures, and delivered Context size. These records describe operations and reported use; they do not measure the quality of the AI's work.
+AACL should make it possible to bring existing instructions into a structured method without losing their origin or damaging the source files. The import flow can:
 
-## Export and backup
+- discover candidate instructions and supporting files;
+- classify their actual responsibilities as Workflows, Roles, Skills, Rules, or other assets;
+- preserve source paths, hashes, and provenance;
+- verify reads, writes, and classification before switching usage over;
+- keep unsupported or plugin-managed material in place; and
+- restore the previous organization without overwriting later source edits.
 
-| Command or UI action | Result |
-| --- | --- |
-| `aacl export DIRECTORY` | Writes one Markdown file per Asset and Journal, plus `records.json` with record and revision data. The destination must be a new directory. |
-| `aacl backup FILE` | Creates a consistent SQLite backup. The destination must be a new file. |
-| `aacl restore FILE --dir NEW_DIRECTORY` | Checks SQLite integrity and schema version 1, then restores into a new managed directory and installs the app there. |
+The same assets can be exported as a connected package for use with AACL or as a standalone package that does not require the Core.
 
-The UI also provides export and backup actions. Markdown files are convenient for reading individual Assets and Journals; `records.json` and the SQLite backup preserve structured records and revision data for transfer or recovery.
+## Interfaces
 
-## Development and verification
+The browser UI, MCP, and CLI use the same Core operations. The UI is for inspecting and managing assets, Runs, Journals, proposals, history, and diagnostics. MCP lets connected AI clients obtain Context, retrieve Skills, report execution, and request changes. The CLI supports project-oriented and operational tasks.
 
-```bash
-npm ci
-npx playwright install chromium
-npm run dev       # Development service and UI, using .local data
-npm run check     # Build, Core/HTTP/CLI tests, and browser tests
-```
+AACL is designed for local, single-user use. Its canonical records and immutable execution evidence are kept in the local data store.
 
-The development UI is available at [http://127.0.0.1:4318](http://127.0.0.1:4318). Development data is stored in `.local/` in this repository. The canonical verification command is `npm run check`.
+## Setup
 
-The application is implemented in TypeScript on Node.js, uses SQLite for its canonical state, and serves the browser UI and HTTP MCP endpoint from the local service.
+See [docs/setup.md](docs/setup.md) for installation, startup, Runtime connection, ports, environment settings, migration, backup, restore, and verification.
