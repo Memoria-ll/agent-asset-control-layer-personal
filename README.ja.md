@@ -2,218 +2,116 @@
 
 [English](README.md) | [日本語](README.ja.md)
 
-AACLは、AI開発の進め方を再利用可能な資産として整理し、接続したAIクライアントからWorkflowを実行し、作業記録をもとに改善するローカルアプリです。正本の資産と実行状態をSQLiteに保存し、ブラウザーUIとHTTP MCPから同じ操作を提供します。CLIは導入と保守に使います。
+AACLは、AI開発の知見を再利用・確認できる方法へ整理するローカルのコントロール層です。指示をAssetとして管理し、Claude CodeやCodexなどの接続AIクライアントから実行し、作業記録をもとに方法を改善します。
 
-利用者がタスクに使うWorkflowを選んで開始します。AACLは担当者への指示を提供し、報告された進行状態を記録します。実際の開発作業やツール操作は、接続先のAI Runtimeが行います。
+AACLの役割は、方法の管理と実際の作業を分けることです。
 
 ```mermaid
 flowchart LR
-    User[利用者] -->|Workflowとタスクを選ぶ| AI[接続したAI / Runtime]
-    AI <-->|Context取得・結果報告| Core[AACL Core]
-    Core <--> DB[(SQLite)]
-    User <-->|確認・管理| UI[ブラウザーUI]
-    UI <--> Core
+    User[利用者] -->|方法とタスクを選ぶ| AACL[AACL]
+    AACL -->|必要なContextを渡す| Runtime[接続したAI Runtime]
+    Runtime -->|作業と結果を報告| AACL
+    AACL -->|履歴と根拠を記録| Records[記録]
+    User -->|変更を確認・承認| AACL
 ```
 
-## インターフェースと対応環境
+## AACLで実現すること
 
-| インターフェース | できること |
+- 開発方法を、分散したプロンプトファイルではなく再利用可能なAssetとして保存する。
+- 作業を、工程・責務・成果物・差し戻し経路を持つWorkflowとして表現する。
+- 必要な場所でRole、Skill、Rule、Task Type、Capabilityを再利用する。
+- 具体的なタスクに対してWorkflowを開始し、接続したRuntimeに実作業を任せる。
+- 現在の工程に必要なContextだけを渡し、Skill本文や補助ファイルは必要時に取得する。
+- 固定したrevision、提供したContext、実行報告、Skillの実利用を追跡できるようにする。
+- 既存の指示を出所・分類・検証・復元手段付きでAACLへ移行する。
+- 実作業で得た気づきを記録し、確認可能な改善提案へ変える。
+- 承認した変更を新しいrevisionとして適用し、履歴・Snapshot・判断を保持する。
+- 一貫したAsset一式を、接続利用用または単独利用用にExportする。
+
+## Assetで開発方法を表現する
+
+Assetは、ID、revision、適用条件、他のAssetとの関係を持つ再利用可能な指示や知識です。
+
+| Asset | 役割 |
 | --- | --- |
-| ブラウザーUI | Assetの管理、Workflow Runの開始・確認、Journal・提案・履歴・診断の確認。UIは英語を既定とし、画面上の言語セレクターで日本語へ切り替えられます。 |
-| HTTP MCP | `/mcp` endpointから接続AIクライアントがAACLの状態を読み書きします。 |
-| CLI | ローカルServiceの導入・起動、Project登録、Runtime接続、保守を行います。 |
+| Workflow | 工程、責務、遷移、成果物、完了条件を定義する。 |
+| Role | 工程の担当と、そこで作る成果物を定義する。 |
+| Skill | 必要時に使う手順・知識・補助ファイルを提供する。 |
+| Rule | 条件に一致したときに適用する指示を提供する。 |
+| Task Type | 作業の目的、品質基準、制約を定義する。 |
+| Capability | 外部ツールの接続と利用許可を定義する。 |
+| その他 | Project知識、方針、テンプレート、未分類の情報を保持する。 |
 
-個人向けのローカル利用を対象とします。導入後のServiceは`127.0.0.1:4319`、開発・テスト用Serviceは`127.0.0.1:4318`で待ち受けます。対応環境はWSL上のNode.js 24とJavaScriptが有効なChromium系ブラウザーです。
-
-## 導入して起動する
-
-GitHubの公開リポジトリからCLIを一度実行し、ローカルアプリをSetupします。
-
-```bash
-npm exec --yes --package=github:Memoria-ll/agent-asset-control-layer-personal -- aacl setup
-```
-
-導入用のBuild済みCLIをリポジトリに含めているため、GitHubから実行するときにBuild scriptは不要です。npm 12以降はGit依存を既定で拒否するため、その場合は次のようにこのコマンドでGit導入を許可してください。
-
-```bash
-npm exec --yes --allow-git=all --package=github:Memoria-ll/agent-asset-control-layer-personal -- aacl setup
-```
-
-`setup`はBuildしたアプリを管理フォルダー（既定は`$XDG_DATA_HOME/aacl`、未設定なら`~/.local/share/aacl`）へコピーします。
-同じコマンドをもう一度実行すると、SQLiteのデータと生成済みRuntime入口を保持したままアプリ部分だけ更新します。
-
-4318で導入済みの環境を4319へ移行する場合だけ、先に4318のServiceを停止します。
-
-```bash
-npm exec --yes --prefer-online --package=github:Memoria-ll/agent-asset-control-layer-personal -- aacl --port 4318 stop
-npm exec --yes --prefer-online --package=github:Memoria-ll/agent-asset-control-layer-personal -- aacl setup
-```
-
-既定の管理フォルダーは`$XDG_DATA_HOME/aacl`です。未設定の場合は`~/.local/share/aacl`を使います。その`bin`ディレクトリを`PATH`へ追加し、Serviceを確認します。
-
-```bash
-export PATH="$HOME/.local/share/aacl/bin:$PATH"
-aacl health
-```
-
-[http://127.0.0.1:4319](http://127.0.0.1:4319)を開きます。`aacl connect`はCodexとClaude Code向けのMCP登録コマンドを表示します。利用するクライアント用のコマンドを実行してください。接続先は`http://127.0.0.1:4319/mcp`です。
-
-`setup`は編集可能な`journal`と`journal-review`のSkill Assetも導入します。2件の名称と削除状態は固定され、`journal`はRuntimeの直接起動入口ではなくJournal記録設定で制御し、`journal-review`は明示起動するSkillとして残ります。管理するProjectのルートで`aacl init`を実行すると、Project登録とProject scopeのRuntime設定先を準備します。
-
-WSL上で`setup`を実行すると、Windowsログオン時に対象WSLとAACL Serviceを起動するタスクも登録します。配置するSkillのRuntime入口には`name`、`description`、Asset IDと、発火後にAACLから本文を取得するMCP operationだけを記載します。自動起動は`aacl autostart enable`、`aacl autostart disable`、`aacl autostart status`で管理します。
-
-主なCLIコマンド:
-
-| コマンド | 役割 |
-| --- | --- |
-| `aacl ensure` | Serviceが停止中なら起動します。 |
-| `aacl autostart <action>` | `enable`、`disable`、`status`でWindowsログオン時のWSL Service自動起動を管理します。 |
-| `aacl connect` | Serviceを起動し、MCP clientの登録コマンドを表示します。 |
-| `aacl init` | 現在のディレクトリをProjectとして登録します。 |
-| `aacl diagnostics` | 参照、Run状態、提供Contextの診断を表示します。 |
-| `aacl export DIRECTORY` | 新しいディレクトリへMarkdownと`records.json`を出力します。 |
-| `aacl backup FILE` | 新しいファイルへ整合性を保ったSQLite Backupを作成します。 |
-| `aacl restore FILE --dir NEW_DIRECTORY` | 対応Backupを新しい管理フォルダーへ復元します。 |
-
-導入、接続、日常利用、復旧の詳しい手順は[導入・利用手順](docs/setup.md)を参照してください。
-
-## Projectを登録して管理範囲を整理する
-
-AACLに認識させるProject rootで`aacl init`を実行します。Project IDとrootはCoreに登録されます。新規登録時にGlobalのBindingをProject scopeへコピーし、そのProjectのClaude CodeとCodexのRuntime設定先を登録します。登録済みrootに対する再実行では既存Projectが返ります。
-
-AssetはGlobalまたは特定Projectの管理先に作成できます。Project Commonには、そのProjectへ適用するRuleを保存します。Runtime設定先はscopeごとに登録するため、Global設定先にはGlobalの入口を、Project設定先にはそのProjectの入口を生成します。
-
-## Assetと関係
-
-Assetは再利用する指示や知識を保持します。各AssetはID、種類、revision、GlobalまたはProjectの管理先を持ちます。BindingでAsset同士やWorkflowの工程を明示的に結びます。
-
-| 種類 | 役割 |
-| --- | --- |
-| Workflow | 工程、許可する遷移、遷移条件、担当Roleを定義します。 |
-| Role | Workflowの工程で担う責務と期待する成果を定義します。 |
-| Skill | 再利用する手順や知識を保持し、補助ファイルを持てます。 |
-| Rule | 紐づけたAssetや工程へ適用する指示を保持します。 |
-| Model | Model名と呼び出し方、選択肢を保持し、SkillやRuleを条件付きで紐づけられます。 |
-
-Workflowの各工程には1つのRoleを割り当て、必要な工程にはModelを指定できます。Modelを指定した工程はそのサブエージェントで実行する指示になり、連続する同じRole・Modelの工程では同じサブエージェントを使います。Model名と呼び出し方には`{{choice.<選択肢名>}}`を記載でき、Stageで選んだ値へ展開されます。ModelからSkillやRuleを参照するときは、Stageで選んだ選択肢の組み合わせごとに適用条件を設定できます。必要な場所にSkillとRuleを紐づけます。SkillはRuntimeから直接起動する設定もできますが、標準の`journal`はJournal記録のON/OFFで制御します。Asset作成後に種類や管理先は変更できません。異なる種類・管理先にする場合は、正しい値でAssetを作成して関係を付け替えます。
+委任と工程の制御はWorkflowが持ちます。Skillは現在の担当者が使う方法を提供するもので、担当者や次の工程を決めるものではありません。
 
 ```mermaid
 flowchart TD
-    W[Workflow] --> S1[工程: 実装]
-    W --> S2[工程: Review]
-    S1 --> R1[Role: 実装担当]
-    S2 --> R2[Role: Review担当]
-    S1 -. サブエージェント .-> M1[Model: 指定Model]
-    S1 -. 使用 .-> K1[Skill: 実装手順]
-    S2 -. 使用 .-> K2[Skill: Review手順]
-    W -. 共通指示 .-> Rule[Rule]
+    W[Workflow] --> S1[実装工程]
+    W --> S2[Review工程]
+    S1 --> R1[実装担当Role]
+    S2 --> R2[Review担当Role]
+    S1 -. 使用 .-> K1[実装Skill]
+    S2 -. 使用 .-> K2[Review Skill]
+    W -. 共通制約 .-> Rule[Rule]
 ```
 
-## 既存の指示をAACLへ移す
+## 必要なContextで実行する
 
-現在のアプリでは、UIまたはMCPからAssetを登録して整理できます。フォルダー全体を取り込む機能はありません。移行時は同名の指示を一律統合せず、実際の責務や手順を比べてWorkflow、Role、Skill、Rule、Modelに分類します。元の方法にある関係だけを再構成し、登録内容とRuntime入口を確認するまで元ファイルを保持します。
+Workflowを開始すると、選択したAssetのrevisionと条件をSnapshotへ固定します。接続したRuntimeには、現在の工程、Role、適用するRule、Skill候補を渡します。必要なSkill本文や補助ファイルは、固定したrevisionから必要時に取得します。
 
-分類、登録、Runtime入口、移行後の照合手順は[既存Skill・指示の移行ガイド](docs/skill-migration.md)を参照してください。
-
-## Runtime入口を生成する
-
-Assetの管理先に対応するGlobalまたはProject scopeへ、Claude CodeまたはCodexのRuntime設定先を登録します。Workflow、直接起動が有効なSkill（標準では`journal-review`など）、`reference` bindingで参照されたSkillの入口が生成されます。`journal`の入口は生成されません。bindingで参照されたSkillは`useCase=false`でも通常のCodex description一致による暗黙起動候補になります。
-
-| Runtime | 生成される入口 |
-| --- | --- |
-| Claude Code | `<target>/commands/<slug>.md` |
-| Codex | `<target>/skills/<slug>/SKILL.md` と `<target>/skills/<slug>/agents/openai.yaml` |
-
-入口は`name`、`description`、Asset IDを参照し、指示本文は発火後にAACLから取得します。本文の正本はSQLiteにあります。Codex Assetの`agents/openai.yaml`は入力として保持し、出力時にAACLのpolicyを合成します。`policy.allow_implicit_invocation`だけはbinding状態から決まるAACLの値で上書きし、その他のYAML項目は保持します。Windowsの設定先では生成入口から`wsl.exe`を呼び出します。生成後に管理対象の入口が編集された場合、同期はその内容を上書きせず診断へ記録します。Runtime設定先の管理を解除しても、生成済み入口は残ります。
-
-## ブラウザーUIからWorkflowを開始する
-
-1. Asset LibraryでWorkflowを選び、Runを開始します。
-2. タスクの指示とProject・Runtimeなどの条件を入力して開始します。
-3. 準備されたRun画面でAIへの依頼をコピーし、接続先AIクライアントへ送ります。
-4. Run画面で報告された進行、提供Context、結果、次に許可される遷移を確認します。
-
-Run開始でAACLに準備状態とSnapshotが作られます。AIは自動起動しません。接続先Runtimeが作業を行い、開始と結果をAACLへ報告します。
-
-## MCPからWorkflowを使う
-
-クライアント接続後、まず`aacl_bootstrap_get`でAACLの共通案内を読み、登録済みAsset IDを使います。`aacl_asset_list`は既定で概要だけを返すため、必要な本文は`includeBody`または`aacl_asset_get_many`で取得します。`aacl_usecase_search`ではWorkflowと直接起動Skill（`journal-review`など）を検索できます。`journal`は直接起動の選択肢ではありません。Workflowは明示的に選んで開始します。
-
-```json
-{
-  "workflowId": "registered-workflow-id",
-  "instruction": "ログイン障害を修正する",
-  "runtime": "codex"
-}
-```
-
-この値を`aacl_run_start`へ渡します。ProjectのAssetを使うRunでは`projectId`も指定します。応答の`contextHandle`を後続のRun操作へ同じ値で渡してください。
+Contextを提供した記録と、実際に利用したという報告は分けて保存します。確認のためにSkillを取得しただけでは、利用したことにはしません。RunはContext Handleで識別し、後続の取得・報告・遷移を正しい実行へ結び付けます。
 
 ```mermaid
 sequenceDiagram
-    participant AI as 接続したAI / Runtime
-    participant Core as AACL Core
-    AI->>Core: aacl_run_start: Workflowとタスクを選択
-    Core-->>AI: contextHandleと準備済みRun
-    AI->>Core: aacl_context_get: 現在StageのContext
-    Core-->>AI: Role、Rule、Skill catalog
-    AI->>Core: aacl_run_skill_get: 必要な固定Skill
-    AI->>AI: 作業と確認を実施
-    AI->>Core: aacl_run_report: 結果と実利用を報告
-    AI->>Core: aacl_run_transition: 許可遷移と根拠
+    participant User as 利用者
+    participant AACL
+    participant Runtime as 接続したAI Runtime
+    User->>AACL: タスクのWorkflowを開始
+    AACL-->>Runtime: Context Handleと工程Context
+    Runtime->>AACL: 必要なSkillとファイルを取得
+    Runtime->>Runtime: 作業と検証を実施
+    Runtime->>AACL: 開始・結果・実利用を報告
+    AACL-->>User: 状態・根拠・次の遷移を表示
 ```
 
-各操作の最新の入力schemaはMCP tool定義から取得します。Run画面と`aacl_run_get`でRun状態と許可遷移を確認できます。直接起動Skillは`aacl_skill_get`で取得し、Workflow Runを作りません。
+AACLは方法、Context、状態、記録を管理します。Modelの呼び出し、ツール操作、開発作業はRuntimeが行います。Runの開始は実行を準備する操作であり、AIや結果を暗黙に作り出す操作ではありません。
 
-## Contextと必要時のSkill取得
+## 実作業から方法を改善する
 
-Run開始時に、選択したWorkflow、選択肢条件に一致した関連Asset、Binding、Project Common設定を不変Snapshotへ固定します。初期Contextには現在の工程、担当Role、指定Modelの選択肢展開済みModel名・呼び出し方・選択値、適用するRule本文、候補Skillの説明、サブエージェント継続指示を含めます。`reference` bindingで到達したSkillは、`useCase=false`でも通常Skill候補として扱います。ホストはAACL Asset ID・revisionのloader対応を内部で保持し、選択された本文を`aacl_skill_get`で取得します。同名のローカルSkillへ推測フォールバックしません。Skill本文と補助ファイルは必要時にSnapshotの固定revisionから取得します。
-
-Contextの提供記録と、Skillを利用したという報告は別々に保存します。Skillを確認のため取得しただけでは実利用として報告されません。Run画面には現在StageのContextとSkill候補が表示され、診断ではContext提供量をUTF-8バイト数で確認できます。
-
-## Journalと改善提案
-
-Journal記録がONの場合、タスク完了時に実際に役立ったこと、困ったこと、改善の種などの気づきがある場合だけ短いJournalを記録します。元のMarkdownと解析した気づきを保持し、Runまたは単独のTaskに関連づけられます。定番の成功報告は記録しません。設定がOFFでも既存JournalとJournal Reviewは閲覧できます。
-
-Journal Reviewでは、関連RunのSnapshot・History・Provenanceも参照しながら保留中の気づきを検討します。利用者が明示的に開始したときだけ実行し、Review用のWorkflow Runは作成しません。変更内容、理由、根拠Journal、対象AssetやProject、処理する気づきを含む提案を保存できます。
-
-提案を承認・保留・却下するのは利用者です。承認された提案はAsset、Binding、Project設定の変更をまとめて適用でき、判断と適用済みChange Setを記録します。保留した気づきは保留状態に残ります。
+Journalには、実際のタスクで役立ったこと、困ったこと、改善の種を記録します。利用者が明示的にレビューを開始すると、関連するRunのSnapshot、履歴、Provenanceを結び付け、具体的な提案を作ります。
 
 ```mermaid
 flowchart LR
-    Run[Workflow Run] --> Journal[Journalと気づき]
-    Journal --> Review[明示的に開始したJournal Review]
-    Review --> Proposal[変更内容と根拠を含む提案]
+    Work[実作業] --> Journal[Journalと気づき]
+    Journal --> Review[利用者が開始するReview]
+    Review --> Proposal[変更内容と根拠を持つ提案]
     Proposal --> Decision{利用者の判断}
-    Decision -->|承認| Apply[変更を適用して記録]
-    Decision -->|保留・却下| Record[判断を記録]
+    Decision -->|承認| Revision[新しいrevision]
+    Decision -->|却下・保留| History[判断を記録]
+    Revision --> Next[次の実行]
 ```
 
-## Revision、履歴、診断
+提案を承認・保留・却下するのは利用者です。過去のSnapshot、実行記録、Provenance、判断は比較できる状態で残します。過去の状態へ戻す場合も、履歴を書き換えず新しいrevisionを作ります。
 
-Assetの編集は新しいrevisionとして保存します。既存Asset・紐づけ・Project Commonの更新や解除には、取得時点の`expectedRevision`が必要です。不一致なら一括変更全体がConflictになり、保存されません。`asset.save`は完全な全置換なので、bodyやsupporting filesを含む完全なAssetを送ります。本文など一部fieldだけを変えるときは`asset.update`へ変更fieldだけを送り、省略したfield（大きな`supportingFiles`を含む）は保持します。Snapshot、提供記録、event、Journal、Provenanceは当時の状態を保持します。過去revisionの復元は新revisionを作成します。Asset削除は通常利用から外し、履歴は保持します。Change Setも記録された変更前の状態へ復元できますが、適用後revisionが変わっていない場合だけ実行されます。
+## 既存の指示を移行して再利用する
 
-履歴画面ではAssetのrevisionを比較し、変更理由とProvenanceを確認できます。診断では、参照先の不整合、反復遷移、Runtime入口の失敗、提供Context量などを確認できます。これらは操作と利用報告の記録であり、AIの作業品質を測定するものではありません。
+AACLでは、既存の指示を出所を失わず、元ファイルを壊さずに構造化された方法へ移行できるようにします。移行では次のことを行います。
 
-## ExportとBackup
+- 候補となる指示と補助ファイルを発見する。
+- 実際の責務に基づき、Workflow、Role、Skill、Ruleなどへ分類する。
+- 元のパス、ハッシュ、Provenanceを保持する。
+- 読み書きと分類を検証してから利用を切り替える。
+- 未対応形式やPlugin管理の資産は、理由を残して元の場所に置く。
+- 後から変更された元ファイルを上書きせず、以前の構成を復元できるようにする。
 
-| コマンドまたはUI操作 | 結果 |
-| --- | --- |
-| `aacl export DIRECTORY` | AssetとJournalごとのMarkdown、およびrecord・revision情報を持つ`records.json`を出力します。出力先は新規directoryにします。 |
-| `aacl backup FILE` | 整合性を保ったSQLite Backupを作成します。出力先は新規fileにします。 |
-| `aacl restore FILE --dir NEW_DIRECTORY` | SQLite整合性とschema version 1を確認し、新しい管理フォルダーへ復元してアプリを導入します。 |
+同じAsset一式を、AACLへ接続して使うPackage、またはCoreなしで使うStandalone PackageとしてExportできます。
 
-UIからもExportとBackupを実行できます。Markdownは個別AssetやJournalを読む用途に、`records.json`とSQLite Backupは構造化データとrevisionの移送・復旧に使えます。
+## インターフェース
 
-## 開発と検証
+ブラウザーUI、MCP、CLIは同じCore操作を利用します。UIではAsset、Run、Journal、提案、履歴、診断を確認・管理します。MCPでは接続AIクライアントがContext取得、Skill取得、実行報告、変更依頼を行います。CLIはProject単位の操作や保守に使います。
 
-```bash
-npm ci
-npx playwright install chromium
-npm run dev       # .localのデータを使って開発ServiceとUIを起動
-npm run check     # Build、Core/HTTP/CLI試験、画面試験
-```
+AACLは個人向けのローカル利用を想定しています。正本の記録と変更されない実行根拠をローカルのデータストアに保持します。
 
-開発用UIは[http://127.0.0.1:4318](http://127.0.0.1:4318)で利用できます。開発用データはリポジトリ内の`.local/`に保存します。正式な検証コマンドは`npm run check`です。
+## セットアップ
 
-アプリはNode.js上のTypeScriptで実装し、正本の状態をSQLiteに保存します。ローカルServiceがブラウザーUIとHTTP MCP endpointを提供します。
+インストール、起動、Runtime接続、ポート、環境設定、移行、Backup、復元、検証は[docs/setup.md](docs/setup.md)を参照してください。
