@@ -70,6 +70,7 @@ test('C33: Chromium UI assigns existing and new Roles from Workflow editor, runs
   await dialog.getByRole('button', { name: '保存する', exact: true }).click();
   await expect(dialog).not.toBeVisible();
   await page.getByRole('button', { name: '紐づける', exact: true }).click();
+  await dialog.getByRole('searchbox', { name: '資産検索' }).fill('検証手順');
   await dialog.getByLabel('参照する資産').selectOption({ label: 'Skill / 検証手順' });
   await dialog.getByRole('button', { name: '紐づけを保存' }).click();
   await expect(dialog).not.toBeVisible();
@@ -98,6 +99,7 @@ test('C33: Chromium UI assigns existing and new Roles from Workflow editor, runs
   await expect(dialog).not.toBeVisible();
   await expect(page.getByRole('heading', { name: '実装Model', exact: true })).toBeVisible();
   await page.getByRole('button', { name: '紐づける', exact: true }).click();
+  await dialog.getByRole('searchbox', { name: '資産検索' }).fill('検証手順');
   await dialog.getByLabel('参照する資産').selectOption({ label: 'Skill / 検証手順' });
   await expect(dialog.getByRole('group', { name: '参照条件' })).toBeVisible();
   await dialog.getByLabel('実行系の条件').selectOption('codex sol');
@@ -116,6 +118,7 @@ test('C33: Chromium UI assigns existing and new Roles from Workflow editor, runs
   await expect(dialog.locator('.info-button').first()).toHaveCSS('opacity', '1');
   await expect(dialog.getByLabel('担当Role').first()).toHaveAttribute('translate', 'no');
   await expect(dialog.getByLabel('Model').first()).toHaveAttribute('translate', 'no');
+  await dialog.locator('.stage-editor').nth(0).locator('.asset-picker:has(select[name=stageModel]) input').fill('実装Model');
   await dialog.getByLabel('Model').nth(0).selectOption({ label: '実装Model / provider/implementer · 実行系: codex luna / codex sol · effort: low / high（Global）' });
   await expect(dialog.locator('[name=modelChoice][data-choice-name="実行系"]')).toBeVisible();
   await dialog.locator('[name=modelChoice][data-choice-name="実行系"]').selectOption('codex sol');
@@ -124,6 +127,7 @@ test('C33: Chromium UI assigns existing and new Roles from Workflow editor, runs
   await dialog.getByLabel('追加指示（任意）').nth(0).fill('Roleの責務を土台にして、変更範囲を先に確認する。');
   await dialog.getByRole('button', { name: '＋ 工程を追加' }).click();
   await dialog.getByLabel('工程名', { exact: true }).nth(1).fill('確認');
+  await dialog.locator('.stage-editor').nth(1).locator('.asset-picker:has(select[name=stageModel]) input').fill('実装Model');
   await dialog.getByLabel('Model').nth(1).selectOption({ label: '実装Model / provider/implementer · 実行系: codex luna / codex sol · effort: low / high（Global）' });
   await dialog.locator('[name=modelChoice][data-choice-name="実行系"]').nth(1).selectOption('codex luna');
   await dialog.locator('[name=modelChoice][data-choice-name="effort"]').nth(1).selectOption('low');
@@ -145,6 +149,10 @@ test('C33: Chromium UI assigns existing and new Roles from Workflow editor, runs
   await expect(dialog).not.toBeVisible();
   await page.getByRole('button', { name: '編集する', exact: true }).click();
   const editedStages = dialog.locator('.stage-editor');
+  const firstRolePicker = editedStages.nth(0).locator('.asset-picker:has(select[name=stageRole])');
+  await firstRolePicker.locator('input').fill('存在しない資産');
+  await expect(firstRolePicker.locator('option', { hasText: 'レビュー担当（Global）' })).toHaveJSProperty('hidden', true);
+  await firstRolePicker.locator('input').fill('');
   await expect(editedStages.nth(0).locator('.transition-row')).toHaveCount(2);
   await expect(editedStages.nth(1).locator('.transition-row')).toHaveCount(2);
   const firstStageEditor = editedStages.nth(0);
@@ -245,6 +253,7 @@ test('C33: Chromium UI assigns existing and new Roles from Workflow editor, runs
   await expect(page.locator('.detail .editor-row').nth(0)).toContainText('Roleの責務を土台にして、変更範囲を先に確認する。');
   await page.screenshot({ path: '/tmp/aacl-workflow.png', fullPage: true });
   await page.getByRole('button', { name: 'Runを開始', exact: true }).click();
+  await dialog.locator('.asset-picker:has(select[name=workflowId]) input').fill('改善の確認');
   await dialog.getByLabel('実行する依頼').fill('動作経路を確認する');
   await dialog.getByRole('button', { name: 'Runを開始', exact: true }).click();
   await expect(dialog).not.toBeVisible();
@@ -272,6 +281,7 @@ test('C33: Chromium UI assigns existing and new Roles from Workflow editor, runs
   await dialog.getByLabel('観測した状況').fill('説明が不足');
   await dialog.getByLabel('変更の内容').fill('検証手順に報告の具体化を追加');
   await dialog.getByLabel('理由', { exact: true }).fill('結果を判断しやすくする');
+  await dialog.locator('.asset-picker:has(select[name=assetId]) input').fill('検証手順');
   await dialog.getByLabel('変更する資産').selectOption({ label: 'Skill / 検証手順' });
   await dialog.getByLabel('更新後の本文・責務').fill('検証結果と具体的な根拠を報告する。');
   await dialog.locator('[name=journalIds]').check();
