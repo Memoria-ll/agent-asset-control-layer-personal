@@ -749,18 +749,75 @@ export class Core {
         }
         return { updates: results };
     }
+    journalList(input = {}) {
+        const allJournals = this.store.list('journal').filter(journal => !input.projectId || journal.projectId === input.projectId || !journal.projectId);
+        const cursorIndex = input.cursor ? allJournals.findIndex(journal => journal.id === input.cursor) : -1;
+        const start = cursorIndex < 0 ? 0 : cursorIndex + 1;
+        const page = allJournals.slice(start, start + (input.limit ?? 20));
+        const pageIds = new Set(page.map(journal => journal.id));
+        const pageInsights = this.store.list('insight').filter(insight => pageIds.has(insight.journalId));
+        const journals = page.map(journal => {
+            if (input.includeBodies)
+                return journal;
+            const { raw: _raw, parsed: _parsed, ...summary } = journal;
+            const insights = pageInsights.filter(insight => insight.journalId === journal.id);
+            return { ...summary, insightCount: insights.length, pendingInsightCount: insights.filter(insight => insight.status === 'pending').length };
+        });
+        const insights = pageInsights.map(insight => input.includeBodies ? insight : (() => {
+            const { body: _body, ...summary } = insight;
+            return summary;
+        })());
+        return { journals, insights, total: allJournals.length, nextCursor: start + page.length < allJournals.length ? page.at(-1)?.id ?? null : null };
+    }
     review(input = {}) {
         const include = input.include ?? ['journalTask', 'insights', 'proposalRefs'], includeBodies = input.includeBodies ?? false;
         const allInsights = this.store.list('insight'), journalsById = new Map(this.store.list('journal').map(journal => [journal.id, journal])), insightItems = new Map(this.store.list('review-item').map(item => [item.insightId, item]));
         const items = allInsights.map(insight => insightItems.get(insight.id) ?? this.reviewItemForInsight(insight.id, false) ?? { id: insight.id, revision: insight.revision, createdAt: insight.createdAt, updatedAt: insight.updatedAt, journalId: insight.journalId, journalTaskId: insight.journalId, insightId: insight.id, projectId: journalsById.get(insight.journalId)?.projectId, heading: insight.heading, body: insight.body, status: insight.status, lastDecision: insight.status === 'processed' ? 'approved' : insight.status === 'rejected' ? 'rejected' : 'none', proposalIds: [] }).filter(item => !input.status || item.status === input.status).filter(item => !input.projectId || item.projectId === input.projectId);
         const cursorIndex = input.cursor ? items.findIndex(item => item.id === input.cursor) : -1;
         const start = cursorIndex < 0 ? 0 : cursorIndex + 1, page = items.slice(start, start + (input.limit ?? 100));
-        const journals = include.includes('journalTask') ? this.store.list('journal').filter(journal => page.some(item => item.journalTaskId === journal.id)) : [];
+        const journals = include.includes('journalTask') ? this.store.list('journal').filter(journal => page.some(item => item.journalTaskId === journal.id)).map(journal => {
+            if (includeBodies)
+                return journal;
+            const { raw: _raw, parsed: _parsed, ...summary } = journal;
+            return summary;
+        }) : [];
         const insights = include.includes('insights') ? allInsights.filter(insight => page.some(item => item.insightId === insight.id)).map(insight => includeBodies ? insight : { ...insight, body: '' }) : [];
         const proposalIds = [...new Set(page.flatMap(item => item.proposalIds ?? []))];
         const proposalRefs = include.includes('proposalRefs') ? this.store.list('proposal').filter(proposal => proposalIds.includes(proposal.id)).map(proposal => input.includeChanges ? proposal : this.proposalSummary(proposal)) : [];
         const reviewItems = page.map(({ body, ...item }) => includeBodies ? { ...item, body } : item);
         return { reviewItems, journals, insights, proposalRefs, nextCursor: start + page.length < items.length ? page.at(-1)?.id ?? null : null };
+    }
+    history(input = {}) {
+        if (input.entityId) {
+            return {
+                histories: this.store.list('history').filter(history => history.entityId === input.entityId),
+                revisions: this.store.revisions(input.entityId),
+                changeSets: this.store.list('changeset'),
+                provenance: this.store.list('provenance'),
+            };
+        }
+        const allChangeSets = this.store.list('changeset');
+        const selected = input.changeSetId
+            ? allChangeSets.filter(changeSet => changeSet.id === input.changeSetId)
+            : (() => {
+                const cursorIndex = input.cursor ? allChangeSets.findIndex(changeSet => changeSet.id === input.cursor) : -1;
+                const start = cursorIndex < 0 ? 0 : cursorIndex + 1;
+                return allChangeSets.slice(start, start + (input.limit ?? 20));
+            })();
+        const selectedIds = new Set(selected.map(changeSet => changeSet.id));
+        const histories = this.store.list('history').filter(history => selectedIds.has(history.changeSetId));
+        const provenanceIds = new Set(selected.map(changeSet => changeSet.provenanceId));
+        const provenance = this.store.list('provenance').filter(item => provenanceIds.has(item.id));
+        const changeSets = selected.map(changeSet => {
+            if (input.includeDetails || input.changeSetId)
+                return changeSet;
+            const { operations: _operations, ...summary } = changeSet;
+            return summary;
+        });
+        const cursorIndex = input.cursor ? allChangeSets.findIndex(changeSet => changeSet.id === input.cursor) : -1;
+        const start = cursorIndex < 0 ? 0 : cursorIndex + 1;
+        const hasMore = !input.changeSetId && start + selected.length < allChangeSets.length;
+        return { histories, revisions: [], changeSets, provenance, nextCursor: hasMore ? selected.at(-1)?.id ?? null : null };
     }
     reviewItemGet(reviewItemId, includeChanges = false) {
         const stored = this.store.maybe(reviewItemId), item = stored?.insightId ? stored : this.reviewItemForInsight(reviewItemId, true);

@@ -540,6 +540,35 @@ test('C25: Markdown raw, duplicate headings, unknown fragments, fences, independ
   await assert.rejects(f.call('journal.write', { body: '関連づけなし' }), /Task/);
 });
 
+test('Journal, Review and History list pages stay compact and load details by cursor or ID', async t => {
+  const f = fixture(t);
+  await f.call('journal.write', { task: '一つ目の記録', body: '## 困った点\n本文を個別取得する' });
+  await f.call('journal.write', { task: '二つ目の記録', body: '## 改善の種\n次のページへ進む' });
+
+  const journalPage = await f.call<{ journals: (Journal & { raw?: string })[]; total: number; nextCursor: string | null }>('journal.list', { limit: 1 });
+  assert.equal(journalPage.total, 2);
+  assert.equal(journalPage.journals.length, 1);
+  assert.equal(journalPage.journals[0]!.task, '二つ目の記録');
+  assert.equal('raw' in journalPage.journals[0]!, false);
+  assert.ok(journalPage.nextCursor);
+  const olderJournalPage = await f.call<{ journals: Journal[] }>('journal.list', { limit: 1, cursor: journalPage.nextCursor });
+  assert.equal(olderJournalPage.journals[0]!.task, '一つ目の記録');
+
+  const reviewPage = await f.call<{ reviewItems: (ReviewItem & { body?: string })[]; journals: (Journal & { raw?: string })[]; nextCursor: string | null }>('review.pending', { limit: 1, include: ['journalTask'], includeBodies: false });
+  assert.equal('body' in reviewPage.reviewItems[0]!, false);
+  assert.equal('raw' in reviewPage.journals[0]!, false);
+  assert.ok(reviewPage.nextCursor);
+
+  const asset = await f.asset('skill', { name: '履歴の概要確認' });
+  const updated = await f.call<{ entities: Asset[] }>('asset.save', { id: asset.id, expectedRevision: asset.revision, asset: { ...f.core.assetPayload(asset), body: '更新後の本文' }, provenance });
+  assert.equal(updated.entities[0]!.revision, 2);
+  const historyPage = await f.call<{ changeSets: (ChangeSet & { operations?: ChangeSet['operations'] })[]; nextCursor: string | null }>('history.get', { limit: 1 });
+  assert.equal(historyPage.changeSets.length, 1);
+  assert.equal('operations' in historyPage.changeSets[0]!, false);
+  const detailedHistory = await f.call<{ changeSets: ChangeSet[] }>('history.get', { changeSetId: historyPage.changeSets[0]!.id, includeDetails: true });
+  assert.ok(detailedHistory.changeSets[0]!.operations.length > 0);
+});
+
 test('Review items keep direct Journal task links and independent decisions', async t => {
   const f = fixture(t), result = await f.call<{ journal: Journal; insights: Insight[] }>('journal.write', { body: '## Task\n独立Review\n\n## 良かった点\n残す方法\n\n## 困った点\n直す詰まり' });
   const compact = await f.call<{ reviewItems: (ReviewItem & { body?: string })[]; journals: Journal[]; insights: Insight[]; nextCursor: string | null }>('review.pending', { includeBodies: false, limit: 1 });
