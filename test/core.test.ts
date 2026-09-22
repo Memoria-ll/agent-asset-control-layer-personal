@@ -43,6 +43,7 @@ test('Skill metadata separates the human explanation from Runtime description an
   const skill = await f.asset('skill', { name: 'frontmatter-skill', description: '人が読む説明', taskType: 'Runtimeが使う説明', body: '本文' });
   assert.equal(skill.description, 'Runtimeが使う説明');
   assert.equal(skill.explanation, '人が読む説明');
+  assert.equal(skill.implicitInvocation, false);
   assert.equal('taskType' in skill, false);
 
   const role = await f.asset('role', { taskType: 'Roleの旧分類' });
@@ -93,6 +94,8 @@ test('Journal Skills are protected, journal is not a direct entry, and recording
   assert.ok(!useCases.assets.some(asset => asset.id === journal.id));
 
   for (const asset of [journal, review]) {
+    assert.equal(asset.implicitInvocation, false);
+    await assert.rejects(f.call('asset.update', { id: asset.id, expectedRevision: asset.revision, asset: { implicitInvocation: true }, provenance }), /自動発火を有効にできません/);
     await assert.rejects(f.call('asset.save', { id: asset.id, expectedRevision: asset.revision, asset: { ...f.core.assetPayload(asset), name: `${asset.name}-renamed` }, provenance }), /名前は変更できません/);
     const preview = await f.call<{ asset: Asset; bindings: { id: string; revision: number }[]; projectCommons: { id: string; revision: number }[] }>('asset.delete.preview', { assetId: asset.id });
     await assert.rejects(f.call('asset.delete', { assetId: asset.id, expectedRevision: preview.asset.revision, expectedBindingRevisions: preview.bindings, expectedProjectCommonRevisions: preview.projectCommons, confirmed: true, provenance }), /削除できません/);
@@ -136,8 +139,8 @@ test('Run start returns an execution plan before the executor retrieves Context'
   assert.equal(f.store.list('delivery').length, 1);
 });
 
-test('Runtime Skill entries carry only frontmatter metadata and the AACL entry ID', async t => {
-  const f = fixture(t), skill = await f.asset('skill', { name: 'runtime-description', description: 'yaml frontmatter description', explanation: '人が呼んで分かる説明', body: 'CANONICAL_SKILL_BODY_42', useCase: true });
+test('Runtime Skill entries with automatic invocation carry only frontmatter metadata and the AACL entry ID', async t => {
+  const f = fixture(t), skill = await f.asset('skill', { name: 'runtime-description', description: 'yaml frontmatter description', explanation: '人が呼んで分かる説明', body: 'CANONICAL_SKILL_BODY_42', useCase: true, implicitInvocation: true });
   const root = mkdtempSync(join(tmpdir(), 'aacl-runtime-description-'));
   await f.call('runtime.register', { runtime: 'codex', platform: 'wsl', scope: 'global', path: root });
   const content = readFileSync(join(root, 'skills', skill.name, 'SKILL.md'), 'utf8');
@@ -790,20 +793,102 @@ test('Runtime entry names come from Workflow and direct Skill names, with IDs on
   assert.ok(!existsSync(join(claudeRoot, 'commands', `${internalSkill.id}.md`)));
 });
 
-test('Binding-referenced Skills are implicit Codex candidates without becoming direct use cases', async t => {
+test('Binding-referenced Skills default to explicit invocation and require opt-in to expose their description', async t => {
   const f = fixture(t), parent = await f.asset('skill', { name: 'setup-project-architecture', useCase: false }), child = await f.asset('skill', { name: 'setup-codegraph-project', description: 'CodeGraphを導入する', useCase: false });
   const root = mkdtempSync(join(tmpdir(), 'aacl-runtime-binding-'));
   await f.bind(parent, child);
   await f.call('runtime.register', { runtime: 'codex', platform: 'wsl', scope: 'global', path: root });
   const path = join(root, 'skills', child.name, 'SKILL.md'), policyPath = join(root, 'skills', child.name, 'agents', 'openai.yaml');
   assert.equal(existsSync(path), true);
+  assert.ok(!readFileSync(path, 'utf8').includes(child.description));
+  assert.equal(readFileSync(policyPath, 'utf8'), 'policy:\n  allow_implicit_invocation: false\n');
+  await f.call('asset.update', { id: child.id, expectedRevision: child.revision, asset: { implicitInvocation: true }, provenance });
   assert.match(readFileSync(path, 'utf8'), /^description: "CodeGraphを導入する"$/m);
   assert.equal(readFileSync(policyPath, 'utf8'), 'policy:\n  allow_implicit_invocation: true\n');
   const entry = f.store.list<{ assetId: string; implicitInvocation?: boolean }>('runtime-entry').find(item => item.assetId === child.id)!;
   assert.equal(entry.implicitInvocation, true);
+  assert.equal(f.core.asset(child.id).useCase, false);
+  await f.call('asset.update', { id: child.id, expectedRevision: f.core.asset(child.id).revision, asset: { implicitInvocation: false }, provenance });
+  assert.ok(!readFileSync(path, 'utf8').includes(child.description));
+  assert.equal(readFileSync(policyPath, 'utf8'), 'policy:\n  allow_implicit_invocation: false\n');
   await f.call('binding.remove', { id: f.core.bindings().find(binding => binding.sourceId === parent.id && binding.targetId === child.id)!.id, expectedRevision: f.core.bindings().find(binding => binding.sourceId === parent.id && binding.targetId === child.id)!.revision, provenance });
   assert.equal(existsSync(path), false);
   assert.equal(existsSync(policyPath), false);
+});
+
+test('Skill automatic invocation controls both Runtime entries independently of direct launch', async t => {
+  const f = fixture(t), skill = await f.asset('skill', { name: 'invocation-setting', description: 'AUTOMATIC_TRIGGER_DESCRIPTION', body: 'CANONICAL_INVOCATION_TEST_BODY', useCase: true });
+  const root = mkdtempSync(join(tmpdir(), 'aacl-runtime-invocation-'));
+  for (const runtime of ['codex', 'claude']) await f.call('runtime.register', { runtime, platform: 'wsl', scope: 'global', path: join(root, runtime) });
+  const codexPath = join(root, 'codex/skills', skill.name, 'SKILL.md');
+  const claudePath = join(root, 'claude/commands', `${skill.name}.md`);
+  const policyPath = join(root, 'codex/skills', skill.name, 'agents/openai.yaml');
+  const check = (enabled: boolean) => {
+    const codex = readFileSync(codexPath, 'utf8'), claude = readFileSync(claudePath, 'utf8');
+    assert.equal(codex.includes(skill.description), enabled);
+    assert.equal(claude.includes(skill.description), enabled);
+    assert.equal(claude.includes('\ndescription:'), enabled);
+    assert.match(claude, new RegExp(`^disable-model-invocation: ${!enabled}$`, 'm'));
+    assert.equal(readFileSync(policyPath, 'utf8'), `policy:\n  allow_implicit_invocation: ${enabled}\n`);
+    assert.ok(!codex.includes('disable-model-invocation'));
+    for (const content of [codex, claude]) {
+      assert.ok(content.includes(`assetId: ${skill.id}`));
+      assert.ok(!content.includes(skill.body));
+    }
+  };
+  check(false);
+  assert.match(readFileSync(codexPath, 'utf8'), /^description: "invocation-settingをAACLから起動する"$/m);
+  const input = { id: skill.id, expectedRevision: skill.revision, asset: { implicitInvocation: true }, provenance };
+  const operationId = randomUUID();
+  await f.call('asset.update', input, operationId);
+  check(true);
+  await f.call('asset.update', input, operationId);
+  assert.equal(f.core.asset(skill.id).revision, 2);
+  await assert.rejects(f.call('asset.update', { ...input, asset: { implicitInvocation: false } }), /Conflict/);
+  check(true);
+  await f.call('asset.restore', { assetId: skill.id, revision: 1, expectedRevision: 2 });
+  check(false);
+  assert.equal(f.core.asset(skill.id).description, skill.description);
+  const loaded = await f.call<{ description: string; body: string }>('skill.get', { assetId: skill.id });
+  assert.equal(loaded.description, skill.description);
+  assert.equal(loaded.body, skill.body);
+
+  await f.call('skill.usecase', { assetId: skill.id, enabled: false, provenance });
+  assert.equal(existsSync(codexPath), false);
+  assert.equal(existsSync(claudePath), false);
+  await f.call('asset.update', { id: skill.id, expectedRevision: f.core.asset(skill.id).revision, asset: { implicitInvocation: true }, provenance });
+  assert.equal(f.core.asset(skill.id).useCase, false);
+  check(true);
+  await f.call('asset.update', { id: skill.id, expectedRevision: f.core.asset(skill.id).revision, asset: { implicitInvocation: false }, provenance });
+  assert.equal(existsSync(codexPath), false);
+  assert.equal(existsSync(claudePath), false);
+  assert.equal(existsSync(policyPath), false);
+  await assert.rejects(f.asset('rule', { implicitInvocation: true }), /自動発火を設定できるのはSkill/);
+});
+
+test('Legacy Skills and binding-derived Runtime policies migrate to off on synchronization', async t => {
+  const f = fixture(t), parent = await f.asset('skill', { name: 'legacy-parent' });
+  const skill = await f.asset('skill', { name: 'legacy-invocation', description: 'LEGACY_TRIGGER_DESCRIPTION' });
+  const { implicitInvocation: _implicitInvocation, ...legacy } = skill;
+  // Simulate the stored format produced before Skill-level invocation settings existed.
+  f.store.db.prepare('UPDATE records SET data=? WHERE id=?').run(JSON.stringify(legacy), skill.id);
+  await f.bind(parent, skill);
+  assert.equal(f.core.asset(skill.id).implicitInvocation, false);
+  const root = mkdtempSync(join(tmpdir(), 'aacl-runtime-legacy-invocation-'));
+  await f.call('runtime.register', { runtime: 'codex', platform: 'wsl', scope: 'global', path: root });
+  const entry = f.store.list<{ id: string; assetId: string; path: string; hash: string; implicitInvocation?: boolean }>('runtime-entry').find(e => e.assetId === skill.id)!;
+  const policy = f.store.list<{ id: string; assetId: string; path: string; hash: string }>('runtime-file').find(file => file.assetId === skill.id)!;
+  const oldBody = readFileSync(entry.path, 'utf8').replace(`${skill.name}をAACLから起動する`, skill.description);
+  const oldPolicy = 'policy:\n  allow_implicit_invocation: true\n';
+  writeFileSync(entry.path, oldBody);
+  writeFileSync(policy.path, oldPolicy);
+  f.store.put('runtime-entry', { ...entry, hash: createHash('sha256').update(oldBody).digest('hex'), implicitInvocation: true });
+  f.store.put('runtime-file', { ...policy, hash: createHash('sha256').update(oldPolicy).digest('hex') });
+  const synced = await f.call<{ runtimeSync: { failureCount: number } }>('runtime.sync');
+  assert.equal(synced.runtimeSync.failureCount, 0);
+  assert.ok(!readFileSync(entry.path, 'utf8').includes(skill.description));
+  assert.equal(readFileSync(policy.path, 'utf8'), 'policy:\n  allow_implicit_invocation: false\n');
+  assert.equal(f.core.asset(skill.id).revision, skill.revision);
 });
 
 test('Retargeting and restoring bindings synchronize both former and current Skill entries', async t => {
@@ -818,7 +903,7 @@ test('Retargeting and restoring bindings synchronize both former and current Ski
   const changed = await f.call<{ changeSet: ChangeSet }>('binding.save', update, operationId);
   assert.equal(existsSync(join(root, 'skills', former.name)), false);
   assert.equal(readFileSync(join(root, 'skills', current.name, 'notes.md'), 'utf8'), 'current notes');
-  assert.equal(readFileSync(join(root, 'skills', current.name, 'agents/openai.yaml'), 'utf8'), 'policy:\n  allow_implicit_invocation: true\n');
+  assert.equal(readFileSync(join(root, 'skills', current.name, 'agents/openai.yaml'), 'utf8'), 'policy:\n  allow_implicit_invocation: false\n');
 
   await f.call('changeset.restore', { changeSetId: changed.changeSet.id });
   assert.equal(existsSync(join(root, 'skills', current.name)), false);

@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { mkdtempSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
@@ -76,8 +76,8 @@ test('C33: Chromium UI assigns existing and new Roles from Workflow editor, runs
   await page.locator('.asset-card').click();
   await expect(page.locator('.asset-drawer')).toBeVisible();
   await expect(page.getByText('実データを使う検証手順を選ぶ', { exact: true })).toBeVisible();
-  await page.getByRole('switch').click();
-  await expect(page.getByRole('switch')).toHaveAttribute('aria-checked', 'true');
+  await page.getByRole('switch', { name: '直接起動', exact: true }).click();
+  await expect(page.getByRole('switch', { name: '直接起動', exact: true })).toHaveAttribute('aria-checked', 'true');
   await page.getByRole('button', { name: '＋ 資産を作成' }).click();
   await dialog.getByRole('button', { name: 'Role', exact: true }).click();
   await dialog.getByLabel('名前', { exact: true }).fill('検証担当');
@@ -647,4 +647,65 @@ test.describe('Display regressions', () => {
     }
     await expect(page.locator('.breadcrumb')).toHaveAttribute('title', projectName);
   });
+});
+
+test('Skill automatic invocation defaults to off, persists through both UI controls, and synchronizes entries', async ({ page }) => {
+  const root = mkdtempSync(join(tmpdir(), 'aacl-ui-invocation-'));
+  const isolated = await serve(join(root, 'data'), 0);
+  try {
+    for (const runtime of ['codex', 'claude']) await isolated.operations.execute('runtime.register', {
+      operationId: randomUUID(), runtime, scope: 'global', path: join(root, runtime), platform: 'wsl',
+    });
+    await page.addInitScript(() => localStorage.setItem('aacl-language', 'ja'));
+    await page.goto(`http://127.0.0.1:${isolated.port}`);
+    await page.getByRole('button', { name: '最初の資産を作成' }).click();
+    const dialog = page.getByRole('dialog');
+    await dialog.getByLabel('名前', { exact: true }).fill('ui-invocation');
+    await dialog.getByLabel('コメント', { exact: true }).fill('人が読むSkillの説明');
+    await dialog.getByLabel('説明（Runtime YAML）', { exact: true }).fill('UI_AUTOMATIC_TRIGGER');
+    await dialog.getByLabel('本文（Markdown）').fill('UI_CANONICAL_BODY');
+    await expect(dialog.getByRole('checkbox', { name: '自動発火を有効にする' })).not.toBeChecked();
+    await dialog.getByRole('checkbox', { name: 'Runtimeから直接起動できるSkillにする' }).check();
+    await dialog.getByRole('button', { name: '保存する', exact: true }).click();
+    await expect(dialog).not.toBeVisible();
+    const toggle = page.getByRole('switch', { name: '自動発火', exact: true });
+    await expect(toggle).toHaveAttribute('aria-checked', 'false');
+    await expect(page.getByRole('switch', { name: '直接起動', exact: true })).toHaveAttribute('aria-checked', 'true');
+    const checkEntries = (enabled: boolean) => {
+      for (const path of ['codex/skills/ui-invocation/SKILL.md', 'claude/commands/ui-invocation.md']) {
+        const body = readFileSync(join(root, path), 'utf8');
+        expect(body.includes('UI_AUTOMATIC_TRIGGER')).toBe(enabled);
+        expect(body).not.toContain('UI_CANONICAL_BODY');
+      }
+      expect(readFileSync(join(root, 'codex/skills/ui-invocation/agents/openai.yaml'), 'utf8')).toBe(`policy:\n  allow_implicit_invocation: ${enabled}\n`);
+      expect(readFileSync(join(root, 'claude/commands/ui-invocation.md'), 'utf8')).toContain(`disable-model-invocation: ${!enabled}`);
+    };
+    checkEntries(false);
+    await toggle.click();
+    await expect(toggle).toHaveAttribute('aria-checked', 'true');
+    checkEntries(true);
+    await page.reload();
+    await expect(toggle).toHaveAttribute('aria-checked', 'true');
+    await page.getByRole('button', { name: '編集する', exact: true }).click();
+    await expect(dialog.getByRole('checkbox', { name: '自動発火を有効にする' })).toBeChecked();
+    await dialog.getByLabel('コメント', { exact: true }).fill('説明の編集後も自動発火設定を保持する');
+    await dialog.getByRole('button', { name: '保存する', exact: true }).click();
+    await expect(dialog).not.toBeVisible();
+    await expect(toggle).toHaveAttribute('aria-checked', 'true');
+    checkEntries(true);
+    await page.getByRole('button', { name: '編集する', exact: true }).click();
+    await dialog.getByRole('checkbox', { name: '自動発火を有効にする' }).uncheck();
+    await dialog.getByRole('button', { name: '保存する', exact: true }).click();
+    await expect(dialog).not.toBeVisible();
+    await expect(toggle).toHaveAttribute('aria-checked', 'false');
+    checkEntries(false);
+    await page.reload();
+    await expect(toggle).toHaveAttribute('aria-checked', 'false');
+    await page.locator('#language-select').selectOption('en');
+    await expect(page.getByRole('switch', { name: 'Automatic invocation', exact: true })).toHaveAttribute('aria-checked', 'false');
+    await page.getByRole('button', { name: 'Edit', exact: true }).click();
+    await expect(dialog.getByRole('checkbox', { name: 'Enable automatic invocation' })).not.toBeChecked();
+  } finally {
+    await isolated.close();
+  }
 });

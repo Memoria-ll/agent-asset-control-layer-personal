@@ -142,10 +142,13 @@ export class RuntimeEntries {
   body(asset: Asset, runtime: string, entryName = runtimeSlug(asset.name)) {
     const operation = asset.kind === 'workflow' ? 'run_start' : 'skill_get';
     const input = asset.kind === 'workflow' ? `workflowId: ${asset.id}` : `assetId: ${asset.id}`;
-    const description = asset.kind === 'skill' ? asset.description : `${asset.name}をAACLから起動する`;
-    const frontmatter = runtime === 'codex' || asset.kind === 'skill'
-      ? `---\nname: ${entryName}\ndescription: ${JSON.stringify(description)}\n---`
-      : `---\nname: ${entryName}\n---`;
+    const implicitInvocation = asset.kind === 'skill' && asset.implicitInvocation === true;
+    // Codex requires a description even for entries that can only be invoked explicitly.
+    const description = implicitInvocation ? asset.description : `${asset.name}をAACLから起動する`;
+    const frontmatter = `---\nname: ${entryName}\n`
+      + (runtime === 'codex' || implicitInvocation ? `description: ${JSON.stringify(description)}\n` : '')
+      + (runtime === 'claude' ? `disable-model-invocation: ${!implicitInvocation}\n` : '')
+      + '---';
     return `${frontmatter}\n\n<!-- aacl-entry:${asset.id} -->\n\nMCPの aacl_${operation} に ${input} を渡す。\n${asset.kind === 'workflow' ? '現在開いているProject rootをrootへ渡し、operationIdに新しいUUIDを使う。返されたnextExecutionのexecutorを確認し、実施主体がcontextHandleでaacl_context_getを呼び出してからStageを実施する。遷移後も返されたnextExecutionに従い、Skill・Rule本文をオーケストレーターへ転送しない。\n' : '取得したCanonical本文に従う。\n'}`;
   }
   policy(runtime: string, implicitInvocation = false, source?: string) {
@@ -217,7 +220,7 @@ export class RuntimeEntries {
     const results: { targetId: string; assetId: string; ok: boolean; message?: string }[] = [];
     for (const target of this.core.store.list<RuntimeTarget>('runtime-target').filter(t => t.enabled)) {
       const boundSkillIds = new Set(this.core.bindings(target.scope).filter(b => b.purpose === 'reference').map(b => b.targetId).filter(assetId => allAssets.some(a => a.id === assetId && a.kind === 'skill')));
-      const assets = allAssets.filter(a => !a.deletedAt && a.scope === target.scope && (a.kind === 'workflow' || a.kind === 'skill' && (a.useCase || boundSkillIds.has(a.id))));
+      const assets = allAssets.filter(a => !a.deletedAt && a.scope === target.scope && (a.kind === 'workflow' || a.kind === 'skill' && (a.useCase || a.implicitInvocation === true || boundSkillIds.has(a.id))));
       const names = runtimeNames(assets);
       const previous = this.core.store.list<Entry>('runtime-entry').filter(e => e.targetId === target.id && e.active);
       const previousFiles = this.core.store.list<RuntimeFile>('runtime-file').filter(file => file.targetId === target.id);
@@ -229,7 +232,7 @@ export class RuntimeEntries {
           const entryName = names.get(asset.id);
           const path = entryName ? target.runtime === 'claude' ? join(target.path, 'commands', `${entryName}.md`) : join(target.path, 'skills', entryName, 'SKILL.md') : undefined;
           const desired = entryName ? this.body(asset, target.runtime, entryName) : undefined;
-          const implicitInvocation = asset.kind === 'skill' && boundSkillIds.has(asset.id);
+          const implicitInvocation = asset.kind === 'skill' && asset.implicitInvocation === true;
           if (requested.has(asset.id) || (old && path && (old.path !== path || old.hash !== hash(desired!) || old.implicitInvocation !== implicitInvocation))) ids.add(asset.id);
         }
         for (const entry of previous) if (requested.has(entry.assetId)) ids.add(entry.assetId);
@@ -268,7 +271,7 @@ export class RuntimeEntries {
               unlinkSync(old!.path);
               removeEmptyCodexSkillDirectory(target.runtime, old!.path);
             }
-            const implicitInvocation = asset.kind === 'skill' && boundSkillIds.has(asset.id);
+            const implicitInvocation = asset.kind === 'skill' && asset.implicitInvocation === true;
             if (!old || old.path !== path || old.hash !== hash(desired!) || old.implicitInvocation !== implicitInvocation) this.core.store.put('runtime-entry', { id: old?.id, targetId: target.id, assetId, path, hash: hash(desired!), active: true, implicitInvocation });
           } else if (old) {
             if (existing !== undefined) unlinkSync(path);
@@ -276,7 +279,7 @@ export class RuntimeEntries {
             this.core.store.put('runtime-entry', { ...old, active: false });
           }
           phase = 'runtime-file';
-          const implicitInvocation = asset ? asset.kind === 'skill' && boundSkillIds.has(asset.id) : oldImplicitInvocation;
+          const implicitInvocation = asset ? asset.kind === 'skill' && asset.implicitInvocation === true : oldImplicitInvocation;
           const legacyPolicy = target.runtime === 'codex' ? this.policy(target.runtime, oldImplicitInvocation) : undefined;
           this.syncSupportingFiles(target, asset, old, asset ? path : old?.path, previousFiles.filter(file => file.assetId === assetId), implicitInvocation, legacyPolicy);
           if (prior && !prior.resolvedAt) this.core.store.put('diagnostic', { ...prior, resolvedAt: new Date().toISOString() });

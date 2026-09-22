@@ -81,9 +81,9 @@ claude mcp add --transport http aacl http://127.0.0.1:4319/mcp
 
 MCP endpointはStreamable HTTP、protocol revisionは`2026-07-28`です。Runの対応づけには`run.start`が返す`contextHandle`を使用します。後続のRun操作へAIがこの値を渡します。
 
-配置するWorkflow CommandとCodex Skillには、対象Asset IDを渡すMCP operationだけを記載します。Skill入口にはRuntime用の`name`と`description`も持たせます。入口は`aacl ensure`やshell commandを実行しません。Windowsログオン後は同じWSLのServiceへlocalhostで接続できます。Serviceを手動停止した場合は、WSLで`aacl ensure`を実行して再開します。
+配置するWorkflow CommandとCodex Skillには、対象Asset IDを渡すMCP operationだけを記載します。Skill入口にはRuntime用の`name`と、自動発火ON時だけSkillの`description`を持たせます。入口は`aacl ensure`やshell commandを実行しません。Windowsログオン後は同じWSLのServiceへlocalhostで接続できます。Serviceを手動停止した場合は、WSLで`aacl ensure`を実行して再開します。
 
-Projectで`aacl init`を実行すると、Globalの紐づけをProject用にコピーし、Project scopeのAsset用Runtime設定先を登録します。Project内にはProject専用の入口だけを配置し、Global入口はGlobal設定先に置きます。Global設定先はUIで標準候補を確認して登録できます。生成するSkill入口には`name`、`description`、Asset IDと取得手順を記載し、Canonical本文は発火後にSQLiteから取得します。Assetの`agents/openai.yaml`は入力として保存できます。Codex出力時はそのYAMLへAACLのpolicyを合成し、`policy.allow_implicit_invocation`だけをAACLの設定で上書きします。生成後に利用者が編集した入口は自動上書きせず、診断へ記録します。
+Projectで`aacl init`を実行すると、Globalの紐づけをProject用にコピーし、Project scopeのAsset用Runtime設定先を登録します。Project内にはProject専用の入口だけを配置し、Global入口はGlobal設定先に置きます。Global設定先はUIで標準候補を確認して登録できます。生成するSkill入口には`name`、自動発火ON時のSkillの`description`、Asset IDと取得手順を記載し、Canonical本文は発火後にSQLiteから取得します。Assetの`agents/openai.yaml`は入力として保存できます。Codex出力時はそのYAMLへAACLのpolicyを合成し、`policy.allow_implicit_invocation`だけをSkillの自動発火設定（`implicitInvocation`、既定false）で上書きします。直接起動や紐づけの有無では自動発火を有効にしません。OFF時のCodex入口には必須のdescription欄へ短い起動案内だけを残し、Claude Codeではdescriptionを省略して`disable-model-invocation: true`を記載します。更新後は「設定・接続 → Runtimeの入口」の「再同期」で既存の入口にも反映できます。生成後に利用者が編集した入口は自動上書きせず、診断へ記録します。
 
 Asset、紐づけ、Project Commonの書き込みでは、新しい`operationId`を使用してください。同じ操作の再送時だけ、同じIDと同じ入力を再利用します。既存対象の更新・解除には取得時点の`expectedRevision`を付け、複数変更は`aacl_changeset_preview`でDry Runしてから適用します。`asset.save`は全置換なので、本文や補助ファイルを省略せず完全なAssetを送ってください。AI経由の資産変更には`provenance.origin: "ai"`と`userRequest`・`reason`が必要です。`aacl_asset_list`は概要が既定で、本文は`includeBody`、`fields`、または`aacl_asset_get_many`で明示取得します。用途別のtool一覧と入力schemaはMCPの`tools/list`から取得できます。共通案内は`aacl_bootstrap_get`で取得します。
 
@@ -91,7 +91,7 @@ Asset、紐づけ、Project Commonの書き込みでは、新しい`operationId`
 
 ## 画面での操作
 
-- **資産ライブラリ**: 作成・編集、Skillの直接起動切り替え、Workflowの工程・遷移図、直接参照とRole経由の参照、Stage側／Asset側の紐づけ編集。
+- **資産ライブラリ**: 作成・編集、Skillの直接起動・自動発火切り替え（詳細画面と編集画面）、Workflowの工程・遷移図、直接参照とRole経由の参照、Stage側／Asset側の紐づけ編集。
 - **Workflow Run**: 明示的な開始、許可遷移の選択、完了報告、中止、Snapshot・提供内容・実行記録。
 - **Journal / Journal Review**: タスク完了時の気づき記録ON/OFF、Markdown記録、気づきごとの保留・処理済み・却下、提案、ユーザー判断、承認済み変更の適用。
 - **変更履歴**: Assetの過去版と現在版の比較、revision復元、Change Set適用前への復元、変更理由。

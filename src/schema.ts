@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { modelChoiceTemplateNames } from './model-template.ts';
+import { journalSkillKey } from './canonical-assets.ts';
 
 export const text = z.string().trim().min(1);
 export const id = z.uuid();
@@ -50,6 +51,7 @@ export function normalizeAssetRecord(value: unknown) {
   if (record.kind === 'skill') {
     normalized.description = oldTaskType.trim() || oldDescription;
     normalized.explanation = typeof record.explanation === 'string' ? record.explanation : oldDescription;
+    if (record.implicitInvocation === undefined) normalized.implicitInvocation = false;
   } else {
     delete normalized.explanation;
   }
@@ -72,6 +74,7 @@ const assetInputSchema = z.object({
   name: text, description: text, body: z.string().default(''),
   responsibilities: z.string().default(''), scope: scope.default('global'),
   explanation: z.string().optional(), useCase: z.boolean().default(false),
+  implicitInvocation: z.boolean().default(false),
   modelName: z.string().default(''), invocationMethod: z.string().default(''),
   choices: z.array(modelChoiceSchema).default([]),
   metadata: z.record(z.string(), z.unknown()).default({}),
@@ -86,6 +89,7 @@ export const assetPatchSchema = z.object({
   name: text.optional(), description: text.optional(), body: z.string().optional(),
   responsibilities: z.string().optional(), scope: scope.optional(),
   explanation: z.string().optional(), useCase: z.boolean().optional(),
+  implicitInvocation: z.boolean().optional(),
   modelName: z.string().optional(), invocationMethod: z.string().optional(),
   choices: z.array(modelChoiceSchema).optional(),
   metadata: z.record(z.string(), z.unknown()).optional(),
@@ -116,6 +120,8 @@ export const assetSchema = z.preprocess(normalizeAssetRecord, assetInputSchema).
     }
   }
   if (a.kind !== 'skill' && a.useCase) fail('直接起動を設定できるのはSkillです。');
+  if (a.kind !== 'skill' && a.implicitInvocation) fail('自動発火を設定できるのはSkillです。');
+  if (journalSkillKey(a) && a.implicitInvocation) fail('標準のJournal Skillは自動発火を有効にできません。');
   if (a.kind === 'workflow') {
     const stages = new Set(a.stages.map(s => s.id));
     if (!stages.size || stages.size !== a.stages.length) fail('Stageは1件以上で、IDは重複できません。');
