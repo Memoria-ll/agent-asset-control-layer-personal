@@ -564,6 +564,23 @@ test.describe('Display regressions', () => {
     await page.locator(`.asset-card[href="#assets/${role.id}"]`).click();
     await expect(page.locator('.asset-drawer')).toContainText('Scope B rule');
     await expect(page.locator('.asset-drawer')).not.toContainText('Scope A rule');
+    const summary = page.locator('.asset-drawer .scope-summary');
+    await expect(summary.locator('dt')).toHaveText(['Asset stored in', 'Bindings used here']);
+    await expect(summary.locator('dd')).toHaveText(['Global', 'Project / Scope B']);
+    await expect(summary).toContainText('managed independently');
+    await page.locator('.asset-drawer [data-action^="binding-edit:"]').click();
+    await expect(page.locator('dialog .scope-summary dd')).toHaveText(['Global', 'Project / Scope B']);
+    await page.locator('dialog [name=targetId]').selectOption({ label: 'Rule / Scope A rule' });
+    await page.getByRole('button', { name: 'Save binding', exact: true }).click();
+    await expect(page.locator('dialog')).not.toBeVisible();
+    await expect(page.locator('.asset-drawer')).toContainText('Scope A rule');
+    await page.locator('#language-select').selectOption('ja');
+    await expect(summary.locator('dt')).toHaveText(['資産の保存先', '紐づけの管理先']);
+    await expect(summary).toContainText('その後は自動同期されません');
+    await page.locator('#scope-select').selectOption('global');
+    await page.locator(`.asset-card[href="#assets/${role.id}"]`).click();
+    await expect(summary.locator('dd')).toHaveText(['Global', 'Global']);
+    await expect(page.locator('.asset-drawer')).not.toContainText('Scope A rule');
   });
 
   test('English Workflow editor translates added stages and renumbered transitions', async ({ page }) => {

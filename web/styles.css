@@ -749,6 +749,38 @@ pre {
   margin:0;
   font-size:12px
 }
+.scope-summary {
+  border:1px solid var(--line);
+  border-left:3px solid var(--blue);
+  border-radius:10px;
+  padding:12px 16px;
+  margin-bottom:18px;
+  overflow-wrap:anywhere
+}
+.scope-summary dl {
+  display:flex;
+  flex-wrap:wrap;
+  gap:12px 28px;
+  margin:0
+}
+.scope-summary dl > div {
+  flex:1 1 180px;
+  min-width:0
+}
+.scope-summary dt {
+  color:var(--muted);
+  font-size:11px
+}
+.scope-summary dd {
+  margin:4px 0 0;
+  font-size:13px;
+  font-weight:600
+}
+.scope-summary p {
+  margin:10px 0 0;
+  font-size:12px;
+  line-height:1.7
+}
 .badge-row {
   display:flex;
   align-items:center;

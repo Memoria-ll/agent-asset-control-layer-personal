@@ -301,11 +301,8 @@ export class RuntimeEntries {
                     if (existing !== undefined && existing !== desired && (!old || old.path !== path || hash(existing) !== old.hash))
                         throw new Error('既存ファイルがAACL生成後に変更されています。内容を確認してください。');
                     if (asset) {
-                        if (existing !== desired) {
-                            const temp = `${path}.${process.pid}.tmp`;
-                            writeFileSync(temp, desired, { mode: 0o600, flag: 'wx' });
-                            renameSync(temp, path);
-                        }
+                        if (existing !== desired)
+                            writeOwnedFile(path, desired);
                         if (oldPathExists) {
                             if (lstatSync(old.path).isSymbolicLink() || hash(readFileSync(old.path, 'utf8')) !== old.hash)
                                 throw new Error('以前の入口がAACL生成後に変更されています。内容を確認してください。');
@@ -317,10 +314,8 @@ export class RuntimeEntries {
                             this.core.store.put('runtime-entry', { id: old?.id, targetId: target.id, assetId, path, hash: hash(desired), active: true, implicitInvocation });
                     }
                     else if (old) {
-                        if (existing !== undefined) {
+                        if (existing !== undefined)
                             unlinkSync(path);
-                            removeEmptyCodexSkillDirectory(target.runtime, path);
-                        }
                         removeEmptyCodexSkillDirectory(target.runtime, path);
                         this.core.store.put('runtime-entry', { ...old, active: false });
                     }

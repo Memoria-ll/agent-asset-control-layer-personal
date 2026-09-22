@@ -9,7 +9,7 @@ import { Core, normalizeRoot } from '../src/core.ts';
 import { Operations } from '../src/operations.ts';
 import { assetSchema, parseJournal } from '../src/schema.ts';
 import { backupData, exportData, restoreBackup } from '../src/maintenance.ts';
-import { diagnosticAsset, diagnosticAssetId, relatedWorkflows, stageRoleBindingChanges, workflowDiagram } from '../web/view-model.ts';
+import { diagnosticAsset, diagnosticAssetId, relatedWorkflows, stageModelBindingChanges, stageRoleBindingChanges, workflowDiagram } from '../web/view-model.ts';
 import type { Asset, Binding, ChangeSet, Context, Delivery, ExecutionPlan, Insight, Journal, Project, ReviewItem, Run, RuntimeTarget, Snapshot } from '../src/schema.ts';
 
 const provenance = { origin: 'ai', userRequest: 'テスト用の明示依頼', reason: '挙動の確認' };
@@ -236,6 +236,9 @@ test('Model choices are configured freely, selected per Workflow Stage, and deli
   const workflow = await f.workflow();
   const selectedChoices = { 実行系: 'codex sol', effort: 'high' };
   const binding = await f.bind(workflow, model, { stageId: 'build', purpose: 'stage-model', selectedChoices });
+  assert.deepEqual(stageModelBindingChanges(workflow.id, 'global', [
+    { stageId: 'build', modelId: model.id, selectedChoices: { effort: 'high', 実行系: 'codex sol' } },
+  ], f.core.bindings()), [], 'choice key order must not create a new binding revision');
   const run = await f.start(workflow);
   assert.deepEqual(binding.selectedChoices, selectedChoices);
   assert.deepEqual(run.context.modelSelections, selectedChoices);
@@ -257,6 +260,15 @@ test('Model choices are configured freely, selected per Workflow Stage, and deli
   assert.throws(() => assetSchema.parse({ kind: 'model', name: '重複', description: '説明', modelName: 'agent', invocationMethod: 'Runtime', choices: [{ name: 'effort', options: ['low', 'low'] }] }), /重複/);
   assert.throws(() => assetSchema.parse({ kind: 'model', name: '未定義', description: '説明', modelName: 'agent-{{choice.variant}}', invocationMethod: 'Runtime', choices: [{ name: 'effort', options: ['low'] }] }), /定義されていません/);
   assert.throws(() => assetSchema.parse({ kind: 'model', name: '不正', description: '説明', modelName: 'agent-{{choice.}}', invocationMethod: 'Runtime', choices: [{ name: 'effort', options: ['low'] }] }), /空、または不正/);
+  const changes = stageModelBindingChanges(workflow.id, 'global', [
+    { stageId: 'build', modelId: model.id, selectedChoices: { ...selectedChoices, effort: 'low' } },
+    { stageId: 'review', modelId: model.id, selectedChoices },
+  ], f.core.bindings());
+  await f.call('changeset.apply', { changes, provenance });
+  assert.equal((await f.start(workflow)).context.modelSelections?.effort, 'low');
+  const removals = stageModelBindingChanges(workflow.id, 'global', [], f.core.bindings());
+  await f.call('changeset.apply', { changes: removals, provenance });
+  assert.equal((await f.start(workflow)).nextExecution.executor, 'orchestrator');
 });
 
 test('C02 C04 C13 C14 C15 C28 C29: schema / stable identity / idempotent writes / provenance / restoration', async t => {
@@ -319,6 +331,44 @@ test('asset.update preserves omitted fields such as supportingFiles', async t =>
   });
   assert.equal(f.core.asset(asset.id).revision, 2);
   await assert.rejects(f.call('asset.update', { id: asset.id, expectedRevision: asset.revision, asset: {}, provenance }), /更新するAsset field/);
+});
+
+test('Change Set partial updates merge with preceding saves and creates, and roll back together', async t => {
+  const f = fixture(t), original = await f.asset('skill', { supportingFiles: { 'guide.md': 'original' } });
+  const createdId = randomUUID();
+  const changes = [
+    { type: 'asset.save', id: original.id, expectedRevision: 1, asset: { ...f.core.assetPayload(original), body: 'saved', supportingFiles: { 'guide.md': 'saved guide' } } },
+    { type: 'asset.update', id: original.id, expectedRevision: 2, asset: { name: 'renamed' } },
+    { type: 'asset.update', id: original.id, expectedRevision: 3, asset: { description: 'new description' } },
+    { type: 'asset.create', id: createdId, asset: { ...f.core.assetPayload(original), body: 'created' } },
+    { type: 'asset.update', id: createdId, expectedRevision: 1, asset: { name: 'created and renamed' } },
+  ];
+  const boundary = f.store.boundary();
+  const preview = await f.call<{ valid: boolean }>('changeset.preview', { changes });
+  assert.equal(preview.valid, true);
+  assert.equal(f.store.boundary(), boundary);
+  assert.deepEqual(f.core.asset(original.id), original);
+  assert.equal(f.store.maybe(createdId), undefined);
+
+  await assert.rejects(f.call('changeset.apply', { changes: [...changes,
+    { type: 'asset.update', id: original.id, expectedRevision: 4, asset: { body: '' } },
+  ], provenance }), /本文は必須/);
+  assert.equal(f.store.boundary(), boundary);
+  assert.deepEqual(f.core.asset(original.id), original);
+  assert.equal(f.store.maybe(createdId), undefined);
+
+  const result = await f.call<{ changeSet: ChangeSet }>('changeset.apply', { changes, provenance });
+  const updated = f.core.asset(original.id);
+  assert.equal(updated.revision, 4);
+  assert.equal(updated.body, 'saved');
+  assert.equal(updated.name, 'renamed');
+  assert.equal(updated.description, 'new description');
+  assert.deepEqual(updated.supportingFiles, { 'guide.md': 'saved guide' });
+  assert.equal(f.core.asset(createdId).body, 'created');
+  assert.equal(f.core.asset(createdId).name, 'created and renamed');
+  assert.equal(f.core.asset(createdId).revision, 2);
+  assert.equal(f.store.revision<Asset>(original.id, 3).body, 'saved');
+  assert.equal(result.changeSet.operations.some(change => change.type === 'asset.update'), false);
 });
 
 test('Change Set restore detects edits made after the original Change Set', async t => {
@@ -572,13 +622,20 @@ test('Journal, Review and History list pages stay compact and load details by cu
   assert.equal(journalPage.journals[0]!.task, '二つ目の記録');
   assert.equal('raw' in journalPage.journals[0]!, false);
   assert.ok(journalPage.nextCursor);
-  const olderJournalPage = await f.call<{ journals: Journal[] }>('journal.list', { limit: 1, cursor: journalPage.nextCursor });
+  const olderJournalPage = await f.call<{ journals: Journal[]; nextCursor: string | null }>('journal.list', { limit: 1, cursor: journalPage.nextCursor });
   assert.equal(olderJournalPage.journals[0]!.task, '一つ目の記録');
+  assert.equal(olderJournalPage.nextCursor, null);
+  const restartedJournalPage = await f.call<{ journals: Journal[] }>('journal.list', { limit: 1, cursor: 'unknown' });
+  assert.equal(restartedJournalPage.journals[0]!.id, journalPage.journals[0]!.id);
 
   const reviewPage = await f.call<{ reviewItems: (ReviewItem & { body?: string })[]; journals: (Journal & { raw?: string })[]; nextCursor: string | null }>('review.pending', { limit: 1, include: ['journalTask'], includeBodies: false });
   assert.equal('body' in reviewPage.reviewItems[0]!, false);
   assert.equal('raw' in reviewPage.journals[0]!, false);
   assert.ok(reviewPage.nextCursor);
+  const olderReviewPage = await f.call<{ reviewItems: ReviewItem[]; journals: Journal[]; nextCursor: string | null }>('review.pending', { limit: 1, cursor: reviewPage.nextCursor });
+  assert.equal(olderReviewPage.reviewItems[0]!.journalId, olderJournalPage.journals[0]!.id);
+  assert.equal(olderReviewPage.journals[0]!.id, olderJournalPage.journals[0]!.id);
+  assert.equal(olderReviewPage.nextCursor, null);
 
   const asset = await f.asset('skill', { name: '履歴の概要確認' });
   const updated = await f.call<{ entities: Asset[] }>('asset.save', { id: asset.id, expectedRevision: asset.revision, asset: { ...f.core.assetPayload(asset), body: '更新後の本文' }, provenance });
@@ -586,8 +643,13 @@ test('Journal, Review and History list pages stay compact and load details by cu
   const historyPage = await f.call<{ changeSets: (ChangeSet & { operations?: ChangeSet['operations'] })[]; nextCursor: string | null }>('history.get', { limit: 1 });
   assert.equal(historyPage.changeSets.length, 1);
   assert.equal('operations' in historyPage.changeSets[0]!, false);
-  const detailedHistory = await f.call<{ changeSets: ChangeSet[] }>('history.get', { changeSetId: historyPage.changeSets[0]!.id, includeDetails: true });
+  assert.ok(historyPage.nextCursor);
+  const olderHistoryPage = await f.call<{ changeSets: ChangeSet[]; nextCursor: string | null }>('history.get', { limit: 1, cursor: historyPage.nextCursor });
+  assert.notEqual(olderHistoryPage.changeSets[0]!.id, historyPage.changeSets[0]!.id);
+  assert.equal(olderHistoryPage.nextCursor, null);
+  const detailedHistory = await f.call<{ changeSets: ChangeSet[]; nextCursor: string | null }>('history.get', { changeSetId: historyPage.changeSets[0]!.id, includeDetails: true });
   assert.ok(detailedHistory.changeSets[0]!.operations.length > 0);
+  assert.equal(detailedHistory.nextCursor, null);
 });
 
 test('Review items keep direct Journal task links and independent decisions', async t => {
@@ -742,6 +804,33 @@ test('Binding-referenced Skills are implicit Codex candidates without becoming d
   await f.call('binding.remove', { id: f.core.bindings().find(binding => binding.sourceId === parent.id && binding.targetId === child.id)!.id, expectedRevision: f.core.bindings().find(binding => binding.sourceId === parent.id && binding.targetId === child.id)!.revision, provenance });
   assert.equal(existsSync(path), false);
   assert.equal(existsSync(policyPath), false);
+});
+
+test('Retargeting and restoring bindings synchronize both former and current Skill entries', async t => {
+  const f = fixture(t), parent = await f.asset('skill', { name: 'parent' });
+  const former = await f.asset('skill', { name: 'former', supportingFiles: { 'notes.md': 'former notes' } });
+  const current = await f.asset('skill', { name: 'current', supportingFiles: { 'notes.md': 'current notes' } });
+  const binding = await f.bind(parent, former);
+  const root = mkdtempSync(join(tmpdir(), 'aacl-runtime-retarget-'));
+  await f.call('runtime.register', { runtime: 'codex', platform: 'wsl', scope: 'global', path: root });
+  const update = { id: binding.id, expectedRevision: binding.revision, binding: { sourceId: parent.id, targetId: current.id }, provenance };
+  const operationId = randomUUID();
+  const changed = await f.call<{ changeSet: ChangeSet }>('binding.save', update, operationId);
+  assert.equal(existsSync(join(root, 'skills', former.name)), false);
+  assert.equal(readFileSync(join(root, 'skills', current.name, 'notes.md'), 'utf8'), 'current notes');
+  assert.equal(readFileSync(join(root, 'skills', current.name, 'agents/openai.yaml'), 'utf8'), 'policy:\n  allow_implicit_invocation: true\n');
+
+  await f.call('changeset.restore', { changeSetId: changed.changeSet.id });
+  assert.equal(existsSync(join(root, 'skills', current.name)), false);
+  assert.equal(readFileSync(join(root, 'skills', former.name, 'notes.md'), 'utf8'), 'former notes');
+  await f.call('binding.save', update, operationId);
+  assert.equal(existsSync(join(root, 'skills', current.name)), false);
+  assert.equal(existsSync(join(root, 'skills', former.name, 'SKILL.md')), true);
+
+  const restored = f.core.bindings().find(item => item.id === binding.id)!;
+  await f.call('changeset.apply', { changes: [{ type: 'binding.save', id: binding.id, binding: update.binding, expectedRevision: restored.revision }], provenance });
+  assert.equal(existsSync(join(root, 'skills', former.name)), false);
+  assert.equal(existsSync(join(root, 'skills', current.name, 'SKILL.md')), true);
 });
 
 test('Runtime sync moves an owned ID-named entry to its asset name', async t => {

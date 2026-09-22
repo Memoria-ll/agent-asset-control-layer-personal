@@ -21,6 +21,12 @@ function sameRevisions(a: { id: string; revision: number }[], b: { id: string; r
   return JSON.stringify(sorted(a)) === JSON.stringify(sorted(b));
 }
 
+function pageByCursor<T extends { id: string }>(items: T[], cursor: string | null | undefined, limit: number) {
+  const start = cursor ? items.findIndex(item => item.id === cursor) + 1 : 0;
+  const page = items.slice(start, start + limit);
+  return { page, nextCursor: start + page.length < items.length ? page.at(-1)?.id ?? null : null };
+}
+
 class PreviewAbort extends Error {
   readonly result: ReturnType<Core['applyChanges']>;
   constructor(result: ReturnType<Core['applyChanges']>) { super('preview'); this.result = result; }
@@ -154,22 +160,18 @@ export class Core {
   }
   private validateExpectedRevisions(changes: Change[]) {
     const virtual = new Map<string, number>();
-    const current = (kind: string, id: string) => {
-      const value = kind === 'common' ? this.store.list<Common>('common').find(c => c.projectId === id) : this.store.maybe<Stamp>(id);
-      if (!value) throw new ConflictError(`${kind}の対象が見つかりません: ${id}`, { kind, id });
-      const key = `${kind}:${value.id}`;
-      const revision = virtual.get(key) ?? value.revision;
-      return { key, revision };
-    };
     const advance = (kind: string, id: string, expected: number | undefined) => {
-      const target = current(kind, id);
-      if (expected === undefined) throw new ConflictError(`${kind} ${id} のexpectedRevisionが必要です。最新revisionを取得して再試行してください。`, { kind, id, actual: target.revision });
-      if (target.revision !== expected) throw new ConflictError(`${kind} ${id} はrev.${expected}ではなくrev.${target.revision}です。`, { kind, id, expected, actual: target.revision });
-      virtual.set(target.key, target.revision + 1);
+      const key = `${kind}:${id}`;
+      const actual = virtual.get(key) ?? (kind === 'common' ? this.store.list<Common>('common').find(c => c.projectId === id) : this.store.maybe<Stamp>(id))?.revision;
+      if (actual === undefined) throw new ConflictError(`${kind}の対象が見つかりません: ${id}`, { kind, id });
+      if (expected === undefined) throw new ConflictError(`${kind} ${id} のexpectedRevisionが必要です。最新revisionを取得して再試行してください。`, { kind, id, actual });
+      if (actual !== expected) throw new ConflictError(`${kind} ${id} はrev.${expected}ではなくrev.${actual}です。`, { kind, id, expected, actual });
+      virtual.set(key, actual + 1);
     };
     for (const change of changes) {
+      if (change.type === 'asset.create') virtual.set(`asset:${change.id}`, 1);
       if (change.type === 'asset.save' && change.id) advance('asset', change.id, change.expectedRevision);
-      if (change.type === 'asset.delete') advance('asset', change.id, change.expectedRevision);
+      if (change.type === 'asset.update' || change.type === 'asset.delete') advance('asset', change.id, change.expectedRevision);
       if (change.type === 'binding.save' && change.id) advance('binding', change.id, change.expectedRevision);
       if (change.type === 'binding.remove') advance('binding', change.id, change.expectedRevision);
       if (change.type === 'common.save') {
@@ -184,35 +186,21 @@ export class Core {
     }
   }
   applyChanges(changes: Change[], provenance: Provenance, proposalId?: string, approvalId?: string, restore?: { entityId: string; revision: number }[], restoresChangeSetId?: string, allowAssetDelete = false, allowJournalSkillSetup = false) {
-    const stagedAssets = new Map<string, ReturnType<Core['assetPayload']>>();
-    const resolvedChanges = changes.map(change => {
-      if (change.type !== 'asset.update') return change;
-      const current = stagedAssets.get(change.id) ?? this.assetPayload(this.asset(change.id));
-      const patch = assetPatchSchema.parse(change.asset);
-      const asset = assetSchema.parse({ ...current, ...patch });
-      stagedAssets.set(change.id, asset);
-      return {
-        type: 'asset.save' as const,
-        id: change.id,
-        expectedRevision: change.expectedRevision,
-        asset,
-      };
-    });
-    if (!allowAssetDelete && resolvedChanges.some(c => c.type === 'asset.delete')) throw new Error('Asset削除は影響一覧を確認した後、専用の削除操作から確定してください。');
-    for (const change of resolvedChanges) {
+    if (!allowAssetDelete && changes.some(c => c.type === 'asset.delete')) throw new Error('Asset削除は影響一覧を確認した後、専用の削除操作から確定してください。');
+    for (const change of changes) {
       if (change.type === 'asset.delete' && journalSkillKey(this.asset(change.id))) throw new Error('JournalとJournal Reviewの標準Skillは削除できません。');
     }
-    this.validateExpectedRevisions(resolvedChanges);
-    for (const change of resolvedChanges.filter((c): c is Extract<Change, { type: 'asset.delete' }> => c.type === 'asset.delete')) {
+    this.validateExpectedRevisions(changes);
+    for (const change of changes.filter((c): c is Extract<Change, { type: 'asset.delete' }> => c.type === 'asset.delete')) {
       const preview = this.assetDeletionPreview(change.id);
       const bindingRevisions = preview.bindings.map(({ id, revision }) => ({ id, revision }));
       const projectCommonRevisions = preview.projectCommons.map(({ id, revision }) => ({ id, revision }));
       if (!change.confirmed || preview.asset.revision !== change.expectedRevision || !sameRevisions(bindingRevisions, change.expectedBindingRevisions) || !sameRevisions(projectCommonRevisions, change.expectedProjectCommonRevisions)) {
         throw new Error('Assetまたは参照関係が変わりました。参照一覧を再取得し、削除を確認してください。');
       }
-      for (const reference of preview.bindings) if (!resolvedChanges.some(c => c.type === 'binding.remove' && c.id === reference.id)) throw new Error('削除前に参照する紐づけを解除してください。');
+      for (const reference of preview.bindings) if (!changes.some(c => c.type === 'binding.remove' && c.id === reference.id)) throw new Error('削除前に参照する紐づけを解除してください。');
       for (const reference of preview.projectCommons) {
-        const commonChange = resolvedChanges.find(c => c.type === 'common.save' && c.projectId === reference.projectId);
+        const commonChange = changes.find(c => c.type === 'common.save' && c.projectId === reference.projectId);
         if (!commonChange || commonChange.type !== 'common.save' || commonChange.ruleIds.includes(change.id)) throw new Error('削除前にProject CommonのRule参照を解除してください。');
       }
     }
@@ -231,7 +219,14 @@ export class Core {
       histories.push(this.store.put('history', { entityId: result.id, kind, before, after: result.revision, changeSetId, restoredFrom: restore?.find(r => r.entityId === result.id)?.revision }));
       return result;
     };
-    for (const change of resolvedChanges) {
+    const resolvedChanges: Change[] = [];
+    for (const input of changes) {
+      // Merge against the preceding write in this transaction, including full saves and creates.
+      const change = input.type === 'asset.update' ? {
+        ...input, type: 'asset.save' as const,
+        asset: assetSchema.parse({ ...this.assetPayload(this.asset(input.id)), ...assetPatchSchema.parse(input.asset) }),
+      } : input;
+      resolvedChanges.push(change);
       if (change.type === 'asset.create') {
         const a = assetSchema.parse(change.asset);
         this.assertScope(a.scope);
@@ -646,9 +641,7 @@ export class Core {
   }
   journalList(input: { projectId?: string; limit?: number; cursor?: string | null; includeBodies?: boolean } = {}) {
     const allJournals = this.store.list<Journal>('journal').filter(journal => !input.projectId || journal.projectId === input.projectId || !journal.projectId);
-    const cursorIndex = input.cursor ? allJournals.findIndex(journal => journal.id === input.cursor) : -1;
-    const start = cursorIndex < 0 ? 0 : cursorIndex + 1;
-    const page = allJournals.slice(start, start + (input.limit ?? 20));
+    const { page, nextCursor } = pageByCursor(allJournals, input.cursor, input.limit ?? 20);
     const pageIds = new Set(page.map(journal => journal.id));
     const pageInsights = this.store.list<Insight>('insight').filter(insight => pageIds.has(insight.journalId));
     const journals = page.map(journal => {
@@ -661,24 +654,24 @@ export class Core {
       const { body: _body, ...summary } = insight;
       return summary;
     })());
-    return { journals, insights, total: allJournals.length, nextCursor: start + page.length < allJournals.length ? page.at(-1)?.id ?? null : null };
+    return { journals, insights, total: allJournals.length, nextCursor };
   }
   review(input: { status?: ReviewItem['status']; projectId?: string; include?: ('journalTask' | 'insights' | 'proposalRefs')[]; includeBodies?: boolean; includeChanges?: boolean; limit?: number; cursor?: string | null } = {}) {
     const include = input.include ?? ['journalTask', 'insights', 'proposalRefs'], includeBodies = input.includeBodies ?? false;
     const allInsights = this.store.list<Insight>('insight'), journalsById = new Map(this.store.list<Journal>('journal').map(journal => [journal.id, journal])), insightItems = new Map(this.store.list<ReviewItem>('review-item').map(item => [item.insightId, item]));
-    const items = allInsights.map(insight => insightItems.get(insight.id) ?? this.reviewItemForInsight(insight.id, false) ?? ({ id: insight.id, revision: insight.revision, createdAt: insight.createdAt, updatedAt: insight.updatedAt, journalId: insight.journalId, journalTaskId: insight.journalId, insightId: insight.id, projectId: journalsById.get(insight.journalId)?.projectId, heading: insight.heading, body: insight.body, status: insight.status, lastDecision: insight.status === 'processed' ? 'approved' : insight.status === 'rejected' ? 'rejected' : 'none', proposalIds: [] } as ReviewItem)).filter(item => !input.status || item.status === input.status).filter(item => !input.projectId || item.projectId === input.projectId);
-    const cursorIndex = input.cursor ? items.findIndex(item => item.id === input.cursor) : -1;
-    const start = cursorIndex < 0 ? 0 : cursorIndex + 1, page = items.slice(start, start + (input.limit ?? 100));
-    const journals = include.includes('journalTask') ? this.store.list<Journal>('journal').filter(journal => page.some(item => item.journalTaskId === journal.id)).map(journal => {
+    const items = allInsights.map(insight => insightItems.get(insight.id) ?? ({ id: insight.id, revision: insight.revision, createdAt: insight.createdAt, updatedAt: insight.updatedAt, journalId: insight.journalId, journalTaskId: insight.journalId, insightId: insight.id, projectId: journalsById.get(insight.journalId)?.projectId, heading: insight.heading, body: insight.body, status: insight.status, lastDecision: insight.status === 'processed' ? 'approved' : insight.status === 'rejected' ? 'rejected' : 'none', proposalIds: [] } as ReviewItem)).filter(item => !input.status || item.status === input.status).filter(item => !input.projectId || item.projectId === input.projectId);
+    const { page, nextCursor } = pageByCursor(items, input.cursor, input.limit ?? 100);
+    const journalIds = new Set(page.map(item => item.journalTaskId)), insightIds = new Set(page.map(item => item.insightId));
+    const journals = include.includes('journalTask') ? [...journalsById.values()].filter(journal => journalIds.has(journal.id)).map(journal => {
       if (includeBodies) return journal;
       const { raw: _raw, parsed: _parsed, ...summary } = journal;
       return summary;
     }) : [];
-    const insights = include.includes('insights') ? allInsights.filter(insight => page.some(item => item.insightId === insight.id)).map(insight => includeBodies ? insight : { ...insight, body: '' }) : [];
-    const proposalIds = [...new Set(page.flatMap(item => item.proposalIds ?? []))];
-    const proposalRefs = include.includes('proposalRefs') ? this.store.list<Proposal>('proposal').filter(proposal => proposalIds.includes(proposal.id)).map(proposal => input.includeChanges ? proposal : this.proposalSummary(proposal)) : [];
+    const insights = include.includes('insights') ? allInsights.filter(insight => insightIds.has(insight.id)).map(insight => includeBodies ? insight : { ...insight, body: '' }) : [];
+    const proposalIds = new Set(page.flatMap(item => item.proposalIds ?? []));
+    const proposalRefs = include.includes('proposalRefs') ? this.store.list<Proposal>('proposal').filter(proposal => proposalIds.has(proposal.id)).map(proposal => input.includeChanges ? proposal : this.proposalSummary(proposal)) : [];
     const reviewItems = page.map(({ body, ...item }) => includeBodies ? { ...item, body } : item);
-    return { reviewItems, journals, insights, proposalRefs, nextCursor: start + page.length < items.length ? page.at(-1)?.id ?? null : null };
+    return { reviewItems, journals, insights, proposalRefs, nextCursor };
   }
   history(input: { entityId?: string; changeSetId?: string; limit?: number; cursor?: string | null; includeDetails?: boolean } = {}) {
     if (input.entityId) {
@@ -690,13 +683,9 @@ export class Core {
       };
     }
     const allChangeSets = this.store.list<ChangeSet>('changeset');
-    const selected = input.changeSetId
-      ? allChangeSets.filter(changeSet => changeSet.id === input.changeSetId)
-      : (() => {
-          const cursorIndex = input.cursor ? allChangeSets.findIndex(changeSet => changeSet.id === input.cursor) : -1;
-          const start = cursorIndex < 0 ? 0 : cursorIndex + 1;
-          return allChangeSets.slice(start, start + (input.limit ?? 20));
-        })();
+    const { page: selected, nextCursor } = input.changeSetId
+      ? { page: allChangeSets.filter(changeSet => changeSet.id === input.changeSetId), nextCursor: null }
+      : pageByCursor(allChangeSets, input.cursor, input.limit ?? 20);
     const selectedIds = new Set(selected.map(changeSet => changeSet.id));
     const histories = this.store.list<History>('history').filter(history => selectedIds.has(history.changeSetId));
     const provenanceIds = new Set(selected.map(changeSet => changeSet.provenanceId));
@@ -706,10 +695,7 @@ export class Core {
       const { operations: _operations, ...summary } = changeSet;
       return summary;
     });
-    const cursorIndex = input.cursor ? allChangeSets.findIndex(changeSet => changeSet.id === input.cursor) : -1;
-    const start = cursorIndex < 0 ? 0 : cursorIndex + 1;
-    const hasMore = !input.changeSetId && start + selected.length < allChangeSets.length;
-    return { histories, revisions: [], changeSets, provenance, nextCursor: hasMore ? selected.at(-1)?.id ?? null : null };
+    return { histories, revisions: [], changeSets, provenance, nextCursor };
   }
   reviewItemGet(reviewItemId: string, includeChanges = false) {
     const stored = this.store.maybe<ReviewItem>(reviewItemId), item = stored?.insightId ? stored : this.reviewItemForInsight(reviewItemId, true);
