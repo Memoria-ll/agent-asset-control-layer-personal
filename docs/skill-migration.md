@@ -24,9 +24,9 @@ Skill本文にはそのSkill自身の手順を保存します。別のSkill本�
 
 ## 登録と切り替え
 
-現在の画面にはフォルダー全体を取り込む機能はありません。Asset editorまたはMCP操作で、分類した内容と紐づけを登録します。SkillはRuntimeのYAML front matterへ渡す短い`description`と、UIで人が呼び出し方を判断する`explanation`を分けて登録します。MCP経由のAIによる変更では、Provenanceに利用者の依頼内容と変更理由を記録します。元ファイルは、AACL側の登録内容と接続を確認するまで保持します。
+現在の画面にはフォルダー全体を取り込む機能はありません。Asset editorまたはMCP操作で、分類した内容と紐づけを登録します。Skillは自動発火ON時だけRuntimeのYAML front matterへ渡す短い`description`と、UIで人が呼び出し方を判断する`explanation`を分けて登録します。MCP経由のAIによる変更では、Provenanceに利用者の依頼内容と変更理由を記録します。元ファイルは、AACL側の登録内容と接続を確認するまで保持します。
 
-Runtime入口はAssetの状態とは別に管理します。Claude Code／Codexの設定先を登録して同期すると、Workflowと直接起動を有効にしたSkillの入口が生成されます。直接起動Skillとしての有効状態、Runtime設定先の管理状態、生成ファイルの内容をそれぞれ確認します。Runtime設定先の管理解除後も、生成済み入口は残ります。
+Runtime入口はAssetの状態とは別に管理します。Claude Code／Codexの設定先を登録して同期すると、Workflowと、直接起動・自動発火が有効または紐づけで参照されるSkillの入口が生成されます。自動発火は既定OFFで、紐づけだけではONになりません。直接起動Skillとしての有効状態、Runtime設定先の管理状態、生成ファイルの内容をそれぞれ確認します。Runtime設定先の管理解除後も、生成済み入口は残ります。
 
 移行元の自動読み込み設定は、AACL側の入口から期待したAssetが開き、必要な本文と補助ファイルを取得できることを確認してから利用者が切り替えます。
 
@@ -35,7 +35,7 @@ Runtime入口はAssetの状態とは別に管理します。Claude Code／Codex�
 - 種類ごとのAsset数と同名Assetを確認し、同名のものは本文と責務を比較する。
 - Workflowの工程ごとに担当Roleと完了条件を確認する。
 - Skill本文、補助ファイル、Skill間Bindingの向きと参照先を確認する。
-- Assetの管理先、Skillの`description` / `explanation`、Skillの直接起動設定を確認する。
+- Assetの管理先、Skillの`description` / `explanation`、Skillの直接起動・自動発火設定を確認する。
 - Runtime設定先、生成された入口ファイル、入口から取得できるCanonical本文を確認する。
 - ブラウザーのService接続先と選択中のGlobal／Projectを確認し、移行したAssetの表示を照合する。
 
