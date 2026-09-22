@@ -467,3 +467,167 @@ test('Asset Library keeps the list position while opening and closing the detail
   await expect(page.locator('.asset-drawer')).toHaveCount(0);
   await expect(page.locator('.asset-scroll')).toHaveJSProperty('scrollTop', before);
 });
+
+test.describe('Display regressions', () => {
+  let displayApp: Awaited<ReturnType<typeof serve>>;
+  let origin: string;
+  test.beforeEach(async () => {
+    displayApp = await serve(mkdtempSync(join(tmpdir(), 'aacl-display-')), 0);
+    origin = `http://127.0.0.1:${displayApp.port}`;
+  });
+  test.afterEach(async () => { await displayApp.close(); });
+
+  test('late navigation responses cannot replace the current page or show stale errors', async ({ page }) => {
+    await page.goto(origin);
+    await expect(page.getByRole('heading', { name: 'Asset Library', exact: true })).toBeVisible();
+    for (const status of [200, 500]) {
+      let requestStarted!: () => void, release!: () => void, responseHandled!: () => void;
+      const requested = new Promise<void>(resolve => { requestStarted = resolve; });
+      const pending = new Promise<void>(resolve => { release = resolve; });
+      const handled = new Promise<void>(resolve => { responseHandled = resolve; });
+      await page.route('**/api/run.list', async route => {
+        requestStarted();
+        await pending;
+        await route.fulfill({ status, json: status === 200 ? { runs: [] } : { error: 'STALE_RUN_ERROR' } });
+        responseHandled();
+      });
+      await page.getByRole('link', { name: 'Workflow Run', exact: true }).click();
+      await requested;
+      await page.getByRole('link', { name: 'Asset Library', exact: true }).click();
+      release();
+      await handled;
+      await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+      await expect(page).toHaveURL(/#assets$/);
+      await expect(page.getByRole('heading', { name: 'Asset Library', exact: true })).toBeVisible();
+      await expect(page.locator('#toast')).not.toContainText('STALE_RUN_ERROR');
+      await page.unroute('**/api/run.list');
+    }
+  });
+
+  test('Journal pages translate lazy content and update the displayed record count', async ({ page }) => {
+    for (let index = 0; index < 25; index++) {
+      const response = await page.request.post(`${origin}/api/journal.write`, {
+        data: { operationId: randomUUID(), task: `Journal ${index}`, body: '## 改善の種\n利用者が保存した本文・管理・診断' },
+      });
+      expect(response.ok()).toBeTruthy();
+    }
+    await page.goto(`${origin}/#journals`);
+    await expect(page.locator('.record-panel')).toHaveCount(20);
+    await expect(page.locator('.record-intro')).toContainText('20 records shown');
+    const first = page.locator('.record-panel').first();
+    await first.locator('summary').first().click();
+    await expect(first.getByRole('heading', { name: 'Insights', exact: true })).toBeVisible();
+    await expect(first.getByText('利用者が保存した本文・管理・診断', { exact: true })).toBeVisible();
+    await page.locator('[data-record-load-more]').scrollIntoViewIfNeeded();
+    await expect(page.locator('.record-panel')).toHaveCount(25);
+    await expect(page.locator('.record-intro')).toContainText('25 records shown');
+    const last = page.locator('.record-panel').last();
+    await expect(last.locator('summary')).toContainText('1 insights');
+    await last.locator('summary').first().click();
+    await expect(last.getByText('Original Journal', { exact: true })).toBeVisible();
+  });
+
+  test('rapid scope changes display bindings from the last selected Project', async ({ page }) => {
+    const write = async (operation: string, input: object) => {
+      const response = await page.request.post(`${origin}/api/${operation}`, { data: { ...input, operationId: randomUUID() } });
+      expect(response.ok()).toBeTruthy();
+      return response.json();
+    };
+    const provenance = { origin: 'ui', userRequest: 'scope display regression' };
+    const role = (await write('asset.save', { provenance, asset: { kind: 'role', name: 'Scope role', description: 'Role', responsibilities: 'Check bindings' } })).entities[0];
+    const projects: { id: string }[] = [];
+    for (const name of ['Scope A', 'Scope B']) {
+      const { project } = await write('project.init', { name, root: mkdtempSync(join(tmpdir(), 'aacl-scope-project-')) });
+      projects.push(project);
+      const rule = (await write('asset.save', { provenance, asset: { kind: 'rule', name: `${name} rule`, description: 'Rule', body: 'Check scope' } })).entities[0];
+      await write('binding.save', { provenance, binding: { scope: project.id, sourceId: role.id, targetId: rule.id, purpose: 'reference' } });
+    }
+    await page.goto(origin);
+    let requestStarted!: () => void, release!: () => void, responseHandled!: () => void;
+    const requested = new Promise<void>(resolve => { requestStarted = resolve; });
+    const pending = new Promise<void>(resolve => { release = resolve; });
+    const handled = new Promise<void>(resolve => { responseHandled = resolve; });
+    await page.route('**/api/binding.list', async route => {
+      if (route.request().postDataJSON().scope !== projects[0].id) { await route.continue(); return; }
+      const response = await route.fetch();
+      requestStarted();
+      await pending;
+      await route.fulfill({ response });
+      responseHandled();
+    });
+    await page.locator('#scope-select').selectOption(projects[0].id);
+    await requested;
+    await page.locator('#scope-select').selectOption(projects[1].id);
+    await expect(page.locator('.breadcrumb')).toContainText('Scope B');
+    release();
+    await handled;
+    await page.locator(`.asset-card[href="#assets/${role.id}"]`).click();
+    await expect(page.locator('.asset-drawer')).toContainText('Scope B rule');
+    await expect(page.locator('.asset-drawer')).not.toContainText('Scope A rule');
+  });
+
+  test('English Workflow editor translates added stages and renumbered transitions', async ({ page }) => {
+    await page.goto(origin);
+    await page.getByRole('button', { name: '+ Create asset', exact: true }).click();
+    const dialog = page.getByRole('dialog');
+    await dialog.getByRole('button', { name: 'Workflow', exact: true }).click();
+    await dialog.locator('[data-action="stage-add"]').click();
+    const stage = dialog.locator('.stage-editor');
+    await expect(stage.getByLabel('Stage name', { exact: true })).toBeVisible();
+    await stage.getByLabel('Stage name', { exact: true }).fill('工程名は翻訳しない');
+    await stage.locator('[data-action="transition-add"]').click();
+    await stage.locator('[data-action="transition-add"]').click();
+    await expect(stage.locator('.transition-row').last()).toHaveAccessibleName('Transition 2');
+    await stage.locator('.transition-remove').first().click();
+    await expect(stage.locator('.transition-row')).toHaveAccessibleName('Transition 1');
+    await expect(stage.locator('.transition-remove')).toHaveAccessibleName('Transition 1 — Delete');
+    await expect(stage.getByLabel('Destination', { exact: true }).locator('option[value="completed"]')).toHaveText('Complete');
+    await expect(stage.getByLabel('Stage name', { exact: true })).toHaveValue('工程名は翻訳しない');
+  });
+
+  test('Review loads distinguishable insight labels when opening a proposal', async ({ page }) => {
+    const response = await page.request.post(`${origin}/api/journal.write`, {
+      data: { operationId: randomUUID(), task: 'Proposal evidence task', body: '## 改善の種\n提案へ反映する内容\n\n別の改善内容' },
+    });
+    expect(response.ok()).toBeTruthy();
+    const { insights } = await response.json();
+    const detailRequests: string[] = [];
+    page.on('request', request => {
+      if (request.url().endsWith('/api/journal.get')) detailRequests.push(request.url());
+    });
+    await page.goto(`${origin}/#review`);
+    await expect(page.locator('.record-panel')).toHaveCount(2);
+    expect(detailRequests).toHaveLength(0);
+    await page.locator('[data-action="proposal-new"]').click();
+    const dialog = page.getByRole('dialog');
+    await expect(dialog).toBeVisible();
+    await expect(dialog.getByLabel('Proposal evidence task', { exact: true })).toBeVisible();
+    await expect(dialog.locator(`[name="insightIds"][value="${insights[0].id}"]`)).toHaveAccessibleName('Proposal evidence task / 提案へ反映する内容');
+    await expect(dialog.locator(`[name="insightIds"][value="${insights[1].id}"]`)).toHaveAccessibleName('Proposal evidence task / 別の改善内容');
+    expect(detailRequests).toHaveLength(1);
+  });
+
+  test('long Project names keep the header and its controls inside the viewport', async ({ page }) => {
+    const projectName = 'LongProjectName'.repeat(12);
+    const response = await page.request.post(`${origin}/api/project.init`, {
+      data: { operationId: randomUUID(), name: projectName, root: mkdtempSync(join(tmpdir(), 'aacl-display-project-')) },
+    });
+    expect(response.ok()).toBeTruthy();
+    const { project } = await response.json();
+    await page.goto(origin);
+    await page.locator('#scope-select').selectOption(project.id);
+    await expect(page.locator('.breadcrumb')).toContainText(projectName);
+    for (const width of [880, 1149, 1150, 1151, 1440]) {
+      await page.setViewportSize({ width, height: 900 });
+      const bounds = await page.locator('.breadcrumb,#scope-select,#language-select,#theme-toggle').evaluateAll(elements => elements.map(element => element.getBoundingClientRect().toJSON()));
+      for (const boundsOfControl of bounds) {
+        expect(boundsOfControl.left).toBeGreaterThanOrEqual(0);
+        expect(boundsOfControl.right).toBeLessThanOrEqual(width);
+        expect(boundsOfControl.top).toBeGreaterThanOrEqual(0);
+        expect(boundsOfControl.bottom).toBeLessThan(90);
+      }
+      expect(bounds[0].right).toBeLessThan(bounds[1].left);
+    }
+    await expect(page.locator('.breadcrumb')).toHaveAttribute('title', projectName);
+  });
+});
