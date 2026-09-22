@@ -25,13 +25,20 @@ test('C16 C25 C26 C33: CLI setup / custom directory / auto-start / init / backup
   const taskLog = join(root, 'scheduled-task.log');
   writeFileSync(join(fakeWindows, 'powershell.exe'), `#!/bin/sh\nprintf '%s\\n' "$*" >> '${taskLog}'\n`, { mode: 0o700 });
   const env = { ...process.env, PATH: `${fakeWindows}:${process.env.PATH ?? ''}`, WSL_DISTRO_NAME: 'AACL-test distro' };
-  const run = (args: string[], cwd = root) => exec(process.execPath, [cli, ...args, '--dir', dir, '--port', String(port)], { cwd, env, timeout: 15000 });
+  // Every child, including the installed launcher and restore, must use the fake Windows tools.
+  const execute = (file: string, args: string[], cwd = root) => exec(file, args, { cwd, env, timeout: 15000 });
+  const run = (args: string[], cwd = root) => execute(process.execPath, [cli, ...args, '--dir', dir, '--port', String(port)], cwd);
+  const taskScripts = () => readFileSync(taskLog, 'utf8').trim().split('\n').map(line => {
+    const encoded = line.match(/-EncodedCommand (\S+)/)?.[1];
+    assert.ok(encoded, 'Windows operations must be captured by the fake PowerShell');
+    return Buffer.from(encoded, 'base64').toString('utf16le');
+  });
   t.after(async () => { try { await run(['stop']); } catch {} });
   const unrelated = join(root, 'unrelated'); mkdirSync(unrelated); writeFileSync(join(unrelated, 'keep.txt'), '保持する');
   assert.throws(() => prepareManagedDirectory(unrelated), /空のフォルダー/);
   const setup = await run(['setup']); assert.match(setup.stdout, /導入しました/); assert.match(setup.stdout, /自動起動: 有効/);
   const bin = join(dir, 'bin/aacl'); assert.ok(existsSync(bin));
-  const health = JSON.parse((await exec(bin, ['health'], { cwd: root })).stdout); assert.equal(health.dataDirectory, dir);
+  const health = JSON.parse((await execute(bin, ['health'])).stdout); assert.equal(health.dataDirectory, dir);
   const list = await (await fetch(`http://127.0.0.1:${port}/api/asset.list`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' })).json() as { assets: { id: string; name: string; body: string }[] };
   assert.deepEqual(list.assets.map(a => a.name).sort(), ['journal', 'journal-review']);
   const installAgain = await fetch(`http://127.0.0.1:${port}/api/setup.skills`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ operationId: randomUUID() }) });
@@ -47,10 +54,18 @@ test('C16 C25 C26 C33: CLI setup / custom directory / auto-start / init / backup
   await run(['stop']);
   const restarted = JSON.parse((await run(['health'])).stdout); assert.notEqual(restarted.pid, health.pid);
   const restoreDir = join(root, 'restored');
-  await exec(process.execPath, [cli, 'restore', join(root, 'copy.sqlite'), '--dir', restoreDir, '--port', String(await freePort())], { cwd: root, timeout: 15000 });
+  await execute(process.execPath, [cli, 'restore', join(root, 'copy.sqlite'), '--dir', restoreDir, '--port', String(await freePort())]);
   assert.ok(existsSync(join(restoreDir, 'aacl.sqlite'))); assert.ok(existsSync(join(restoreDir, 'bin/aacl')));
+  const registrations = taskScripts();
+  assert.equal(registrations.length, 2, 'setup and restore must both register through fake PowerShell');
+  for (const script of registrations) {
+    assert.match(script, /Register-ScheduledTask/);
+    assert.ok(script.includes('"--distribution" "AACL-test distro"'));
+  }
+  assert.ok(registrations[1].includes(join(restoreDir, 'bin/aacl')));
   await assert.rejects(run(['uninstall']), /--yes/);
   await run(['uninstall', '--yes']);
-  assert.equal(readFileSync(taskLog, 'utf8').match(/-EncodedCommand/g)?.length, 2);
+  assert.equal(taskScripts().length, 3);
+  assert.match(taskScripts()[2], /Unregister-ScheduledTask/);
   assert.equal(existsSync(dir), false); assert.ok(existsSync(entry)); assert.ok(!existsSync(globalEntry)); assert.equal(readFileSync(join(unrelated, 'keep.txt'), 'utf8'), '保持する');
 });
