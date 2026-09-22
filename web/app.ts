@@ -62,7 +62,8 @@ const recordPageSize = 20;
 type JournalSummary = Omit<Journal, 'raw' | 'parsed'> & { insightCount?: number; pendingInsightCount?: number };
 type ReviewSummary = Omit<ReviewItem, 'body'>;
 type ChangeSetSummary = Omit<ChangeSet, 'operations'>;
-let recordRouteKey = '';
+let refreshController: AbortController | undefined;
+let renderController: AbortController | undefined;
 let recordGeneration = 0;
 let recordLoading = false;
 let recordObserver: IntersectionObserver | undefined;
@@ -70,9 +71,10 @@ let journalListState: { journals: JournalSummary[]; insights: Omit<Insight, 'bod
 let reviewListState: { reviewItems: ReviewSummary[]; journals: JournalSummary[]; insights: Omit<Insight, 'body'>[]; nextCursor: string | null } = { reviewItems: [], journals: [], insights: [], nextCursor: null };
 let historyListState: { histories: History[]; changeSets: ChangeSetSummary[]; provenance: (Provenance & { id: string })[]; nextCursor: string | null } = { histories: [], changeSets: [], provenance: [], nextCursor: null };
 function notify(message: string) { const t = document.querySelector('#toast')!; t.textContent = message; t.classList.add('visible'); clearTimeout(toastTimer); toastTimer = setTimeout(() => t.classList.remove('visible'), 5000); }
-async function api<T>(operation: string, input: object = {}, write = false): Promise<T> {
-  const response = await fetch(`/api/${operation}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(write ? { ...input, operationId: crypto.randomUUID() } : input) });
+async function api<T>(operation: string, input: object = {}, write = false, signal?: AbortSignal): Promise<T> {
+  const response = await fetch(`/api/${operation}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(write ? { ...input, operationId: crypto.randomUUID() } : input), signal });
   const data = await response.json();
+  signal?.throwIfAborted();
   if (!response.ok) throw new Error(data.error ?? `HTTP ${response.status}`);
   if (data.runtimeSync?.failureCount > 0) notify('保存しました。Runtime入口の生成に失敗があります。診断を確認してください。');
   return data as T;
@@ -118,28 +120,29 @@ function pageHeading(title: string, description: string, action = '') { return `
 function shell(content: string, contentClass = '') {
   const [page] = route();
   const journalBadge = journalReportCount >= 10 ? `<span class="nav-notification" aria-hidden="true" title="${esc(`${journalReportCount}件のJournal報告`)}">${journalReportCount > 99 ? '99+' : journalReportCount}</span>` : '';
-  app.innerHTML = localizeHtml(`<div class="shell"><aside class="sidebar"><a class="brand" href="#assets"><span class="brand-mark">Λ</span><div><div class="brand-name">AACL</div><small>AGENT ASSET CONTROL LAYER</small></div></a><div class="nav-label">ワークスペース</div><nav>${navs.slice(0, 4).map(([key, title, path]) => `<a href="#${key}" class="nav-item ${page === key ? 'active' : ''}"${page === key ? ' aria-current="page"' : ''}>${icon(path)}${title}${key === 'journals' ? journalBadge : ''}</a>`).join('')}</nav><div class="nav-label">管理</div><nav>${navs.slice(4, 6).map(([key, title, path]) => `<a href="#${key}" class="nav-item ${page === key ? 'active' : ''}">${icon(path)}${title}</a>`).join('')}</nav><div class="sidebar-bottom"><a class="nav-item ${page === 'settings' ? 'active' : ''}" href="#settings">${icon(navs[6][2])}設定・接続</a><div class="connection"><span class="dot"></span>ローカルに接続済み</div></div></aside><main class="main"><div class="topbar"><div class="breadcrumb">ワークスペース &nbsp; / &nbsp; <span>${esc(labelScope(selectedScope))}</span></div><div class="topbar-controls"><label class="scope-select"><span class="mono">SCOPE</span><select id="scope-select" aria-label="管理先" translate="no">${opt('global', 'Global', selectedScope)}${projects.map(p => opt(p.id, p.name, selectedScope)).join('')}</select></label><label class="language-select"><span class="mono">言語</span><select id="language-select" aria-label="言語" translate="no"><option value="en"${language === 'en' ? ' selected' : ''}>英語</option><option value="ja"${language === 'ja' ? ' selected' : ''}>日本語</option></select></label><div class="theme-control"><span class="mono">テーマ</span><button type="button" id="theme-toggle" class="theme-toggle" aria-pressed="${theme === 'dark'}" aria-label="${theme === 'dark' ? 'ライトモードに切り替え' : 'ダークモードに切り替え'}" title="${theme === 'dark' ? 'ライトモードに切り替え' : 'ダークモードに切り替え'}"><span class="theme-toggle-track"><span class="theme-toggle-thumb" aria-hidden="true">${theme === 'dark' ? '☾' : '☀'}</span></span><span class="theme-toggle-value">${theme === 'dark' ? 'ダーク' : 'ライト'}</span></button></div></div></div><div class="main-content ${contentClass}">${content}<div class="footer-note">AACL · あなたの開発方法を、あなたの手で。</div></div></main></div>`, language);
+  app.innerHTML = localizeHtml(`<div class="shell"><aside class="sidebar"><a class="brand" href="#assets"><span class="brand-mark">Λ</span><div><div class="brand-name">AACL</div><small>AGENT ASSET CONTROL LAYER</small></div></a><div class="nav-label">ワークスペース</div><nav>${navs.slice(0, 4).map(([key, title, path]) => `<a href="#${key}" class="nav-item ${page === key ? 'active' : ''}"${page === key ? ' aria-current="page"' : ''}>${icon(path)}${title}${key === 'journals' ? journalBadge : ''}</a>`).join('')}</nav><div class="nav-label">管理</div><nav>${navs.slice(4, 6).map(([key, title, path]) => `<a href="#${key}" class="nav-item ${page === key ? 'active' : ''}">${icon(path)}${title}</a>`).join('')}</nav><div class="sidebar-bottom"><a class="nav-item ${page === 'settings' ? 'active' : ''}" href="#settings">${icon(navs[6][2])}設定・接続</a><div class="connection"><span class="dot"></span>ローカルに接続済み</div></div></aside><main class="main"><div class="topbar"><div class="breadcrumb" title="${esc(labelScope(selectedScope))}">ワークスペース &nbsp; / &nbsp; <span>${esc(labelScope(selectedScope))}</span></div><div class="topbar-controls"><label class="scope-select"><span class="mono">SCOPE</span><select id="scope-select" aria-label="管理先" translate="no">${opt('global', 'Global', selectedScope)}${projects.map(p => opt(p.id, p.name, selectedScope)).join('')}</select></label><label class="language-select"><span class="mono">言語</span><select id="language-select" aria-label="言語" translate="no"><option value="en"${language === 'en' ? ' selected' : ''}>英語</option><option value="ja"${language === 'ja' ? ' selected' : ''}>日本語</option></select></label><div class="theme-control"><span class="mono">テーマ</span><button type="button" id="theme-toggle" class="theme-toggle" aria-pressed="${theme === 'dark'}" aria-label="${theme === 'dark' ? 'ライトモードに切り替え' : 'ダークモードに切り替え'}" title="${theme === 'dark' ? 'ライトモードに切り替え' : 'ダークモードに切り替え'}"><span class="theme-toggle-track"><span class="theme-toggle-thumb" aria-hidden="true">${theme === 'dark' ? '☾' : '☀'}</span></span><span class="theme-toggle-value">${theme === 'dark' ? 'ダーク' : 'ライト'}</span></button></div></div></div><div class="main-content ${contentClass}">${content}<div class="footer-note">AACL · あなたの開発方法を、あなたの手で。</div></div></main></div>`, language);
   document.documentElement.lang = language;
   syncThemeControl();
 }
 async function refresh() {
-  if (loading) return;
+  refreshController?.abort();
+  renderController?.abort();
+  const controller = refreshController = new AbortController();
+  const read = <T>(operation: string, input: object = {}) => api<T>(operation, input, false, controller.signal);
   loading = true;
-  recordObserver?.disconnect();
-  recordObserver = undefined;
-  recordRouteKey = '';
-  recordGeneration += 1;
+  resetRecordState();
   try {
-    const [a, p, b, j] = await Promise.all([api<{ assets: AssetSummary[] }>('asset.list'), api<{ projects: Project[] }>('project.list'), api<{ bindings: Binding[] }>('binding.list', { scope: selectedScope }), api<{ total: number }>('journal.list', { ...(selectedScope !== 'global' ? { projectId: selectedScope } : {}) })]);
+    const [a, p, b, j] = await Promise.all([read<{ assets: AssetSummary[] }>('asset.list'), read<{ projects: Project[] }>('project.list'), read<{ bindings: Binding[] }>('binding.list', { scope: selectedScope }), read<{ total: number }>('journal.list', { ...(selectedScope !== 'global' ? { projectId: selectedScope } : {}) })]);
     assets = a.assets.map(asset => {
       const cached = assetDetails.get(asset.id);
       return cached && cached.revision === asset.revision ? { ...asset, ...cached } : asset;
     });
     projects = p.projects; bindings = b.bindings;
     journalReportCount = j.total;
+    loading = false;
     await render();
-  } catch (error) { shell(`<div class="glass error-panel"><h2>読み込めませんでした</h2><p>${esc((error as Error).message)}</p>${button('refresh', '再読み込み')}</div>`); }
-  finally { loading = false; }
+  } catch (error) { if (controller.signal.aborted) return; shell(`<div class="glass error-panel"><h2>読み込めませんでした</h2><p>${esc((error as Error).message)}</p>${button('refresh', '再読み込み')}</div>`); }
+  finally { if (refreshController === controller) loading = false; }
 }
 function diagram(asset: Asset) {
   const d = workflowDiagram(asset);
@@ -203,12 +206,9 @@ function renderAssets() {
   }
 }
 
-function recordRoute(page: string) {
-  const key = `${page}:${selectedScope}`;
-  if (recordRouteKey === key) return;
+function resetRecordState() {
   recordObserver?.disconnect();
   recordObserver = undefined;
-  recordRouteKey = key;
   recordGeneration += 1;
   recordLoading = false;
   journalListState = { journals: [], insights: [], nextCursor: null };
@@ -273,7 +273,7 @@ async function loadRecordPanel(panel: HTMLElement) {
       html = historyDetailMarkup(changeSet, data.histories, data.provenance[0]!);
     }
     if (generation === recordGeneration && panel.isConnected) {
-      panel.querySelector<HTMLElement>('.record-panel-body')!.innerHTML = html;
+      panel.querySelector<HTMLElement>('.record-panel-body')!.innerHTML = localizeHtml(html, language);
       panel.dataset.loaded = 'true';
     }
   } catch (error) {
@@ -289,43 +289,54 @@ async function loadMoreRecords(page: 'journals' | 'review' | 'history') {
   recordLoading = true;
   const generation = recordGeneration;
   const button = document.querySelector<HTMLButtonElement>(`[data-action="record-load:${page}"]`);
-  if (button) { button.disabled = true; button.textContent = '読み込み中…'; }
+  if (button) { button.disabled = true; button.textContent = localizeHtml('読み込み中…', language); }
   try {
     if (page === 'journals') {
       const data = await api<{ journals: JournalSummary[]; insights: Omit<Insight, 'body'>[]; nextCursor: string | null }>('journal.list', { limit: recordPageSize, cursor, ...(selectedScope !== 'global' ? { projectId: selectedScope } : {}) });
       if (generation !== recordGeneration) return;
       journalListState.journals.push(...data.journals); journalListState.insights.push(...data.insights); journalListState.nextCursor = data.nextCursor;
       screenData = { ...screenData, journals: journalListState.journals, insights: journalListState.insights };
-      document.querySelector<HTMLElement>('[data-record-list="journals"]')?.insertAdjacentHTML('beforeend', data.journals.map(journalRecordMarkup).join(''));
+      document.querySelector<HTMLElement>('[data-record-list="journals"]')?.insertAdjacentHTML('beforeend', localizeHtml(data.journals.map(journalRecordMarkup).join(''), language));
     } else if (page === 'review') {
       const data = await api<{ reviewItems: ReviewSummary[]; journals: JournalSummary[]; insights: Omit<Insight, 'body'>[]; nextCursor: string | null }>('review.pending', { limit: recordPageSize, cursor, include: ['journalTask', 'insights'], includeBodies: false, ...(selectedScope !== 'global' ? { projectId: selectedScope } : {}) });
       if (generation !== recordGeneration) return;
       reviewListState.reviewItems.push(...data.reviewItems); reviewListState.journals.push(...data.journals); reviewListState.insights.push(...data.insights); reviewListState.nextCursor = data.nextCursor;
       screenData = { ...screenData, reviewItems: reviewListState.reviewItems, journals: reviewListState.journals, insights: reviewListState.insights };
-      document.querySelector<HTMLElement>('[data-record-list="review"]')?.insertAdjacentHTML('beforeend', data.reviewItems.map(reviewRecordMarkup).join(''));
+      document.querySelector<HTMLElement>('[data-record-list="review"]')?.insertAdjacentHTML('beforeend', localizeHtml(data.reviewItems.map(reviewRecordMarkup).join(''), language));
     } else {
       const data = await api<{ histories: History[]; changeSets: ChangeSetSummary[]; provenance: (Provenance & { id: string })[]; nextCursor: string | null }>('history.get', { limit: recordPageSize, cursor });
       if (generation !== recordGeneration) return;
       historyListState.histories.push(...data.histories); historyListState.changeSets.push(...data.changeSets); historyListState.provenance.push(...data.provenance); historyListState.nextCursor = data.nextCursor;
       screenData = { ...screenData, ...historyListState };
-      document.querySelector<HTMLElement>('[data-record-list="history"]')?.insertAdjacentHTML('beforeend', data.changeSets.map(historyRecordMarkup).join(''));
+      document.querySelector<HTMLElement>('[data-record-list="history"]')?.insertAdjacentHTML('beforeend', localizeHtml(data.changeSets.map(historyRecordMarkup).join(''), language));
     }
     const next = page === 'journals' ? journalListState.nextCursor : page === 'review' ? reviewListState.nextCursor : historyListState.nextCursor;
     const sentinel = document.querySelector<HTMLElement>(`[data-record-load-more="${page}"]`);
-    if (sentinel) { sentinel.hidden = !next; sentinel.querySelector('button')!.textContent = '過去を読み込む'; sentinel.querySelector('.hint')!.textContent = next ? 'スクロールすると過去の記録を読み込みます。' : ''; }
+    if (sentinel) { sentinel.hidden = !next; sentinel.querySelector('button')!.textContent = localizeHtml('過去を読み込む', language); sentinel.querySelector('.hint')!.textContent = next ? localizeHtml('スクロールすると過去の記録を読み込みます。', language) : ''; }
+    const count = page === 'journals' ? journalListState.journals.length : page === 'review' ? reviewListState.reviewItems.length : historyListState.changeSets.length;
+    const countLabel = document.querySelector<HTMLElement>('[data-record-count]');
+    if (countLabel) countLabel.textContent = localizeHtml(`${count}件を表示中`, language);
     setupRecordObserver(page);
-  } catch (error) { notify(errorMessage(error)); }
-  finally { recordLoading = false; if (button) button.disabled = false; }
+  } catch (error) { if (generation === recordGeneration) notify(errorMessage(error)); }
+  finally { if (generation === recordGeneration) recordLoading = false; if (button) button.disabled = false; }
 }
 async function render() {
+  renderController?.abort();
+  const controller = renderController = new AbortController();
+  resetRecordState();
+  try { await renderPage(controller.signal); }
+  catch (error) { if (!controller.signal.aborted) throw error; }
+}
+async function renderPage(signal: AbortSignal) {
+  const read = <T>(operation: string, input: object = {}) => api<T>(operation, input, false, signal);
   const [page, selectedId] = route();
   if (page !== 'assets') { assetDetailRequest = undefined; assetDetailRequestToken += 1; }
   if (page === 'assets') { renderAssets(); return; }
   if (page === 'runs') {
-    const data = await api<{ runs: Run[] }>('run.list', selectedScope === 'global' ? {} : { projectId: selectedScope }); screenData = data;
+    const data = await read<{ runs: Run[] }>('run.list', selectedScope === 'global' ? {} : { projectId: selectedScope }); screenData = data;
     const run = data.runs.find(r => r.id === selectedId);
     if (run) {
-      const detail = await api<{ run: Run; snapshot: Snapshot; deliveries: Delivery[]; events: RunEvent[]; journals: Journal[] }>('run.inspect', { contextHandle: run.contextHandle });
+      const detail = await read<{ run: Run; snapshot: Snapshot; deliveries: Delivery[]; events: RunEvent[]; journals: Journal[] }>('run.inspect', { contextHandle: run.contextHandle });
       screenData = { ...data, detail };
       const transitions = run.status === 'active' ? detail.snapshot.workflow.transitions.filter(t => t.from === run.stageId) : [];
       const currentStage = detail.snapshot.workflow.stages.find(s => s.id === run.stageId)!;
@@ -337,17 +348,16 @@ async function render() {
       shell(pageHeading(esc(name(run.workflowId)), `${esc(run.instruction)} · rev. ${run.workflowRevision}`, `<a href="#runs" class="badge">← Run一覧</a>`) + `<div class="glass card"><div class="row spread"><div class="badge-row">${status(run.status)}${badge(run.runtime)}${badge(labelScope(run.projectId ?? 'global'))}</div><span class="mono">${date(run.createdAt)}</span></div>${diagram(detail.snapshot.workflow)}<div class="row spread"><div><h3>現在の工程: ${esc(currentStage.name)}</h3><p class="hint">担当Role: ${esc(currentRoleName)}</p><p class="hint">Model: ${currentModel ? `${esc(currentModel.name)} / ${esc(currentModel.modelName)}（サブエージェント実行）${currentModel.choices?.length ? `<br>選択肢: ${esc(selectedChoiceSummary(currentModel, currentModelSelections))}` : ''}` : 'Runtimeの通常実行'}</p>${currentStage.additionalInstructions ? `<section class="section"><strong>追加指示</strong><p class="prose">${esc(currentStage.additionalInstructions)}</p></section>` : ''}</div>${run.status === 'active' ? button(`run-cancel:${run.id}`, 'Runを中止', 'danger small') : ''}</div><div class="row wrap">${transitions.map(t => `<div class="transition-option">${button(`run-transition:${run.id}:${t.id}`, t.label, 'primary small')}<small>条件: ${esc(t.condition)}</small></div>`).join('')}${button(`journal-new:${run.id}`, 'Journalを記録')}</div><div class="statline"><span><strong>${detail.deliveries.length}</strong>提供記録</span><span><strong>${detail.deliveries.reduce((s, d) => s + d.bytes, 0).toLocaleString()}</strong>bytes 提供</span><span><strong>${detail.journals.length}</strong>Journal</span></div></div><div class="grid-two section"><article class="glass card"><h3>進行記録</h3><div class="timeline">${detail.events.map(e => `<article><small>${date(e.createdAt)}</small><strong>${esc(e.type)}</strong>${details('報告・根拠', e.data)}</article>`).join('')}</div></article><article class="glass card"><h3>Contextの提供</h3>${detail.deliveries.map(d => `<div class="relation"><div>${esc(d.target)}<small>${esc(d.stageId)} · ${d.bytes.toLocaleString()} bytes${d.assetRevision ? ` · rev. ${d.assetRevision}` : ''}</small></div>${badge(d.success ? '提供済み' : '取得失敗', d.success ? '' : 'red')}</div>`).join('')}${details('固定Snapshot・参照経路', detail.snapshot)}${details('提供内容・取得失敗の理由', detail.deliveries)}</article></div>`);
     } else shell(pageHeading('Workflow Run', '実行ごとに資産の版を固定し、進行と提供したContextを記録します。', button('run-new', '＋ Runを開始', 'primary')) + `<div class="glass">${data.runs.length ? `<table class="table"><thead><tr><th>Workflow / 依頼</th><th>状態</th><th>工程</th><th>Runtime</th><th>開始</th></tr></thead><tbody>${data.runs.map(r => `<tr><td><a href="#runs/${r.id}"><strong>${esc(name(r.workflowId))}</strong><p class="hint">${esc(r.instruction)}</p></a></td><td>${status(r.status)}</td><td>${esc(r.stageId)}</td><td>${esc(r.runtime)}</td><td class="mono">${date(r.createdAt)}</td></tr>`).join('')}</tbody></table>` : empty('まだ実行記録はありません', '使うWorkflowを明示して、最初のRunを開始します。', button('run-new', 'Workflowを選ぶ'))}</div>`);
   } else if (page === 'journals' || page === 'review') {
-    recordRoute(page);
     if (page === 'journals') {
-      const data = await api<{ journals: JournalSummary[]; insights: Omit<Insight, 'body'>[]; nextCursor: string | null }>('journal.list', { limit: recordPageSize, ...(selectedScope !== 'global' ? { projectId: selectedScope } : {}) });
+      const data = await read<{ journals: JournalSummary[]; insights: Omit<Insight, 'body'>[]; nextCursor: string | null }>('journal.list', { limit: recordPageSize, ...(selectedScope !== 'global' ? { projectId: selectedScope } : {}) });
       journalListState = data;
       screenData = { journals: data.journals, insights: data.insights };
-      shell(pageHeading('Journal', 'タイトルを一覧し、必要な記録だけ開いて本文を読み込みます。', button('journal-new', '＋ Journalを記録', 'primary')) + `<div class="record-intro"><span>${data.journals.length}件を表示中</span><span class="hint">本文は開いた項目だけ読み込みます。</span></div><div class="stack record-list" data-record-list="journals">${data.journals.length ? data.journals.map(journalRecordMarkup).join('') : `<div class="glass">${empty('気づきを、次の改善へ', '書き残したい発見や摩擦があるときに、Journalを記録してください。', button('journal-new', 'Journalを記録'))}</div>`}</div>${loadMoreMarkup('journals', data.nextCursor)}`);
+      shell(pageHeading('Journal', 'タイトルを一覧し、必要な記録だけ開いて本文を読み込みます。', button('journal-new', '＋ Journalを記録', 'primary')) + `<div class="record-intro"><span data-record-count>${data.journals.length}件を表示中</span><span class="hint">本文は開いた項目だけ読み込みます。</span></div><div class="stack record-list" data-record-list="journals">${data.journals.length ? data.journals.map(journalRecordMarkup).join('') : `<div class="glass">${empty('気づきを、次の改善へ', '書き残したい発見や摩擦があるときに、Journalを記録してください。', button('journal-new', 'Journalを記録'))}</div>`}</div>${loadMoreMarkup('journals', data.nextCursor)}`);
       setupRecordObserver('journals');
     } else {
       const [data, proposals] = await Promise.all([
-        api<{ reviewItems: ReviewSummary[]; journals: JournalSummary[]; insights: Omit<Insight, 'body'>[]; nextCursor: string | null }>('review.pending', { ...(selectedScope !== 'global' ? { projectId: selectedScope } : {}), include: ['journalTask', 'insights'], includeBodies: false, limit: recordPageSize }),
-        api<{ proposals: Proposal[]; decisions: Decision[]; changeSets: ChangeSetSummary[] }>('proposal.list', { includeChanges: false }),
+        read<{ reviewItems: ReviewSummary[]; journals: JournalSummary[]; insights: Omit<Insight, 'body'>[]; nextCursor: string | null }>('review.pending', { ...(selectedScope !== 'global' ? { projectId: selectedScope } : {}), include: ['journalTask', 'insights'], includeBodies: false, limit: recordPageSize }),
+        read<{ proposals: Proposal[]; decisions: Decision[]; changeSets: ChangeSetSummary[] }>('proposal.list', { includeChanges: false }),
       ]);
       reviewListState = data;
       screenData = { ...data, ...proposals };
@@ -355,25 +365,24 @@ async function render() {
         const d = proposals.decisions.find(d => d.proposalId === p.id), applied = proposals.changeSets.some(c => c.proposalId === p.id);
         return `<article class="glass card"><div class="row spread"><h2>${esc(p.title)}</h2>${applied ? badge('適用済み', 'green') : d ? status(d.choice) : badge('判断待ち', 'amber')}</div><p class="prose">${esc(p.proposedChange)}</p><p>理由: ${esc(p.reason)}</p><p class="hint">根拠Journal ${p.evidenceJournalIds.length}件 · 対象の気づき ${p.insightIds.length}件</p>${details('変更内容・影響する資産・管理先', p)}${applied ? '' : `<footer><div class="row">${button(`proposal-decide:${p.id}:approved`, '承認', 'small')}${button(`proposal-decide:${p.id}:deferred`, '保留', 'small')}${button(`proposal-decide:${p.id}:rejected`, '却下', 'small')}</div>${d?.choice === 'approved' ? button(`proposal-apply:${p.id}`, '承認した変更を適用', 'primary') : ''}</footer>`}</article>`;
       }).join('')}</div><div class="spacer"></div>` : '';
-      shell(pageHeading('Journal Review', '気づきのタイトルを一覧し、必要な内容だけ開いて判断します。', button('proposal-new', '＋ 改善を提案', 'primary')) + proposalMarkup + `<div class="record-intro"><span>${data.reviewItems.length}件を表示中</span><span class="hint">本文・判断操作は開いた項目だけ読み込みます。</span></div><div class="stack record-list" data-record-list="review">${data.reviewItems.length ? data.reviewItems.map(reviewRecordMarkup).join('') : `<div class="glass">${empty('レビュー待ちの気づきはありません', 'Journalを記録すると、ここで改善の判断ができます。', button('journal-new', 'Journalを記録'))}</div>`}</div>${loadMoreMarkup('review', data.nextCursor)}`);
+      shell(pageHeading('Journal Review', '気づきのタイトルを一覧し、必要な内容だけ開いて判断します。', button('proposal-new', '＋ 改善を提案', 'primary')) + proposalMarkup + `<div class="record-intro"><span data-record-count>${data.reviewItems.length}件を表示中</span><span class="hint">本文・判断操作は開いた項目だけ読み込みます。</span></div><div class="stack record-list" data-record-list="review">${data.reviewItems.length ? data.reviewItems.map(reviewRecordMarkup).join('') : `<div class="glass">${empty('レビュー待ちの気づきはありません', 'Journalを記録すると、ここで改善の判断ができます。', button('journal-new', 'Journalを記録'))}</div>`}</div>${loadMoreMarkup('review', data.nextCursor)}`);
       setupRecordObserver('review');
     }
   } else if (page === 'history') {
-    recordRoute(page);
-    const data = await api<{ histories: History[]; changeSets: ChangeSetSummary[]; provenance: (Provenance & { id: string })[]; nextCursor: string | null }>('history.get', { limit: recordPageSize });
+    const data = await read<{ histories: History[]; changeSets: ChangeSetSummary[]; provenance: (Provenance & { id: string })[]; nextCursor: string | null }>('history.get', { limit: recordPageSize });
     historyListState = data; screenData = data;
-    shell(pageHeading('変更履歴', '変更のタイトルを一覧し、必要なChange Setだけ開いて詳細を読み込みます。') + `<div class="record-intro"><span>${data.changeSets.length}件を表示中</span><span class="hint">変更内容とProvenanceは開いた項目だけ読み込みます。</span></div><div class="stack record-list" data-record-list="history">${data.changeSets.length ? data.changeSets.map(historyRecordMarkup).join('') : `<div class="glass">${empty('変更はまだありません', '資産や紐づけを保存すると、履歴と変更理由を確認できます。')}</div>`}</div>${loadMoreMarkup('history', data.nextCursor)}`);
+    shell(pageHeading('変更履歴', '変更のタイトルを一覧し、必要なChange Setだけ開いて詳細を読み込みます。') + `<div class="record-intro"><span data-record-count>${data.changeSets.length}件を表示中</span><span class="hint">変更内容とProvenanceは開いた項目だけ読み込みます。</span></div><div class="stack record-list" data-record-list="history">${data.changeSets.length ? data.changeSets.map(historyRecordMarkup).join('') : `<div class="glass">${empty('変更はまだありません', '資産や紐づけを保存すると、履歴と変更理由を確認できます。')}</div>`}</div>${loadMoreMarkup('history', data.nextCursor)}`);
     setupRecordObserver('history');
   } else if (page === 'diagnostics') {
-    const data = await api<{ diagnostics: Diagnostic[]; costs: { runId: string; stageId: string; roleIds: string[]; target: string; bytes: number; deliveries: number; runtime: string }[] }>('diagnostics.get');
+    const data = await read<{ diagnostics: Diagnostic[]; costs: { runId: string; stageId: string; roleIds: string[]; target: string; bytes: number; deliveries: number; runtime: string }[] }>('diagnostics.get');
     const missingAssetIds = [...new Set(data.diagnostics.map(d => diagnosticAssetId(d.evidence)).filter((id): id is string => Boolean(id) && !assets.some(asset => asset.id === id)))];
-    const diagnosticAssets = (await Promise.all(Array.from({ length: Math.ceil(missingAssetIds.length / 100) }, (_, index) => api<{ assets: Asset[] }>('asset.get_many', { assetIds: missingAssetIds.slice(index * 100, index * 100 + 100), includeDeleted: true })))).flatMap(result => result.assets);
+    const diagnosticAssets = (await Promise.all(Array.from({ length: Math.ceil(missingAssetIds.length / 100) }, (_, index) => read<{ assets: Asset[] }>('asset.get_many', { assetIds: missingAssetIds.slice(index * 100, index * 100 + 100), includeDeleted: true })))).flatMap(result => result.assets);
     const diagnosticCatalog = [...assets, ...diagnosticAssets];
     screenData = data;
     shell(pageHeading('診断', '参照の整合性、繰り返す遷移、実際のContext提供量を確認します。', button('refresh', '再診断')) + `<div class="glass card"><h2>整合性と実行の状態</h2>${data.diagnostics.length ? data.diagnostics.map(d => `<div class="insight"><div class="row">${badge(d.severity, d.severity === 'error' ? 'red' : 'amber')}<strong>${esc(d.code)}</strong></div><p>${esc(d.message)}</p>${diagnosticAssetCard(d.evidence, diagnosticCatalog)}${details('対象と根拠', { target: d.target, evidence: d.evidence })}</div>`).join('') : '<div class="status-message">検出された問題はありません。</div>'}</div><div class="glass card section"><h2>Contextの提供量</h2><p>実際に提供した内容のUTF-8バイト数です。未取得のSkill本文は含みません。</p>${data.costs.length ? `<div class="table-wrap"><table class="table"><thead><tr><th>Run / Stage</th><th>対象</th><th>Role</th><th>Runtime</th><th>提供回数</th><th>bytes</th></tr></thead><tbody>${data.costs.map(c => `<tr><td><a href="#runs/${c.runId}" class="mono">${c.runId.slice(0, 8)}</a><p class="hint">${esc(c.stageId)}</p></td><td>${esc(assets.some(a => a.id === c.target) ? name(c.target) : c.target)}</td><td>${esc(c.roleIds.map(name).join(', ') || '—')}</td><td>${esc(c.runtime)}</td><td>${c.deliveries}</td><td class="mono">${c.bytes.toLocaleString()}</td></tr>`).join('')}</tbody></table></div>` : '<p class="hint">Workflow Runを開始すると提供量を確認できます。</p>'}</div>`);
   } else if (page === 'settings') {
-    const [r, s, candidates] = await Promise.all([api<{ targets: RuntimeTarget[] }>('runtime.list'), api<{ timeoutHours: number; journalEnabled: boolean }>('settings.get'), api<{ candidates: { runtime: string; path: string; platform: string; exists: boolean }[] }>('runtime.discover')]);
-    const common = selectedScope !== 'global' ? (await api<{ common: Common }>('common.get', { projectId: selectedScope })).common : null;
+    const [r, s, candidates] = await Promise.all([read<{ targets: RuntimeTarget[] }>('runtime.list'), read<{ timeoutHours: number; journalEnabled: boolean }>('settings.get'), read<{ candidates: { runtime: string; path: string; platform: string; exists: boolean }[] }>('runtime.discover')]);
+    const common = selectedScope !== 'global' ? (await read<{ common: Common }>('common.get', { projectId: selectedScope })).common : null;
     screenData = { ...r, common, ...candidates };
     shell(pageHeading('設定・接続', 'Project、Runtimeの入口、ローカルデータを管理します。') + `<div class="grid-two"><section class="glass card"><div class="section-header"><h2>Project</h2>${button('project-new', '＋ 登録', 'small')}</div>${projects.length ? projects.map(p => `<div class="relation"><div>${esc(p.name)}<small class="mono">${esc(p.root)}</small></div>${badge('登録済み')}</div>`).join('') : '<p>開いているProjectでaacl initを実行するか、rootを指定して登録します。</p>'}${common ? `<div class="section"><div class="section-header"><h3>Project Common</h3>${button('common-edit', 'Ruleを選ぶ', 'small')}</div>${common.ruleIds.map(id => `<div class="relation">${esc(name(id))}</div>`).join('') || '<p class="hint">共通Ruleは未登録です。</p>'}</div>` : '<p class="hint">管理先をProjectへ切り替えると、Project Commonを編集できます。</p>'}</section><section class="glass card"><h2>Runの非活動timeout</h2><p>Runに対する読み取りや操作がない場合の終了時間。</p><form data-form="settings" class="form-stack">${field('時間', 'timeoutHours', String(s.timeoutHours), true, 'number')}<label class="checkbox-label"><input type="checkbox" name="journalEnabled"${s.journalEnabled ? ' checked' : ''}>タスク完了時のJournal記録を有効にする</label><p class="hint">OFFにすると、AI・UIからの新しいJournal記録を停止します。既存のJournal Reviewは確認できます。</p><div><button type="submit">設定を保存</button></div><p class="form-error"></p></form></section></div><section class="glass card section"><div class="section-header"><div><h2>Runtimeの入口</h2><p>登録した設定先へ、Workflowと直接起動Skillの入口を配置します。</p></div><div class="row">${button('journal-skills', 'Journal用Skillを導入', 'small')}${button('runtime-sync', '再同期', 'small')}${button('runtime-new', '＋ 設定先を追加', 'primary small')}</div></div>${r.targets.length ? `<table class="table"><thead><tr><th>Runtime</th><th>管理先</th><th>設定先</th><th>状態</th><th></th></tr></thead><tbody>${r.targets.map(t => `<tr><td>${t.runtime === 'claude' ? 'Claude Code' : 'Codex'}<p class="hint">${t.platform}</p></td><td>${esc(labelScope(t.scope))}</td><td class="mono">${esc(t.path)}</td><td>${badge(t.enabled ? '管理中' : '管理解除', t.enabled ? 'green' : '')}</td><td>${t.enabled ? button(`runtime-remove:${t.id}`, '管理解除', 'small ghost') : ''}</td></tr>`).join('')}</tbody></table>` : '<p>設定先を追加すると、利用できる入口を生成します。</p>'}<div class="section"><h3>MCP接続</h3><pre>codex mcp add aacl --url ${esc(location.origin)}/mcp\nclaude mcp add --transport http aacl ${esc(location.origin)}/mcp</pre><p class="hint">Serviceが停止している場合は、WSLで aacl ensure を実行します。</p></div></section><section class="glass card section"><h2>Export・Backup</h2><p>出力先を指定して保存します。復元はCLIの aacl restore で新しい管理フォルダーへ行います。</p><div class="row">${button('export', 'Markdown / JSONを出力')}${button('backup', 'Backupを保存')}</div></section>`);
   } else { location.hash = 'assets'; }
@@ -438,7 +447,7 @@ function readModelChoiceConditions(form: Element) {
 function updateChoiceConditionNumbers(form: Element) {
   form.querySelectorAll<HTMLElement>('.choice-condition-row').forEach((row, index) => {
     row.dataset.conditionIndex = String(index);
-    row.querySelector('legend')!.textContent = `組み合わせ ${index + 1}`;
+    row.querySelector('legend')!.textContent = localizeHtml(`組み合わせ ${index + 1}`, language);
   });
 }
 function stageRow(s: { id: string; name: string; additionalInstructions?: string }, index: number, roleId = '', modelId = '', selectedChoices: Record<string, string> = {}, transitions: Asset['transitions'] = [], stages: { id: string; name: string }[] = []) {
@@ -488,14 +497,14 @@ function updateTransitionTargets(form: Element) {
   const stages = readStages(form);
   for (const target of form.querySelectorAll<HTMLSelectElement>('.transition-row [name=to]')) {
     const selected = target.value;
-    target.innerHTML = stages.map(s => opt(s.id, s.name || '未命名の工程', selected)).join('') + opt('completed', '完了', selected);
+    target.innerHTML = stages.map(s => opt(s.id, s.name || localizeHtml('未命名の工程', language), selected)).join('') + opt('completed', localizeHtml('完了', language), selected);
   }
 }
-function updateStageNumbers(form: Element) { form.querySelectorAll<HTMLElement>('.stage-editor .stage-title').forEach((label, index) => { label.textContent = `工程 ${index + 1}`; }); }
-function updateTransitionNumbers(stage: HTMLElement) { stage.querySelectorAll<HTMLElement>('.transition-row').forEach((row, index) => { const label = `遷移設定 ${index + 1}`; row.querySelector<HTMLElement>('legend')!.textContent = label; row.querySelector<HTMLButtonElement>('.transition-remove')!.setAttribute('aria-label', `${label}を削除`); }); }
+function updateStageNumbers(form: Element) { form.querySelectorAll<HTMLElement>('.stage-editor .stage-title').forEach((label, index) => { label.textContent = localizeHtml(`工程 ${index + 1}`, language); }); }
+function updateTransitionNumbers(stage: HTMLElement) { stage.querySelectorAll<HTMLElement>('.transition-row').forEach((row, index) => { const label = `遷移設定 ${index + 1}`; row.querySelector<HTMLElement>('legend')!.textContent = localizeHtml(label, language); row.querySelector<HTMLButtonElement>('.transition-remove')!.setAttribute('aria-label', localizeHtml(`${label}を削除`, language)); }); }
 function updateTransitionEmptyState(stage: HTMLElement) {
   const list = stage.querySelector<HTMLElement>('.stage-transition-list')!;
-  if (!list.querySelector('.transition-row')) list.innerHTML = '<p class="hint stage-transition-empty">行き先はまだありません。</p>';
+  if (!list.querySelector('.transition-row')) list.innerHTML = localizeHtml('<p class="hint stage-transition-empty">行き先はまだありません。</p>', language);
 }
 function bindingEditor(sourceId: string, stageId?: string, existing?: Binding) {
   const a = assets.find(a => a.id === sourceId)!;
@@ -532,12 +541,12 @@ async function action(value: string, target: HTMLElement) {
     modal('資産削除の確認', `<p><strong>${esc(preview.asset.name)}</strong>を削除状態にし、検索・利用対象から外します。過去revisionとRun Snapshotは保持します。</p>${hasReferences ? `<section class="section"><h3>同時に解除する参照</h3>${bindingItems ? `<h4>紐づけ</h4><ul>${bindingItems}</ul>` : ''}${commonItems ? `<h4>Project Common</h4><ul>${commonItems}</ul>` : ''}</section>` : '<p class="hint">このAssetを参照する紐づけとProject Commonはありません。</p>'}<form data-form="asset-delete" class="form-stack"><input type="hidden" name="assetId" value="${esc(preview.asset.id)}"><input type="hidden" name="expectedRevision" value="${preview.asset.revision}"><input type="hidden" name="expectedBindingRevisions" value="${esc(JSON.stringify(expectedBindings))}"><input type="hidden" name="expectedProjectCommonRevisions" value="${esc(JSON.stringify(expectedProjectCommons))}"><label class="checkbox-label"><input type="checkbox" name="confirm" required>このAssetの削除${hasReferences ? 'と一覧の参照解除' : ''}を確定します</label>${formEnd(hasReferences ? '参照を解除して削除' : 'このAssetを削除')}</form>`);
     return;
   }
-  if (key === 'stage-add') { const root = dialog.querySelector('#stage-rows')!; root.insertAdjacentHTML('beforeend', stageRow({ id: crypto.randomUUID(), name: '', additionalInstructions: '' }, root.children.length, '', '', {}, [], readStages(dialog))); updateTransitionTargets(dialog); return; }
+  if (key === 'stage-add') { const root = dialog.querySelector('#stage-rows')!; root.insertAdjacentHTML('beforeend', localizeHtml(stageRow({ id: crypto.randomUUID(), name: '', additionalInstructions: '' }, root.children.length, '', '', {}, [], readStages(dialog)), language)); updateTransitionTargets(dialog); return; }
   if (key === 'role-create') {
     const row = target.closest<HTMLElement>('.stage-editor')!, panel = row.querySelector<HTMLElement>('.new-role-fields')!, role = row.querySelector<HTMLSelectElement>('[name=stageRole]')!;
     panel.hidden = !panel.hidden;
     role.disabled = !panel.hidden;
-    target.textContent = panel.hidden ? '＋ 新しいRole' : '作成をやめる';
+    target.textContent = localizeHtml(panel.hidden ? '＋ 新しいRole' : '作成をやめる', language);
     if (!panel.hidden) { panel.dataset.previousRole = role.value; role.value = ''; row.querySelector<HTMLInputElement>('[name=newRoleName]')?.focus(); }
     else role.value = panel.dataset.previousRole ?? '';
     return;
@@ -547,7 +556,7 @@ async function action(value: string, target: HTMLElement) {
   if (key === 'choice-condition-add') {
     const model = assets.find(asset => asset.id === target.closest<HTMLFormElement>('form')?.dataset.source && asset.kind === 'model');
     const rows = dialog.querySelectorAll('.choice-condition-row').length;
-    if (model) dialog.querySelector('#choice-condition-rows')!.insertAdjacentHTML('beforeend', modelChoiceConditionRow(model, {}, rows));
+    if (model) dialog.querySelector('#choice-condition-rows')!.insertAdjacentHTML('beforeend', localizeHtml(modelChoiceConditionRow(model, {}, rows), language));
     return;
   }
   if (key === 'choice-condition-remove') {
@@ -555,21 +564,21 @@ async function action(value: string, target: HTMLElement) {
     updateChoiceConditionNumbers(dialog);
     return;
   }
-  if (key === 'choice-option-add') { target.closest<HTMLElement>('.model-choice-editor-row')!.querySelector('.model-option-rows')!.insertAdjacentHTML('beforeend', `<div class="row model-option-row">${field('選択値', 'choiceOption')}${button('choice-option-remove', '×', 'small ghost')}</div>`); return; }
+  if (key === 'choice-option-add') { target.closest<HTMLElement>('.model-choice-editor-row')!.querySelector('.model-option-rows')!.insertAdjacentHTML('beforeend', localizeHtml(`<div class="row model-option-row">${field('選択値', 'choiceOption')}${button('choice-option-remove', '×', 'small ghost')}</div>`, language)); return; }
   if (key === 'choice-option-remove') {
     const row = target.closest<HTMLElement>('.model-choice-editor-row')!;
     const options = row.querySelectorAll('.model-option-row');
     if (options.length <= 1) throw new Error('選択肢には少なくとも1つの値が必要です。');
     target.closest('.model-option-row')?.remove(); return;
   }
-  if (key === 'file-add') { dialog.querySelector('#file-rows')!.insertAdjacentHTML('beforeend', fileRow()); return; }
+  if (key === 'file-add') { dialog.querySelector('#file-rows')!.insertAdjacentHTML('beforeend', localizeHtml(fileRow(), language)); return; }
   if (key === 'transition-add') {
     const stage = target.closest<HTMLElement>('.stage-editor'), stages = readStages(dialog);
     if (!stage || !stages.length) throw new Error('先に工程を追加してください。');
     const index = stages.findIndex(s => s.id === stage.dataset.id), next = stages[index + 1];
     const transition = { id: crypto.randomUUID(), from: stage.dataset.id!, to: next?.id ?? 'completed', condition: '', label: '' };
     stage.querySelector('.stage-transition-empty')?.remove();
-    stage.querySelector('.stage-transition-list')!.insertAdjacentHTML('beforeend', transitionRow(transition, stages, stage.querySelectorAll('.transition-row').length)); updateTransitionNumbers(stage);
+    stage.querySelector('.stage-transition-list')!.insertAdjacentHTML('beforeend', localizeHtml(transitionRow(transition, stages, stage.querySelectorAll('.transition-row').length), language)); updateTransitionNumbers(stage);
     return;
   }
   if (key === 'row-remove') {
@@ -605,9 +614,12 @@ async function action(value: string, target: HTMLElement) {
   if (key === 'insight') { await api('insight.status', { insightId: id, status: extra }, true); notify('気づきの状態を更新しました。'); await refresh(); return; }
   if (key === 'review-decide') { modal('Review項目への判断', `<form data-form="review-decision" data-id="${id}" data-decision="${extra}" class="form-stack"><p>判断: ${states[extra]}</p>${area('判断の内容', 'note', '', false)}${formEnd('判断を記録')}</form>`); return; }
   if (key === 'proposal-new') {
-    const journals = (screenData.journals as Journal[]) ?? [], insights = (screenData.insights as Insight[]) ?? [];
+    const journals = (screenData.journals as JournalSummary[]) ?? [], summaries = (screenData.insights as Omit<Insight, 'body'>[]) ?? [];
     if (!journals.length) throw new Error('提案の根拠となるJournalを先に記録してください。');
-    modal('改善を提案', `<form data-form="proposal" class="form-stack">${field('提案名', 'title')}${area('観測した状況', 'observedContext')}${area('変更の内容', 'proposedChange')}${area('理由', 'reason')}${assetSelect('変更する資産', 'assetId', assets.map(a => opt(a.id, `${kinds[a.kind]} / ${a.name}`)).join())}${area('更新後の本文・責務', 'body', '', true, true)}<fieldset><h3>根拠Journal・レビュー対象</h3>${journals.map(j => `<label class="checkbox-label"><input type="checkbox" name="journalIds" value="${j.id}">${esc(j.task || date(j.createdAt))}</label>`).join('')}</fieldset><fieldset><h3>適用時に処理する気づき</h3>${insights.filter(i => i.status === 'pending').map(i => `<label class="checkbox-label"><input type="checkbox" name="insightIds" value="${i.id}">${esc(i.body.slice(0, 90))}</label>`).join('')}</fieldset><p class="hint">Workflow構成や複数資産の変更を含む提案は、接続中のAIから作成できます。</p>${formEnd('提案を保存')}</form>`); return;
+    const pending = summaries.filter(insight => insight.status === 'pending');
+    const details = await Promise.all([...new Set(pending.map(insight => insight.journalId))].map(journalId => api<{ insights: Insight[] }>('journal.get', { journalId })));
+    const insights = details.flatMap(detail => detail.insights).filter(insight => pending.some(summary => summary.id === insight.id));
+    modal('改善を提案', `<form data-form="proposal" class="form-stack">${field('提案名', 'title')}${area('観測した状況', 'observedContext')}${area('変更の内容', 'proposedChange')}${area('理由', 'reason')}${assetSelect('変更する資産', 'assetId', assets.map(a => opt(a.id, `${kinds[a.kind]} / ${a.name}`)).join())}${area('更新後の本文・責務', 'body', '', true, true)}<fieldset><h3>根拠Journal・レビュー対象</h3>${journals.map(j => `<label class="checkbox-label"><input type="checkbox" name="journalIds" value="${j.id}">${esc(j.task || date(j.createdAt))}</label>`).join('')}</fieldset><fieldset><h3>適用時に処理する気づき</h3>${insights.filter(i => i.status === 'pending').map(i => `<label class="checkbox-label"><input type="checkbox" name="insightIds" value="${i.id}">${esc(`${journals.find(journal => journal.id === i.journalId)?.task || 'Journal'} / ${i.body.trim().slice(0, 90)}`)}</label>`).join('')}</fieldset><p class="hint">Workflow構成や複数資産の変更を含む提案は、接続中のAIから作成できます。</p>${formEnd('提案を保存')}</form>`); return;
   }
   if (key === 'proposal-decide') { modal('提案への判断', `<form data-form="decision" data-id="${id}" data-choice="${extra}" class="form-stack"><p>判断: ${states[extra]}</p>${area('判断の内容', 'note')}${formEnd('判断を記録')}</form>`); return; }
   if (key === 'proposal-apply') { await api('proposal.apply', { proposalId: id }, true); notify('変更を適用し、対象の気づきを処理済みにしました。'); await refresh(); return; }
@@ -754,7 +766,7 @@ document.addEventListener('change', event => {
     language = input.value === 'ja' ? 'ja' : 'en';
     localStorage.setItem('aacl-language', language);
     document.documentElement.lang = language;
-    void render().catch(e => notify(errorMessage(e)));
+    if (!loading) void render().catch(e => notify(errorMessage(e)));
     return;
   }
   if (input.id === 'scope-select') { selectedScope = input.value; location.hash = route()[0]; void refresh(); }
@@ -763,13 +775,13 @@ document.addEventListener('change', event => {
   }
   if (input.name === 'stageModel') {
     const row = input.closest<HTMLElement>('.stage-editor');
-    if (row) row.querySelector<HTMLElement>('.model-choice-container')!.innerHTML = modelChoiceFields(input.value);
+    if (row) row.querySelector<HTMLElement>('.model-choice-container')!.innerHTML = localizeHtml(modelChoiceFields(input.value), language);
   }
   if (input.name === 'targetId' || input.name === 'purpose') {
     const form = input.closest<HTMLFormElement>('[data-form=binding]');
     const target = form ? assets.find(asset => asset.id === (form.querySelector('[name=targetId]') as HTMLSelectElement)?.value) : undefined;
     const purpose = form?.querySelector<HTMLSelectElement>('[name=purpose]')?.value;
-    if (form) form.querySelector<HTMLElement>('.binding-model-choice-fields')!.innerHTML = target?.kind === 'model' && purpose === 'stage-model' ? modelChoiceFields(target.id) : '';
+    if (form) form.querySelector<HTMLElement>('.binding-model-choice-fields')!.innerHTML = target?.kind === 'model' && purpose === 'stage-model' ? localizeHtml(modelChoiceFields(target.id), language) : '';
   }
 });
 document.addEventListener('input', event => {

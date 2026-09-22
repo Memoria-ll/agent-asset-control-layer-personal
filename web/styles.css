@@ -361,10 +361,12 @@ pre {
   display:flex;
   align-items:center;
   justify-content:space-between;
+  gap:16px;
   height:38px;
   margin-bottom:37px
 }
 .topbar-controls {
+  flex:none;
   display:flex;
   align-items:center;
   gap:12px
@@ -430,6 +432,10 @@ pre {
   padding-bottom:0
 }
 .breadcrumb {
+  min-width:0;
+  overflow:hidden;
+  text-overflow:ellipsis;
+  white-space:nowrap;
   font-size:11px;
   color:#7b909d;
   letter-spacing:.02em
