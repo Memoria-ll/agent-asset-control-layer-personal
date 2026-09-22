@@ -297,8 +297,11 @@ const english = {
     '保存データはそのまま保持されます。': 'Saved data remains unchanged.',
 };
 const orderedEntries = Object.entries(english).sort(([a], [b]) => b.length - a.length);
+const escapeRegExp = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+const translations = new Map(orderedEntries);
+const translationPattern = new RegExp(orderedEntries.map(([source]) => escapeRegExp(source)).join('|'), 'g');
 export function localizeHtml(html, language) {
     if (language === 'ja')
         return html;
-    return orderedEntries.reduce((value, [source, translated]) => value.split(source).join(translated), html);
+    return html.replace(translationPattern, match => translations.get(match) ?? match);
 }
