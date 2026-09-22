@@ -300,8 +300,11 @@ const english: Record<string, string> = {
 };
 
 const orderedEntries = Object.entries(english).sort(([a], [b]) => b.length - a.length);
+const escapeRegExp = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+const translations = new Map(orderedEntries);
+const translationPattern = new RegExp(orderedEntries.map(([source]) => escapeRegExp(source)).join('|'), 'g');
 
 export function localizeHtml(html: string, language: Language) {
   if (language === 'ja') return html;
-  return orderedEntries.reduce((value, [source, translated]) => value.split(source).join(translated), html);
+  return html.replace(translationPattern, match => translations.get(match) ?? match);
 }
