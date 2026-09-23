@@ -1,7 +1,7 @@
 # Agent Asset Control Layer — 開発要求 v16 Draft
 
 作成日: 2026-09-15
-更新日: 2026-09-18
+更新日: 2026-09-23
 
 本書は、Agent Asset Control Layer（AACL）の完成形における製品の責務、管理対象、実行境界、観測と改善の仕組みを定義する。
 
@@ -272,7 +272,7 @@ Coreは次をRole Contextとして構成する。
 - Workflow / Stageで使うと明示されたSkill / Rule
 - Project Commonに登録されたRule
 
-ModelはModel名と呼び出し方、任意の選択肢グループを保持し、Model名と呼び出し方には`{{choice.<選択肢名>}}`を埋め込める。StageのModel紐づけには各選択肢グループの選択値を保存し、ContextとExecution Planでは選択値へ展開する。未定義または未選択の選択肢は拒否する。Modelから明示参照されたSkill / RuleをContextへ含める。ModelからSkill / Ruleへの紐づけには選択肢条件を指定でき、同じ条件内はAND、複数条件はORとして一致する参照だけをContextへ含める。条件を指定しない参照はすべての選択状態で有効とする。外部Modelの実在性と利用可否、実際のサブエージェント起動はユーザーとRuntime / AIが担う。
+ModelはModel名と呼び出し方、任意の選択肢グループを保持し、各選択肢値に安定したIDを付ける。Model名と呼び出し方には`{{choice.<選択肢名>}}`を埋め込める。StageのModel紐づけは選択肢グループ名と選択値IDを保持し、ContextとExecution PlanではそのIDに対応する現在の選択値へ展開する。選択値を変更してIDを保てばStageの選択と選択肢条件は追従する。削除済みまたは存在しないIDへの紐づけはエラー診断へ表示する。未定義または未選択の選択肢は拒否する。Modelから明示参照されたSkill / RuleをContextへ含める。ModelからSkill / Ruleへの紐づけには選択肢条件を指定でき、同じ条件内はAND、複数条件はORとして一致する参照だけをContextへ含める。条件を指定しない参照はすべての選択状態で有効とする。外部Modelの実在性と利用可否、実際のサブエージェント起動はユーザーとRuntime / AIが担う。
 
 ---
 

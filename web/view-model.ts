@@ -27,10 +27,13 @@ export function relatedWorkflows(assetId: string, assets: AssetSummary[], bindin
   return result;
 }
 
-function stageBindingChanges(workflowId: string, scope: string, purpose: 'stage-role' | 'stage-model', assignments: { stageId: string; targetId: string; selectedChoices?: Record<string, string> }[], bindings: Binding[]): Change[] {
+function stageBindingChanges(workflowId: string, scope: string, purpose: 'stage-role' | 'stage-model', assignments: { stageId: string; targetId: string; selectedChoices?: Record<string, string>; selectedChoiceIds?: Record<string, string> }[], bindings: Binding[]): Change[] {
   const desired = new Map(assignments.filter(a => a.targetId).map(a => [a.stageId, {
-    scope, sourceId: workflowId, stageId: a.stageId, targetId: a.targetId, purpose,
-    selectedChoices: a.selectedChoices ?? {}, choiceConditions: [],
+    binding: {
+      scope, sourceId: workflowId, stageId: a.stageId, targetId: a.targetId, purpose,
+      selectedChoices: a.selectedChoices ?? {}, selectedChoiceIds: a.selectedChoiceIds ?? {}, choiceConditions: [], choiceConditionIds: [],
+    },
+    compareChoiceIds: a.selectedChoiceIds !== undefined,
   }]));
   const current = bindings.filter(b => b.active && b.scope === scope && b.sourceId === workflowId && b.purpose === purpose);
   const changes: Change[] = [];
@@ -38,12 +41,12 @@ function stageBindingChanges(workflowId: string, scope: string, purpose: 'stage-
     const stageId = binding.stageId ?? '';
     const next = desired.get(stageId), choices = binding.selectedChoices ?? {};
     if (!next) changes.push({ type: 'binding.remove', id: binding.id, expectedRevision: binding.revision });
-    else if (next.targetId !== binding.targetId || Object.keys(next.selectedChoices).length !== Object.keys(choices).length || Object.entries(next.selectedChoices).some(([key, value]) => choices[key] !== value)) {
-      changes.push({ type: 'binding.save', id: binding.id, expectedRevision: binding.revision, binding: next });
+    else if (next.binding.targetId !== binding.targetId || Object.keys(next.binding.selectedChoices).length !== Object.keys(choices).length || Object.entries(next.binding.selectedChoices).some(([key, value]) => choices[key] !== value) || (next.compareChoiceIds && (Object.keys(next.binding.selectedChoiceIds).length !== Object.keys(binding.selectedChoiceIds ?? {}).length || Object.entries(next.binding.selectedChoiceIds).some(([key, value]) => (binding.selectedChoiceIds ?? {})[key] !== value)))) {
+      changes.push({ type: 'binding.save', id: binding.id, expectedRevision: binding.revision, binding: next.binding });
     }
     desired.delete(stageId);
   }
-  for (const binding of desired.values()) changes.push({ type: 'binding.save', binding });
+  for (const { binding } of desired.values()) changes.push({ type: 'binding.save', binding });
   return changes;
 }
 
@@ -51,8 +54,8 @@ export function stageRoleBindingChanges(workflowId: string, scope: string, assig
   return stageBindingChanges(workflowId, scope, 'stage-role', assignments.map(a => ({ stageId: a.stageId, targetId: a.roleId })), bindings);
 }
 
-export function stageModelBindingChanges(workflowId: string, scope: string, assignments: { stageId: string; modelId: string; selectedChoices?: Record<string, string> }[], bindings: Binding[]): Change[] {
-  return stageBindingChanges(workflowId, scope, 'stage-model', assignments.map(a => ({ stageId: a.stageId, targetId: a.modelId, selectedChoices: a.selectedChoices })), bindings);
+export function stageModelBindingChanges(workflowId: string, scope: string, assignments: { stageId: string; modelId: string; selectedChoices?: Record<string, string>; selectedChoiceIds?: Record<string, string> }[], bindings: Binding[]): Change[] {
+  return stageBindingChanges(workflowId, scope, 'stage-model', assignments.map(a => ({ stageId: a.stageId, targetId: a.modelId, selectedChoices: a.selectedChoices, selectedChoiceIds: a.selectedChoiceIds })), bindings);
 }
 
 export function workflowDiagram(asset: AssetSummary) {

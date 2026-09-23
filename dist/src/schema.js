@@ -1,3 +1,4 @@
+import { createHash, randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import { modelChoiceTemplateNames } from './model-template.js';
 import { journalSkillKey } from './canonical-assets.js';
@@ -11,6 +12,13 @@ function withoutTaskType(value) {
     const { taskType: _taskType, ...rest } = value;
     return rest;
 }
+function legacyChoiceOptionId(assetId, choiceName, index, value) {
+    const hex = [...createHash('sha256').update(`${assetId}\0${choiceName}\0${index}\0${value}`).digest('hex').slice(0, 32)];
+    hex[12] = '8';
+    hex[16] = ((Number.parseInt(hex[16], 16) & 3) | 8).toString(16);
+    const valueId = hex.join('');
+    return `${valueId.slice(0, 8)}-${valueId.slice(8, 12)}-${valueId.slice(12, 16)}-${valueId.slice(16, 20)}-${valueId.slice(20)}`;
+}
 export function normalizeAssetRecord(value) {
     if (!value || typeof value !== 'object' || Array.isArray(value))
         return value;
@@ -19,6 +27,20 @@ export function normalizeAssetRecord(value) {
     const oldTaskType = typeof record.taskType === 'string' ? record.taskType : '';
     const oldDescription = typeof record.description === 'string' ? record.description : '';
     delete normalized.taskType;
+    if (record.kind === 'model' && Array.isArray(normalized.choices))
+        normalized.choices = normalized.choices.map(choice => {
+            if (!choice || typeof choice !== 'object' || Array.isArray(choice))
+                return choice;
+            const item = choice, options = Array.isArray(item.options) ? item.options : [];
+            if (Array.isArray(item.optionIds))
+                return item;
+            return {
+                ...item,
+                optionIds: options.map((option, index) => typeof option === 'string' && typeof record.id === 'string'
+                    ? legacyChoiceOptionId(record.id, typeof item.name === 'string' ? item.name : '', index, option)
+                    : randomUUID()),
+            };
+        });
     if (Array.isArray(normalized.stages)) {
         const completionConditions = new Map(normalized.stages.map(stage => {
             const value = withoutTaskType(stage);
@@ -69,10 +91,23 @@ export const stageSchema = z.preprocess(withoutTaskType, z.object({
 export const transitionSchema = z.object({
     id: text, from: text, to: text, condition: text, label: text,
 }).strict();
-export const modelChoiceSchema = z.object({
+export const modelChoiceSchema = z.preprocess(value => {
+    if (!value || typeof value !== 'object' || Array.isArray(value))
+        return value;
+    const item = value;
+    return Array.isArray(item.options) && !Array.isArray(item.optionIds)
+        ? { ...item, optionIds: item.options.map(() => randomUUID()) }
+        : value;
+}, z.object({
     name: text,
     options: z.array(text).min(1),
-}).strict();
+    optionIds: z.array(id).min(1),
+}).strict().superRefine((choice, ctx) => {
+    if (choice.options.length !== choice.optionIds.length)
+        ctx.addIssue({ code: 'custom', message: `Modelの選択肢「${choice.name}」の値とIDの数が一致しません。` });
+    if (new Set(choice.optionIds).size !== choice.optionIds.length)
+        ctx.addIssue({ code: 'custom', message: `Modelの選択肢「${choice.name}」のIDは重複できません。` });
+}));
 const assetInputSchema = z.object({
     kind: z.enum(['workflow', 'skill', 'role', 'rule', 'model']),
     name: text, description: text, body: z.string().default(''),
@@ -120,6 +155,8 @@ export const assetSchema = z.preprocess(normalizeAssetRecord, assetInputSchema).
         for (const choice of a.choices)
             if (new Set(choice.options).size !== choice.options.length)
                 fail(`Modelの選択肢「${choice.name}」の値は重複できません。`);
+        if (new Set(a.choices.flatMap(choice => choice.optionIds)).size !== a.choices.reduce((count, choice) => count + choice.optionIds.length, 0))
+            fail('Modelの選択肢IDは重複できません。');
         const knownChoices = new Set(choiceNames);
         for (const [field, template] of [['modelName', a.modelName], ['invocationMethod', a.invocationMethod]]) {
             try {
@@ -175,7 +212,9 @@ export const bindingSchema = z.object({
     scope: scope.default('global'), sourceId: id, stageId: text.optional(), targetId: id,
     purpose: z.enum(['reference', 'entry-role', 'stage-role', 'stage-model']).default('reference'),
     selectedChoices: z.record(z.string(), text).default({}),
+    selectedChoiceIds: z.record(z.string(), id).default({}),
     choiceConditions: z.array(z.record(z.string(), text)).default([]),
+    choiceConditionIds: z.array(z.record(z.string(), id)).default([]),
 }).strict();
 export const provenanceSchema = z.object({
     origin: z.enum(['ui', 'ai', 'cli', 'restore', 'proposal', 'init']),

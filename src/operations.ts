@@ -14,10 +14,10 @@ Journal Skillは直接起動せず、Journal記録設定が有効な場合にタ
 aacl_run_startとaacl_run_transitionは、Context本文ではなく次の実行計画（nextExecution）とcontextHandleを返します。実際に次のStageを実施するオーケストレーターまたはサブエージェントが、そのHandleでaacl_context_getを呼び出してください。別の会話のHandleを使わず、ユーザーへHandleの入力を求めません。
 ContextのSkill catalogから必要な本文・補助ファイルを、実際にStageを実施するAIがaacl_run_skill_getで取得します。Ruleを含むContextの取得と意味判断、開発操作は実施者側が行い、オーケストレーターへ本文を転送しません。
 nextExecutionのexecutorがsubagentなら、返されたModel情報とsubagent継続指示に従ってRuntimeでサブエージェントを起動します。executorがorchestratorなら、オーケストレーター自身が実施者としてContextを取得します。連続する同じRole・ModelのStageでは同じsubagentを継続します。
-Modelには自由な名前の選択肢グループを複数定義できます。WorkflowのStageへModelを紐づけるときは、各選択肢の値をselectedChoicesで指定し、ContextのmodelSelectionsで確認します。
+Modelには自由な名前の選択肢グループを複数定義できます。各グループのoptionsとoptionIdsは同じ順序で対応し、選択値を変更するときはoptionIdを保ってください。WorkflowのStageへの紐づけではselectedChoicesに値、selectedChoiceIdsにIDを指定し、ContextのmodelSelectionsで現在の値を確認します。IDを保って値を変更すると選択は追従し、存在しないIDへの紐づけはdiagnostics.getでエラーになります。
 Model名と呼び出し方には{{choice.<選択肢名>}}を埋め込めます。ContextとExecution PlanではStageで選んだ値へ展開され、未定義または未選択の選択肢は受理されません。
 現在Stageから進む遷移のconditionを評価し、遷移判断の報告とaacl_run_getのversionを付けて許可された遷移を要求します。自己ループや差し戻しとRun全体のfailedは別です。
-ModelからSkill / Ruleへの参照にはchoiceConditionsを指定でき、同じ組み合わせ内はAND、複数の組み合わせはORとして、一致する参照だけをContextへ含めます。
+ModelからSkill / Ruleへの参照にはchoiceConditionsと対応するchoiceConditionIdsを指定できます。同じ組み合わせ内はAND、複数の組み合わせはORとして、一致する参照だけをContextへ含めます。optionIdを保って値を変更すると条件も追従し、削除済みまたは存在しないIDはdiagnostics.getでエラーになります。
 現在Stageから進む遷移のconditionを評価し、遷移判断の報告とaacl_run_getのversionを付けて許可された遷移を要求します。retry・returnと自己ループ・差し戻し、Run全体のfailedは別です。
     資産管理はまずaacl_asset_list（既定は概要のみ）またはaacl_asset_get_manyで対象を確かめ、Asset ID・scope・変更内容・理由・userRequestを明示して型付き操作を実行します。既存Asset・紐づけ・Project Commonの更新／解除とChange Set内の各変更には取得時点のexpectedRevisionを必ず付け、Conflictなら最新状態を再取得して変更全体を組み直します。asset.saveは完全な全置換なのでbodyやsupportingFilesを省略しません。既存Assetの一部fieldだけを変えるときはasset.updateへ変更するfieldだけを渡し、省略したfieldを保持します。複数変更はまずaacl_changeset_previewでDry Runし、問題がなければaacl_changeset_applyを実行します。Assetを削除する前にaacl_asset_delete_previewの参照一覧をユーザーへ示し、削除と参照解除の明示承認を得てからaacl_asset_deleteを実行します。方針が曖昧なら具体案を示してユーザーへ確認します。認証情報は保存しません。
 書き込みのoperationIdにはUUIDを使用し、同じ操作の再送だけで再利用します。
@@ -90,7 +90,7 @@ export class Operations {
     write('common.save', 'Project CommonのRule参照を更新する。取得時点のexpectedRevisionを指定する', { projectId: id, expectedRevision: revision, ruleIds: z.array(id), provenance }, p => core.applyChanges([{ type: 'common.save', projectId: p.projectId, expectedRevision: p.expectedRevision, ruleIds: p.ruleIds }], p.provenance));
     read('binding.list', '管理先ごとの紐づけを一覧', { scope: scope.optional(), assetId: id.optional() }, p => ({ bindings: core.bindings(p.scope).filter(b => !p.assetId || b.sourceId === p.assetId || b.targetId === p.assetId) }));
     read('binding.get', '紐づけの現在または過去revisionを取得', { bindingId: id, revision: z.int().positive().optional() }, p => { const binding = store.get<Binding>(p.bindingId, 'binding'); return { binding: p.revision ? store.revision<Binding>(p.bindingId, p.revision) : binding }; });
-    write('binding.save', '明示参照を追加・付け替え。ModelからSkill / Ruleへの参照ではchoiceConditionsで選択肢の組み合わせを指定できる。既存紐づけの更新は取得時点のexpectedRevisionを指定する', { id: id.optional(), expectedRevision: revision.optional(), binding: bindingSchema, provenance }, p => core.applyChanges([{ type: 'binding.save', id: p.id, expectedRevision: p.expectedRevision, binding: p.binding }], p.provenance), changedAssetIds);
+    write('binding.save', '明示参照を追加・付け替え。ModelからSkill / Ruleへの参照はchoiceConditionsと対応するchoiceConditionIdsで選択肢条件を指定する。StageのModel紐づけはselectedChoicesとselectedChoiceIdsを指定する。存在しない選択肢IDは診断エラーになる。既存紐づけの更新は取得時点のexpectedRevisionを指定する', { id: id.optional(), expectedRevision: revision.optional(), binding: bindingSchema, provenance }, p => core.applyChanges([{ type: 'binding.save', id: p.id, expectedRevision: p.expectedRevision, binding: p.binding }], p.provenance), changedAssetIds);
     write('binding.remove', '紐づけを解除する。取得時点のexpectedRevisionを指定する', { id, expectedRevision: revision, provenance }, p => core.applyChanges([{ type: 'binding.remove', id: p.id, expectedRevision: p.expectedRevision }], p.provenance), changedAssetIds);
 
     write('run.start', '明示選択したWorkflowのRunを開始し、Context本文を含まない次の実行計画とContext Handleを返す', { workflowId: id, projectId: id.optional(), root: text.optional(), runtime: text, instruction: text, target: z.string().default('') }, p => core.startRun(p));

@@ -138,42 +138,139 @@ export class Core {
         if (b.purpose === 'stage-model' && (!b.stageId || source.kind !== 'workflow' || target.kind !== 'model'))
             throw new Error('ModelはWorkflowのStageに指定してください。');
         const selectedChoices = b.selectedChoices ?? {};
-        if (Object.keys(selectedChoices).length && (b.purpose !== 'stage-model' || target.kind !== 'model'))
+        const selectedChoiceIds = b.selectedChoiceIds ?? {};
+        if ((Object.keys(selectedChoices).length || Object.keys(selectedChoiceIds).length) && (b.purpose !== 'stage-model' || target.kind !== 'model'))
             throw new Error('Modelの選択肢はWorkflowのStageに指定してください。');
         if (b.purpose === 'stage-model' && target.kind === 'model') {
-            const choices = target.choices ?? [], choiceNames = new Set(choices.map(choice => choice.name));
-            for (const [name, value] of Object.entries(selectedChoices)) {
-                const choice = choices.find(candidate => candidate.name === name);
-                if (!choiceNames.has(name) || !choice?.options.includes(value))
-                    throw new Error(`Modelの選択肢「${name}」の値「${value}」は利用できません。`);
-            }
-            const missing = choices.find(choice => !(choice.name in selectedChoices));
-            if (missing)
-                throw new Error(`Modelの選択肢「${missing.name}」を選択してください。`);
+            this.resolveModelChoices(target, selectedChoices, selectedChoiceIds, `Stage紐づけ ${b.stageId}`, true);
         }
         const choiceConditions = b.choiceConditions ?? [];
-        if (choiceConditions.length && (source.kind !== 'model' || b.purpose !== 'reference' || !['skill', 'rule'].includes(target.kind))) {
+        const choiceConditionIds = b.choiceConditionIds ?? [];
+        if ((choiceConditions.length || choiceConditionIds.length) && (source.kind !== 'model' || b.purpose !== 'reference' || !['skill', 'rule'].includes(target.kind))) {
             throw new Error('選択肢条件はModelからSkillまたはRuleへの参照にだけ指定できます。');
         }
-        if (source.kind === 'model' && choiceConditions.length) {
-            const choices = source.choices ?? [];
-            for (const condition of choiceConditions)
-                for (const [name, value] of Object.entries(condition)) {
-                    const choice = choices.find(candidate => candidate.name === name);
-                    if (!choice || !choice.options.includes(value))
-                        throw new Error(`Modelの選択肢条件「${name}=${value}」は利用できません。`);
-                }
+        if (source.kind === 'model') {
+            if (choiceConditionIds.length && choiceConditionIds.length !== choiceConditions.length)
+                throw new Error('Modelの選択肢条件とIDの数が一致しません。');
+            choiceConditions.forEach((condition, index) => this.resolveModelChoices(source, condition, choiceConditionIds[index] ?? {}, `選択肢条件 ${b.sourceId}`, false));
         }
         if (source.id === target.id)
             throw new Error('Skillの循環参照は登録できません。');
     }
-    bindingMatchesChoices(binding, selectedChoices) {
+    resolveModelChoices(model, values, optionIds, description, requireEveryChoice) {
+        const names = new Set([...Object.keys(values), ...Object.keys(optionIds)]);
+        if (requireEveryChoice)
+            for (const choice of model.choices)
+                names.add(choice.name);
+        const resolvedValues = {}, resolvedIds = {};
+        for (const name of names) {
+            const choice = model.choices.find(candidate => candidate.name === name);
+            const optionId = optionIds[name];
+            if (!choice) {
+                if (optionId)
+                    throw new Error(`${description}の選択肢「${name}」のID「${optionId}」がModelにありません（選択肢グループがありません）。`);
+                throw new Error(`${description}の選択肢グループ「${name}」がModelにありません。`);
+            }
+            const index = optionId ? choice.optionIds.indexOf(optionId) : choice.options.indexOf(values[name] ?? '');
+            if (index < 0) {
+                if (optionId)
+                    throw new Error(`${description}の選択肢「${name}」のID「${optionId}」がModelにありません。`);
+                throw new Error(`${description}の選択肢「${name}」の値「${values[name] ?? ''}」は利用できません。`);
+            }
+            resolvedIds[name] = choice.optionIds[index];
+            resolvedValues[name] = choice.options[index];
+        }
+        if (requireEveryChoice)
+            for (const choice of model.choices)
+                if (!(choice.name in resolvedValues))
+                    throw new Error(`Modelの選択肢「${choice.name}」を選択してください。`);
+        return { values: resolvedValues, ids: resolvedIds };
+    }
+    bindingMatchesChoices(binding, selectedChoices, selectedChoiceIds) {
         const conditions = binding.choiceConditions ?? [];
         if (!conditions.length)
             return true;
-        if (!selectedChoices)
-            return false;
-        return conditions.some(condition => Object.entries(condition).every(([name, value]) => selectedChoices[name] === value));
+        return conditions.some((condition, index) => {
+            const ids = binding.choiceConditionIds?.[index] ?? {};
+            if (Object.keys(ids).length)
+                return !!selectedChoiceIds && Object.entries(ids).every(([name, optionId]) => selectedChoiceIds[name] === optionId);
+            return !!selectedChoices && Object.entries(condition).every(([name, value]) => selectedChoices[name] === value);
+        });
+    }
+    migrateLegacyModelBindingIds(changes) {
+        const changedModels = new Map();
+        for (const change of changes) {
+            if ((change.type !== 'asset.save' && change.type !== 'asset.update') || !change.id)
+                continue;
+            const previous = this.store.maybe(change.id);
+            if (!previous || previous.kind !== 'model')
+                continue;
+            const next = change.type === 'asset.save'
+                ? assetSchema.parse(change.asset)
+                : assetSchema.parse({ ...this.assetPayload(previous), ...assetPatchSchema.parse(change.asset) });
+            if (next.kind !== 'model' || JSON.stringify(previous.choices) === JSON.stringify(next.choices))
+                continue;
+            changedModels.set(change.id, previous);
+        }
+        if (!changedModels.size)
+            return changes;
+        const explicitlyChanged = new Set(changes.flatMap(change => change.type === 'binding.save' || change.type === 'binding.remove' ? [change.id].filter((id) => !!id) : []));
+        const migrations = [];
+        for (const [modelId, previous] of changedModels)
+            for (const binding of this.bindings()) {
+                if (explicitlyChanged.has(binding.id))
+                    continue;
+                let selectedChoiceIds = binding.selectedChoiceIds ?? {};
+                let choiceConditionIds = binding.choiceConditionIds ?? [];
+                let changed = false;
+                if (binding.targetId === modelId && binding.purpose === 'stage-model') {
+                    try {
+                        selectedChoiceIds = this.resolveModelChoices(previous, binding.selectedChoices ?? {}, selectedChoiceIds, `Stage紐づけ ${binding.id}`, true).ids;
+                    }
+                    catch {
+                        continue;
+                    }
+                    changed = JSON.stringify(selectedChoiceIds) !== JSON.stringify(binding.selectedChoiceIds ?? {});
+                }
+                if (binding.sourceId === modelId && binding.purpose === 'reference' && (binding.choiceConditions ?? []).length) {
+                    try {
+                        choiceConditionIds = (binding.choiceConditions ?? []).map((condition, index) => this.resolveModelChoices(previous, condition, choiceConditionIds[index] ?? {}, `選択肢条件 ${binding.id}`, false).ids);
+                    }
+                    catch {
+                        continue;
+                    }
+                    changed = JSON.stringify(choiceConditionIds) !== JSON.stringify(binding.choiceConditionIds ?? []);
+                }
+                if (!changed)
+                    continue;
+                migrations.push({
+                    type: 'binding.save', id: binding.id, expectedRevision: binding.revision,
+                    binding: {
+                        scope: binding.scope, sourceId: binding.sourceId, targetId: binding.targetId, stageId: binding.stageId,
+                        purpose: binding.purpose, selectedChoices: binding.selectedChoices ?? {}, selectedChoiceIds,
+                        choiceConditions: binding.choiceConditions ?? [], choiceConditionIds,
+                    },
+                });
+            }
+        return [...migrations, ...changes];
+    }
+    indexBindingChoices(binding) {
+        const source = this.asset(binding.sourceId), target = this.asset(binding.targetId);
+        let selectedChoices = binding.selectedChoices ?? {}, selectedChoiceIds = binding.selectedChoiceIds ?? {};
+        let choiceConditions = binding.choiceConditions ?? [], choiceConditionIds = binding.choiceConditionIds ?? [];
+        if (binding.purpose === 'stage-model' && target.kind === 'model') {
+            const resolved = this.resolveModelChoices(target, selectedChoices, selectedChoiceIds, `Stage紐づけ ${binding.stageId ?? ''}`, true);
+            selectedChoices = resolved.values;
+            selectedChoiceIds = resolved.ids;
+        }
+        if (source.kind === 'model' && binding.purpose === 'reference') {
+            if (choiceConditionIds.length && choiceConditionIds.length !== choiceConditions.length)
+                throw new Error('Modelの選択肢条件とIDの数が一致しません。');
+            const resolved = choiceConditions.map((condition, index) => this.resolveModelChoices(source, condition, choiceConditionIds[index] ?? {}, `選択肢条件 ${binding.sourceId}`, false));
+            choiceConditions = resolved.map(item => item.values);
+            choiceConditionIds = resolved.map(item => item.ids);
+        }
+        return { ...binding, selectedChoices, selectedChoiceIds, choiceConditions, choiceConditionIds };
     }
     validateExpectedRevisions(changes) {
         const virtual = new Map();
@@ -214,12 +311,16 @@ export class Core {
     applyChanges(changes, provenance, proposalId, approvalId, restore, restoresChangeSetId, allowAssetDelete = false, allowJournalSkillSetup = false) {
         if (!allowAssetDelete && changes.some(c => c.type === 'asset.delete'))
             throw new Error('Asset削除は影響一覧を確認した後、専用の削除操作から確定してください。');
-        for (const change of changes) {
+        this.validateExpectedRevisions(changes);
+        const expandedChanges = this.migrateLegacyModelBindingIds(changes);
+        if (!allowAssetDelete && expandedChanges.some(c => c.type === 'asset.delete'))
+            throw new Error('Asset削除は影響一覧を確認した後、専用の削除操作から確定してください。');
+        for (const change of expandedChanges) {
             if (change.type === 'asset.delete' && journalSkillKey(this.asset(change.id)))
                 throw new Error('JournalとJournal Reviewの標準Skillは削除できません。');
         }
-        this.validateExpectedRevisions(changes);
-        for (const change of changes.filter((c) => c.type === 'asset.delete')) {
+        this.validateExpectedRevisions(expandedChanges);
+        for (const change of expandedChanges.filter((c) => c.type === 'asset.delete')) {
             const preview = this.assetDeletionPreview(change.id);
             const bindingRevisions = preview.bindings.map(({ id, revision }) => ({ id, revision }));
             const projectCommonRevisions = preview.projectCommons.map(({ id, revision }) => ({ id, revision }));
@@ -251,7 +352,7 @@ export class Core {
             return result;
         };
         const resolvedChanges = [];
-        for (const input of changes) {
+        for (const input of expandedChanges) {
             // Merge against the preceding write in this transaction, including full saves and creates.
             const change = input.type === 'asset.update' ? {
                 ...input, type: 'asset.save',
@@ -307,7 +408,7 @@ export class Core {
                 entities.push(save('asset', { ...asset, deletedAt: new Date().toISOString() }, asset.scope));
             }
             else if (change.type === 'binding.save') {
-                const b = bindingSchema.parse(change.binding);
+                const b = this.indexBindingChoices(bindingSchema.parse(change.binding));
                 const previous = change.id ? this.store.get(change.id, 'binding') : undefined;
                 const target = this.asset(b.targetId);
                 if (change.id && this.store.get(change.id, 'binding').scope !== b.scope)
@@ -391,7 +492,7 @@ export class Core {
         const project = this.store.put('project', { name, root });
         const common = this.store.put('common', { projectId: project.id, ruleIds: [] }, project.id);
         const originals = this.bindings('global');
-        const result = this.applyChanges(originals.map(b => ({ type: 'binding.save', binding: { scope: project.id, sourceId: b.sourceId, targetId: b.targetId, stageId: b.stageId, purpose: b.purpose, selectedChoices: b.selectedChoices ?? {}, choiceConditions: b.choiceConditions ?? [] } })), {
+        const result = this.applyChanges(originals.map(b => ({ type: 'binding.save', binding: { scope: project.id, sourceId: b.sourceId, targetId: b.targetId, stageId: b.stageId, purpose: b.purpose, selectedChoices: b.selectedChoices ?? {}, selectedChoiceIds: b.selectedChoiceIds ?? {}, choiceConditions: b.choiceConditions ?? [], choiceConditionIds: b.choiceConditionIds ?? [] } })), {
             origin: 'init', reason: 'Globalの紐づけをProject初期構成へコピー', userRequest: `Project初期導入: ${root}`, proposedBy: '', decision: '',
             sources: originals.map(b => ({ type: 'binding-revision', reference: `${b.id}@${b.revision}` })),
         });
@@ -411,11 +512,15 @@ export class Core {
             throw new Error(`このStageにはModelを1件まで指定できます: ${stageId}`);
         const stageModelBinding = stageModelBindings[0];
         const stageModelId = stageModelBinding?.targetId;
-        const modelSelections = stageModelBinding?.selectedChoices ?? {};
         const assets = new Map(snapshot.assets.map(a => [a.id, a]));
+        const stageModelAsset = stageModelId ? assets.get(stageModelId) : undefined;
+        const modelSelection = stageModelBinding && stageModelAsset?.kind === 'model'
+            ? this.resolveModelChoices(stageModelAsset, stageModelBinding.selectedChoices ?? {}, stageModelBinding.selectedChoiceIds ?? {}, `Stage紐づけ ${stageModelBinding.id}`, true)
+            : { values: {}, ids: {} };
+        const modelSelections = modelSelection.values, modelSelectionIds = modelSelection.ids;
         const chosen = new Map(), resolution = [];
         const seen = new Set();
-        const walk = (assetId, path, stack, reason, selectedChoices) => {
+        const walk = (assetId, path, stack, reason, selectedChoices, selectedChoiceIds) => {
             if (stack.has(assetId))
                 throw new Error(`循環参照: ${[...path, assetId].join(' → ')}`);
             const a = assets.get(assetId);
@@ -428,15 +533,15 @@ export class Core {
             seen.add(assetId);
             const next = new Set(stack).add(assetId);
             for (const b of bindings.filter(b => b.sourceId === assetId && !b.stageId)) {
-                if (a.kind === 'model' && !this.bindingMatchesChoices(b, selectedChoices))
+                if (a.kind === 'model' && !this.bindingMatchesChoices(b, selectedChoices, selectedChoiceIds))
                     continue;
                 walk(b.targetId, [...path, assetId, `${b.id}@${b.revision}`], next, b.choiceConditions?.length ? '選択肢条件に一致した明示的な紐づけ' : '明示的な紐づけ');
             }
         };
         for (const b of bindings.filter(b => b.sourceId === workflow.id && (!b.stageId || b.stageId === stageId))) {
             const target = assets.get(b.targetId);
-            const selected = target?.kind === 'model' && b.stageId === stageId ? b.selectedChoices : undefined;
-            walk(b.targetId, [workflow.id, ...(b.stageId ? [b.stageId] : []), `${b.id}@${b.revision}`], new Set([workflow.id]), b.stageId ? 'Stageの直接参照' : 'Workflowの直接参照', selected);
+            const selected = target?.kind === 'model' && b.stageId === stageId ? this.resolveModelChoices(target, b.selectedChoices ?? {}, b.selectedChoiceIds ?? {}, `Stage紐づけ ${b.id}`, true) : undefined;
+            walk(b.targetId, [workflow.id, ...(b.stageId ? [b.stageId] : []), `${b.id}@${b.revision}`], new Set([workflow.id]), b.stageId ? 'Stageの直接参照' : 'Workflowの直接参照', selected?.values, selected?.ids);
         }
         for (const id of common?.ruleIds ?? [])
             walk(id, [`Project Common@${common.revision}`], new Set(), 'Project Common');
@@ -487,23 +592,25 @@ export class Core {
         const common = project ? this.common(project.id) : null;
         const needed = new Set([workflow.id, ...(common?.ruleIds ?? [])]);
         const visited = new Set();
-        const visit = (source, stack, selectedChoices) => {
+        const visit = (source, stack, selectedChoices, selectedChoiceIds) => {
             if (stack.has(source))
                 throw new Error('循環参照を検出しました。');
             const sourceAsset = this.asset(source);
-            const visitKey = sourceAsset.kind === 'model' ? `${source}:${JSON.stringify(selectedChoices ?? {})}` : source;
+            const visitKey = sourceAsset.kind === 'model' ? `${source}:${JSON.stringify(selectedChoiceIds ?? selectedChoices ?? {})}` : source;
             if (visited.has(visitKey))
                 return;
             visited.add(visitKey);
             const next = new Set(stack).add(source);
             for (const b of allBindings.filter(b => b.sourceId === source)) {
                 this.validateBinding(b);
-                if (sourceAsset.kind === 'model' && !this.bindingMatchesChoices(b, selectedChoices))
+                if (sourceAsset.kind === 'model' && !this.bindingMatchesChoices(b, selectedChoices, selectedChoiceIds))
                     continue;
                 const target = this.asset(b.targetId);
-                const targetChoices = sourceAsset.kind === 'workflow' && target.kind === 'model' && b.stageId ? b.selectedChoices : undefined;
+                const targetSelection = sourceAsset.kind === 'workflow' && target.kind === 'model' && b.stageId
+                    ? this.resolveModelChoices(target, b.selectedChoices ?? {}, b.selectedChoiceIds ?? {}, `Stage紐づけ ${b.id}`, true)
+                    : undefined;
                 needed.add(b.targetId);
-                visit(b.targetId, next, targetChoices);
+                visit(b.targetId, next, targetSelection?.values, targetSelection?.ids);
             }
         };
         visit(workflow.id, new Set());
@@ -890,7 +997,9 @@ export class Core {
             current.set(key, revision + 1);
             return revision;
         };
-        for (const h of [...histories].reverse()) {
+        const reverseHistories = [...histories].reverse();
+        const restoreOrder = [...reverseHistories.filter(h => h.kind === 'asset'), ...reverseHistories.filter(h => h.kind !== 'asset')];
+        for (const h of restoreOrder) {
             if (h.before === null) {
                 if (h.kind === 'binding')
                     operations.push({ type: 'binding.remove', id: h.entityId, expectedRevision: expectedRevision('binding', h.entityId) });
@@ -905,7 +1014,7 @@ export class Core {
                     operations.push({ type: 'asset.save', id: h.entityId, expectedRevision: expectedRevision('asset', h.entityId), asset: this.assetPayload(this.store.revision(h.entityId, h.before)) });
                 if (h.kind === 'binding') {
                     const b = this.store.revision(h.entityId, h.before);
-                    operations.push(b.active ? { type: 'binding.save', id: b.id, expectedRevision: expectedRevision('binding', b.id), binding: { scope: b.scope, sourceId: b.sourceId, targetId: b.targetId, stageId: b.stageId, purpose: b.purpose, selectedChoices: b.selectedChoices ?? {}, choiceConditions: b.choiceConditions ?? [] } } : { type: 'binding.remove', id: b.id, expectedRevision: expectedRevision('binding', b.id) });
+                    operations.push(b.active ? { type: 'binding.save', id: b.id, expectedRevision: expectedRevision('binding', b.id), binding: { scope: b.scope, sourceId: b.sourceId, targetId: b.targetId, stageId: b.stageId, purpose: b.purpose, selectedChoices: b.selectedChoices ?? {}, selectedChoiceIds: b.selectedChoiceIds ?? {}, choiceConditions: b.choiceConditions ?? [], choiceConditionIds: b.choiceConditionIds ?? [] } } : { type: 'binding.remove', id: b.id, expectedRevision: expectedRevision('binding', b.id) });
                 }
                 if (h.kind === 'common') {
                     const c = this.store.revision(h.entityId, h.before);
