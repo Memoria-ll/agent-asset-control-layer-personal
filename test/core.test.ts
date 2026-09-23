@@ -274,6 +274,37 @@ test('Model choices are configured freely, selected per Workflow Stage, and deli
   assert.equal((await f.start(workflow)).nextExecution.executor, 'orchestrator');
 });
 
+test('Model option bindings follow stable IDs and diagnose IDs removed from the Model', async t => {
+  const f = fixture(t), model = await f.asset('model', {
+    name: 'Stable option Model', modelName: 'agent-{{choice.runtime}}', invocationMethod: 'Runtime {{choice.runtime}}',
+    choices: [{ name: 'runtime', options: ['5.6-luna', 'claude-opus'] }],
+  });
+  const runtimeChoice = model.choices[0]!;
+  const runtimeId = runtimeChoice.optionIds[0]!;
+  const conditionalSkill = await f.asset('skill', { name: 'Stable option condition' });
+  const conditionBinding = await f.bind(model, conditionalSkill, { choiceConditions: [{ runtime: '5.6-luna' }] });
+  const workflow = await f.workflow();
+  const stageBinding = await f.bind(workflow, model, { stageId: 'build', purpose: 'stage-model', selectedChoices: { runtime: '5.6-luna' } });
+
+  const renamed = await f.call<{ entities: Asset[] }>('asset.save', {
+    id: model.id, expectedRevision: model.revision,
+    asset: { ...f.core.assetPayload(model), choices: [{ ...runtimeChoice, options: ['6-luna', 'claude-opus'] }] }, provenance,
+  });
+  const updatedRun = await f.start(workflow);
+  assert.equal(updatedRun.context.modelSelections?.runtime, '6-luna');
+  assert.equal(updatedRun.context.model?.modelName, 'agent-6-luna');
+  assert.ok(updatedRun.context.skillCatalog.some(skill => skill.id === conditionalSkill.id));
+
+  const updatedModel = renamed.entities[0]!;
+  await f.call('asset.save', {
+    id: updatedModel.id, expectedRevision: updatedModel.revision,
+    asset: { ...f.core.assetPayload(updatedModel), choices: [{ ...updatedModel.choices[0]!, options: ['claude-opus'], optionIds: [updatedModel.choices[0]!.optionIds[1]!] }] }, provenance,
+  });
+  const diagnostics = await f.call<{ diagnostics: { severity: string; target: string; message: string }[] }>('diagnostics.get');
+  assert.ok(diagnostics.diagnostics.some(diagnostic => diagnostic.severity === 'error' && diagnostic.target === stageBinding.id && diagnostic.message.includes(runtimeId)));
+  assert.ok(diagnostics.diagnostics.some(diagnostic => diagnostic.severity === 'error' && diagnostic.target === conditionBinding.id && diagnostic.message.includes(runtimeId)));
+});
+
 test('C02 C04 C13 C14 C15 C28 C29: schema / stable identity / idempotent writes / provenance / restoration', async t => {
   const f = fixture(t), a = await f.asset('skill');
   const operationId = randomUUID(), input = { id: a.id, expectedRevision: a.revision, asset: { ...f.core.assetPayload(a), name: '改名', body: '更新' }, provenance };

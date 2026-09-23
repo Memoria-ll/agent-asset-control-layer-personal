@@ -1,6 +1,6 @@
 # Agent Asset Control Layer — 実装設計書（個人用）
 
-更新日: 2026-09-18
+更新日: 2026-09-23
 状態: Draft
 
 本書は、[AACL 開発要求 v16](aacl-requirements-personal.md)を実装するための技術要件と内部設計をまとめる。利用者に見える機能・責務・動作の正本は開発要求書とし、本書ではそれらを再定義しない。
@@ -100,7 +100,7 @@ Claude Code / Codex (Windows または同一WSL内のLinux)
 
 - Skill recordの必須本文fieldはname、description、explanation、bodyとし、`description`は自動発火ON時のRuntime入口のYAML front matter、`explanation`はUIで人が呼び出し方を判断する説明として保存する。useCaseとimplicitInvocationを独立して保存し、Runtime target生成処理へ渡す。UIの詳細画面のswitchと編集フォームから自動発火を変更し、既存のAsset更新operationを通してrevision・history・provenanceを保存した後に入口を同期する。
 - Workflow recordはStage listとtransition定義を保持し、StageはWorkflow内の子recordとして保存する。
-- Model recordはModel名、呼び出し方、選択肢グループを保持する。Model名と呼び出し方には`{{choice.<選択肢名>}}`を埋め込め、RunのContextとExecution PlanではStageで選んだ値へ展開する。未定義または未選択の選択肢は拒否する。ModelからSkill / Ruleを参照でき、WorkflowのStageから`stage-model` purposeとstageIdでModelを1件まで指定できる。Model→Skill / Ruleの`reference` bindingには`choiceConditions`を保存でき、各条件内の選択値をAND、条件配列をORとして解決する。条件なしのbindingは無条件参照とする。
+- Model recordはModel名、呼び出し方、選択肢グループを保持し、各選択値に安定したIDを付ける。Model名と呼び出し方には`{{choice.<選択肢名>}}`を埋め込め、RunのContextとExecution PlanではStageで選んだIDに対応する現在の値へ展開する。未定義または未選択の選択肢は拒否する。ModelからSkill / Ruleを参照でき、WorkflowのStageから`stage-model` purposeとstageIdでModelを1件まで指定できる。Model→Skill / Ruleの`reference` bindingには`choiceConditions`と対応する`choiceConditionIds`を保存でき、各条件内はAND、条件配列はORとして解決する。Stageの選択は`selectedChoiceIds`で参照し、値を変えてIDを保てばStageの選択と条件は追従する。選択肢IDが削除または不明になった紐づけは診断errorとして表示する。条件なしのbindingは無条件参照とする。
 - Workflow内の各Stageに`stage-role` purposeとstageIdで指定したRoleを1件割り当て、各transitionに遷移先へ進む必須`condition`を保存・検証する。担当Roleの責務をStageの基本とし、Stageの`additionalInstructions`は任意の追加指示として保存する。Modelを指定したStageはサブエージェント実行の指示とし、連続する同じRole・Modelでは同じsubagent IDをRunへ保持する。
 - Workflow編集UIではStageごとにRoleを割り当て、任意の追加指示を設定できる。新規RoleとWorkflowは`asset.create`でIDを確定してからbindingと同じChange Setで作成し、Roleを複数Workflow / Stageから再利用する。重複IDは拒否する。
 - 作業分類のfieldはWorkflow、Role、Stage、Rule、Modelへ格納しない。旧recordに残る分類値は読み出し・更新時に破棄する。

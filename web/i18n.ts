@@ -238,6 +238,8 @@ const english: Record<string, string> = {
   '選択肢を追加すると候補が表示されます。': 'Add a choice to see insertion candidates.',
   '選択肢名': 'Choice name',
   '選択値': 'Choice value',
+  '例: 実行系（codex luna / claude opes）、effort（low / medium / high）のように自由に追加できます。各選択値はIDで紐づきます。値を変えるときはIDを保つと選択や条件も追従し、値を削除すると参照切れが診断に表示されます。': 'Add any choices, such as runtime (codex luna / claude opes) or effort (low / medium / high). Each option is bound by ID. Keep its ID when changing the value to update selections and conditions; deleting it surfaces a broken reference in diagnostics.',
+  'IDが見つかりません（再選択）': 'ID not found (select again)',
   '選択肢には少なくとも1つの値が必要です。': 'Each choice needs at least one value.',
   '選択肢の組み合わせ': 'Choice combinations',
   'このStageで使う値を選択してください。': 'Choose the values for this stage.',
