@@ -672,13 +672,13 @@ test('Skill automatic invocation defaults to off, persists through both UI contr
     await expect(toggle).toHaveAttribute('aria-checked', 'false');
     await expect(page.getByRole('switch', { name: '直接起動', exact: true })).toHaveAttribute('aria-checked', 'true');
     const checkEntries = (enabled: boolean) => {
-      for (const path of ['codex/skills/ui-invocation/SKILL.md', 'claude/commands/ui-invocation.md']) {
+      for (const path of ['codex/skills/ui-invocation/SKILL.md', 'claude/skills/ui-invocation/SKILL.md']) {
         const body = readFileSync(join(root, path), 'utf8');
         expect(body.includes('UI_AUTOMATIC_TRIGGER')).toBe(enabled);
         expect(body).not.toContain('UI_CANONICAL_BODY');
       }
       expect(readFileSync(join(root, 'codex/skills/ui-invocation/agents/openai.yaml'), 'utf8')).toBe(`policy:\n  allow_implicit_invocation: ${enabled}\n`);
-      expect(readFileSync(join(root, 'claude/commands/ui-invocation.md'), 'utf8')).toContain(`disable-model-invocation: ${!enabled}`);
+      expect(readFileSync(join(root, 'claude/skills/ui-invocation/SKILL.md'), 'utf8')).toContain(`disable-model-invocation: ${!enabled}`);
     };
     checkEntries(false);
     await toggle.click();

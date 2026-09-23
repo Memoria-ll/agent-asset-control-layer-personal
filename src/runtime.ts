@@ -46,15 +46,20 @@ function runtimeNames(assets: Asset[]) {
   }));
 }
 
-function removeEmptyCodexSkillDirectory(runtime: string, path: string) {
-  if (runtime !== 'codex' || !path.endsWith('/SKILL.md')) return;
+function removeEmptySkillDirectory(path: string) {
+  if (!path.endsWith('/SKILL.md')) return;
   const directory = dirname(path), agents = join(directory, 'agents');
   if (existsSync(agents) && readdirSync(agents).length === 0) rmdirSync(agents);
   if (existsSync(directory) && readdirSync(directory).length === 0) rmdirSync(directory);
 }
 
-function supportRoot(runtime: RuntimeTarget['runtime'], entryPath: string) {
-  return runtime === 'claude' ? join(dirname(entryPath), parse(entryPath).name) : dirname(entryPath);
+function runtimeEntryPath(target: RuntimeTarget, entryName: string) {
+  return join(target.path, 'skills', entryName, 'SKILL.md');
+}
+
+// Claude entries recorded before the move to skills/ live at commands/<name>.md with files under commands/<name>/.
+function supportRoot(entryPath: string) {
+  return entryPath.endsWith('/SKILL.md') ? dirname(entryPath) : join(dirname(entryPath), parse(entryPath).name);
 }
 
 function assertWithin(root: string, path: string) {
@@ -155,8 +160,8 @@ export class RuntimeEntries {
     return runtime === 'codex' ? synthesizeCodexPolicy(source, implicitInvocation) : undefined;
   }
   private syncSupportingFiles(target: RuntimeTarget, asset: Asset | undefined, oldEntry: Entry | undefined, entryPath: string | undefined, previous: RuntimeFile[], implicitInvocation = false, legacyPolicy?: string) {
-    const oldRoot = oldEntry ? supportRoot(target.runtime, oldEntry.path) : undefined;
-    const currentRoot = asset && entryPath ? supportRoot(target.runtime, entryPath) : undefined;
+    const oldRoot = oldEntry ? supportRoot(oldEntry.path) : undefined;
+    const currentRoot = asset && entryPath ? supportRoot(entryPath) : undefined;
     const desired = new Map<string, string>();
     if (asset && currentRoot) {
       for (const [relativePath, content] of Object.entries(asset.supportingFiles)) {
@@ -230,7 +235,7 @@ export class RuntimeEntries {
         for (const asset of assets) {
           const old = previous.find(entry => entry.assetId === asset.id);
           const entryName = names.get(asset.id);
-          const path = entryName ? target.runtime === 'claude' ? join(target.path, 'commands', `${entryName}.md`) : join(target.path, 'skills', entryName, 'SKILL.md') : undefined;
+          const path = entryName ? runtimeEntryPath(target, entryName) : undefined;
           const desired = entryName ? this.body(asset, target.runtime, entryName) : undefined;
           const implicitInvocation = asset.kind === 'skill' && asset.implicitInvocation === true;
           if (requested.has(asset.id) || (old && path && (old.path !== path || old.hash !== hash(desired!) || old.implicitInvocation !== implicitInvocation))) ids.add(asset.id);
@@ -246,7 +251,7 @@ export class RuntimeEntries {
           const asset = assets.find(a => a.id === assetId), old = previous.find(e => e.assetId === assetId);
           const entryName = asset ? names.get(assetId)! : undefined;
           if (asset && !entryName) throw new Error('Asset名からRuntime入口名を作れません。英小文字・数字を含む名前にしてください。');
-          const path = asset ? target.runtime === 'claude' ? join(target.path, 'commands', `${entryName}.md`) : join(target.path, 'skills', entryName!, 'SKILL.md') : old?.path;
+          const path = asset ? runtimeEntryPath(target, entryName!) : old?.path;
           if (!path) throw new Error('以前のRuntime入口の配置先を取得できません。');
           safeDirectory(dirname(path));
           let existing: string | undefined;
@@ -269,13 +274,13 @@ export class RuntimeEntries {
             if (oldPathExists) {
               if (lstatSync(old!.path).isSymbolicLink() || hash(readFileSync(old!.path, 'utf8')) !== old!.hash) throw new Error('以前の入口がAACL生成後に変更されています。内容を確認してください。');
               unlinkSync(old!.path);
-              removeEmptyCodexSkillDirectory(target.runtime, old!.path);
+              removeEmptySkillDirectory(old!.path);
             }
             const implicitInvocation = asset.kind === 'skill' && asset.implicitInvocation === true;
             if (!old || old.path !== path || old.hash !== hash(desired!) || old.implicitInvocation !== implicitInvocation) this.core.store.put('runtime-entry', { id: old?.id, targetId: target.id, assetId, path, hash: hash(desired!), active: true, implicitInvocation });
           } else if (old) {
             if (existing !== undefined) unlinkSync(path);
-            removeEmptyCodexSkillDirectory(target.runtime, path);
+            removeEmptySkillDirectory(path);
             this.core.store.put('runtime-entry', { ...old, active: false });
           }
           phase = 'runtime-file';
