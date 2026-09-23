@@ -547,6 +547,9 @@ pre {
   contain:layout paint;
   padding:2px 3px 24px
 }
+.is-scrolling > * {
+  pointer-events:none
+}
 .asset-scroll.drawer-open {
   overflow:hidden
 }
@@ -566,7 +569,7 @@ pre {
   padding:19px;
   border:1px solid #ffffffed;
   border-radius:18px;
-  background:linear-gradient(145deg,#ffffffc7,#ffffff72);
+  background:#f8fafc;
   box-shadow:inset 0 1px #fff;
   text-align:left
 }
@@ -1897,8 +1900,8 @@ dialog::backdrop {
 }
 :root[data-theme="dark"] .asset-card {
   border-color:#3b5a68;
-  background:linear-gradient(145deg,#203b48dd,#172b36bb);
-  box-shadow:var(--shadow),inset 0 1px #ffffff18
+  background:#1a2f3a;
+  box-shadow:inset 0 1px #ffffff18
 }
 :root[data-theme="dark"] .asset-card:hover {
   background:#294653;
