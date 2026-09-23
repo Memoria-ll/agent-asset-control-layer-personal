@@ -819,6 +819,20 @@ document.addEventListener('input', event => {
     if (form?.dataset.kind === 'model') updateModelTemplateAssist(form);
   }
 });
+// ホイールスクロール中はカーソル下を通過する要素の:hover切替と背景transitionが毎フレーム再描画を起こすため、停止かポインタ移動まで子要素のhit testを外す。
+let scrollingElement: Element | undefined;
+let scrollIdleTimer: number | undefined;
+let lastWheelAt = -Infinity;
+function endScrolling() { clearTimeout(scrollIdleTimer); scrollingElement?.classList.remove('is-scrolling'); scrollingElement = undefined; }
+document.addEventListener('wheel', event => { lastWheelAt = event.timeStamp; }, { capture: true, passive: true });
+document.addEventListener('scroll', event => {
+  if (event.timeStamp - lastWheelAt > 150) return;
+  const target = event.target instanceof Element ? event.target : document.documentElement;
+  if (scrollingElement !== target) { endScrolling(); scrollingElement = target; target.classList.add('is-scrolling'); }
+  clearTimeout(scrollIdleTimer);
+  scrollIdleTimer = window.setTimeout(endScrolling, 150);
+}, { capture: true, passive: true });
+document.addEventListener('mousemove', () => { if (scrollingElement) endScrolling(); }, { capture: true, passive: true });
 function errorMessage(error: unknown) { return error instanceof Error ? error.message : String(error); }
 window.addEventListener('hashchange', () => { if (!loading) void render().catch(e => notify(errorMessage(e))); });
 applyTheme();
