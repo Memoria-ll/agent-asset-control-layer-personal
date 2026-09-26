@@ -5,6 +5,11 @@ import { dirname, isAbsolute, join, parse, relative } from 'node:path';
 import { parse as parseYaml, stringify as stringifyYaml } from 'yaml';
 import { normalizeRoot } from './core.js';
 import { supportingFilePathError } from './schema.js';
+export const workflowExecutionInstructions = `nextExecutionには作業（task）、工程名と追加指示（stage）、担当Roleの名前とID（role）、指定Model（model）、contextHandleと継続情報が含まれる。
+executorがsubagentなら、オーケストレーターはこの実行計画だけでmodel.modelName・model.invocationMethod・model.selectionsに従ってサブエージェントを起動する。起動前にaacl_context_get・aacl_context_handoff・Asset取得でRole詳細や紐づくアセットを読み込まない。
+起動時にはtask・stage・role・contextHandleを渡し、起動後にサブエージェント自身がそのHandleでaacl_context_getを呼び、固定revisionのRole詳細・紐づくRule・Skill catalogを取得するよう指示する。必要なSkill本文・補助ファイルはサブエージェント自身がaacl_run_skill_getで取得する。親のContext全体を引き継がせず、Role詳細やアセット本文をオーケストレーター経由で転送しない。
+連続する同じRole・Modelではsubagent.idとcontinuityに従って同じサブエージェントを継続し、新しい工程の実行計画を渡してContextを再取得させる。サブエージェントは作業結果と遷移判断を報告する。
+executorがorchestratorなら、オーケストレーター自身が実施者としてcontextHandleでaacl_context_getを呼ぶ。遷移後も返されたnextExecutionに同じ手順を適用し、終端では次の工程を起動しない。`;
 const codexPolicyRelativePath = 'agents/openai.yaml';
 const hash = (text) => createHash('sha256').update(text).digest('hex');
 const fileMode = (path) => path.toLowerCase().endsWith('.sh') ? 0o700 : 0o600;
@@ -167,7 +172,7 @@ export class RuntimeEntries {
             + (runtime === 'codex' || implicitInvocation ? `description: ${JSON.stringify(description)}\n` : '')
             + (runtime === 'claude' ? `disable-model-invocation: ${!implicitInvocation}\n` : '')
             + '---';
-        return `${frontmatter}\n\n<!-- aacl-entry:${asset.id} -->\n\nMCPの aacl_${operation} に ${input} を渡す。\n${asset.kind === 'workflow' ? '現在開いているProject rootをrootへ渡し、operationIdに新しいUUIDを使う。返されたnextExecutionのexecutorを確認し、実施主体がcontextHandleでaacl_context_getを呼び出してからStageを実施する。遷移後も返されたnextExecutionに従い、Skill・Rule本文をオーケストレーターへ転送しない。\n' : '取得したCanonical本文に従う。\n'}`;
+        return `${frontmatter}\n\n<!-- aacl-entry:${asset.id} -->\n\nMCPの aacl_${operation} に ${input} を渡す。\n${asset.kind === 'workflow' ? `現在開いているProject rootをrootへ渡し、operationIdに新しいUUIDを使う。\n${workflowExecutionInstructions}\n` : '取得したCanonical本文に従う。\n'}`;
     }
     policy(runtime, implicitInvocation = false, source) {
         return runtime === 'codex' ? synthesizeCodexPolicy(source, implicitInvocation) : undefined;

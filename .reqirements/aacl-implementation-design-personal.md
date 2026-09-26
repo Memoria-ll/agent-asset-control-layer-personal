@@ -112,7 +112,8 @@ Claude Code / Codex (Windows または同一WSL内のLinux)
 - Workflow Run開始用とSkill本文取得用に、別々のtyped MCP operationを実装する。Skill取得operationはRun Contextを生成しない。
 - `run.start`の応答にRun ID、Run Context Handle、次に実施するStageのExecution Planを含め、CoreはRun IDとHandleの対応を保存する。開始応答にはContext本文を含めない。
 - Run単位のMCP operationはContext Handleを必須入力として受け取り、その値から対象Runを解決する。AIは`run.start`から受け取ったHandleを同じAI実行Contextの後続operationへ渡す。
-- Execution Planには次StageのID・表示名、実行主体（`orchestrator`または`subagent`）、指定ModelのID・選択肢展開済みのModel名・呼び出し方・選択値、サブエージェントの継続情報、Context Handle、Run versionを含める。Skill・Rule本文やStage Context本文は含めず、Planを受け取った実施主体が`context.get`で取得する。
+- Execution Planには作業依頼と対象（`task.instruction`・`task.target`）、次StageのID・表示名・追加指示（`stage.additionalInstructions`）、担当RoleのIDと名前（`role.id`・`role.name`）、実行主体（`orchestrator`または`subagent`）、指定ModelのID・選択肢展開済みのModel名・呼び出し方・選択値、サブエージェントの継続情報、Context Handle、Run versionを含める。Stage・Role・ModelはSnapshotの固定revisionから構成し、Role詳細・責務、Asset本文、Skill catalogは含めない。
+- `executor=subagent`ではオーケストレーターがExecution Planだけで指定Modelを起動し、作業・Stage・Roleの名前とID・Handleと取得手順を渡す。起動後にサブエージェント自身が`context.get`でRole詳細・明示参照Rule・Skill catalogを取得し、必要なSkill本文・補助ファイルを`run.skill.get`で取得する。起動前にオーケストレーターがContext・Asset取得で詳細を読み込んだり、親のContext全体を引き継がせたりしない。同じサブエージェントの継続時も新しいStageのPlanを渡してContextを再取得させる。この手順はBootstrapとClaude Code / CodexのWorkflow入口で共有する。Model未指定の`executor=orchestrator`は自身がContextを取得する。
 - Run開始transactionでWorkflowと参照revisionの境界を固定し、変更不能なExecution Snapshotを作成する。Snapshotにはrun id、Workflowとrevision、resolution revision boundary、Project、使用した紐づけとrevision、Project CommonのrevisionとRule参照、該当するStage、Role、Runtime、利用対象Assetとrevision、提供したRuleとSkill catalog、timestampを保持する。
 - Resolution recordには、利用対象になった各Assetの参照経路と解決理由を保持する。取得できなかったContextと理由も記録し、初期Contextに渡した情報と区別する。
 - Initial ContextはWorkflow Definition、現在Stageからの許可transitionと各`condition`、`stageRoleId`、担当Roleのresponsibilities、Stageの`additionalInstructions`、明示参照されたRule、利用対象Skill catalog、指定Modelの固定revision、選択肢展開済みのModel名と呼び出し方、サブエージェント継続指示で構成する。

@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { Core, normalizeRoot } from './core.ts';
-import { RuntimeEntries } from './runtime.ts';
+import { RuntimeEntries, workflowExecutionInstructions } from './runtime.ts';
 import { installJournalSkills } from './journal-skills.ts';
 import { backupData, exportData } from './maintenance.ts';
 import { assetPatchSchema, assetSchema, bindingSchema, changeSchema, id, journalTemplate, provenanceSchema, revision, scope, text } from './schema.ts';
@@ -11,9 +11,8 @@ export const bootstrap = `AACLはWorkflow・Skill・Role・Rule・Modelと、明
 aacl_project_resolveへ開いているProject rootを渡して完全一致で確認します。未登録の場合はaacl initで登録します。
 aacl_usecase_searchでWorkflowと直接起動Skillを探します。Skillの直接利用はaacl_skill_getだけを使い、Runや実行記録を作成しません。
 Journal Skillは直接起動せず、Journal記録設定が有効な場合にタスク完了時の気づきをaacl_journal_writeへ記録します。気づきがなければ記録しません。設定状態はaacl_settings_getで確認できます。
-aacl_run_startとaacl_run_transitionは、Context本文ではなく次の実行計画（nextExecution）とcontextHandleを返します。実際に次のStageを実施するオーケストレーターまたはサブエージェントが、そのHandleでaacl_context_getを呼び出してください。別の会話のHandleを使わず、ユーザーへHandleの入力を求めません。
-ContextのSkill catalogから必要な本文・補助ファイルを、実際にStageを実施するAIがaacl_run_skill_getで取得します。Ruleを含むContextの取得と意味判断、開発操作は実施者側が行い、オーケストレーターへ本文を転送しません。
-nextExecutionのexecutorがsubagentなら、返されたModel情報とsubagent継続指示に従ってRuntimeでサブエージェントを起動します。executorがorchestratorなら、オーケストレーター自身が実施者としてContextを取得します。連続する同じRole・ModelのStageでは同じsubagentを継続します。
+aacl_run_start・aacl_run_get・aacl_run_transitionは、Context本文ではなく次の実行計画（nextExecution）を返します。別の会話のHandleを使わず、ユーザーへHandleの入力を求めません。
+${workflowExecutionInstructions}
 Modelには自由な名前の選択肢グループを複数定義できます。各グループのoptionsとoptionIdsは同じ順序で対応し、選択値を変更するときはoptionIdを保ってください。WorkflowのStageへの紐づけではselectedChoicesに値、selectedChoiceIdsにIDを指定し、ContextのmodelSelectionsで現在の値を確認します。IDを保って値を変更すると選択は追従し、存在しないIDへの紐づけはdiagnostics.getでエラーになります。
 Model名と呼び出し方には{{choice.<選択肢名>}}を埋め込めます。ContextとExecution PlanではStageで選んだ値へ展開され、未定義または未選択の選択肢は受理されません。
 現在Stageから進む遷移のconditionを評価し、遷移判断の報告とaacl_run_getのversionを付けて許可された遷移を要求します。自己ループや差し戻しとRun全体のfailedは別です。
@@ -106,8 +105,8 @@ export class Operations {
     });
     this.entries.get('run.inspect')!.mcpVisible = false;
     read('review.run.inspect', 'Review対象Journalに関連する完了Runをbody-lessで参照', { journalId: id }, p => core.reviewRunInspect(p.journalId));
-    read('context.get', '実際にStageを実施する主体へ、固定revisionの現在Stage Contextを提供', { ...handle, model: z.string().optional() }, p => core.context(p.contextHandle, undefined, p.model));
-    read('context.handoff', '明示されたRoleへの引き渡しContextを構成', { ...handle, roleId: id, model: z.string().optional() }, p => core.context(p.contextHandle, p.roleId, p.model));
+    read('context.get', 'Stage実施者が固定revisionのRole詳細と紐づくアセットを取得。executor=subagentでは起動後のサブエージェント自身が呼ぶ', { ...handle, model: z.string().optional() }, p => core.context(p.contextHandle, undefined, p.model));
+    read('context.handoff', '実施者が明示RoleのContextを取得。executor=subagentでは起動後のサブエージェント自身が呼ぶ', { ...handle, roleId: id, model: z.string().optional() }, p => core.context(p.contextHandle, p.roleId, p.model));
     read('run.skill.get', 'Runの固定revisionからSkill本文・補助ファイルを取得', { ...handle, assetId: id, file: text.optional() }, p => core.runSkillGet(p.contextHandle, p.assetId, p.file));
     write('run.transition', '遷移条件への判断報告を付けて許可されたStage遷移を選択し、次の実行計画を返す', { ...handle, version: z.int().positive(), transitionId: text, report: text, evidence, comment: z.string().default('') }, p => core.transition(p));
     write('run.cancel', 'ユーザー意思によるRunの中止', { ...handle, reason: text }, p => core.endRun(p.contextHandle, 'cancelled', p.reason));

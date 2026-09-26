@@ -58,17 +58,27 @@ test('C02 C17 C32 C33: real HTTP / typed MCP / loopback / two concurrent chat Ha
   assert.ok(hiddenResult.error || hiddenResult.result?.isError);
   assert.ok(!tools.some(t => /sql|dispatch|execute_action/.test(t.name)));
   const badHeader = await rpc('tools/list', {}, undefined, { 'Mcp-Method': 'tools/call' }); assert.equal(badHeader.status, 400);
-  const workflowId = randomUUID(), roleId = randomUUID();
+  const workflowId = randomUUID(), roleId = randomUUID(), modelId = randomUUID();
   const created = await api<{ entities: Asset[] }>('changeset.apply', { operationId: randomUUID(), provenance: { origin: 'ui' }, changes: [
-    { type: 'asset.create', id: workflowId, asset: { kind: 'workflow', name: 'HTTP Workflow', description: '結合試験', entryStage: 'start', stages: [{ id: 'start', name: '作業' }], transitions: [{ id: 'end', from: 'start', to: 'completed', condition: '作業を報告できる', label: '完了' }] } },
+    { type: 'asset.create', id: workflowId, asset: { kind: 'workflow', name: 'HTTP Workflow', description: '結合試験', entryStage: 'start', stages: [{ id: 'start', name: '作業', additionalInstructions: '結果を簡潔に報告' }], transitions: [{ id: 'end', from: 'start', to: 'completed', condition: '作業を報告できる', label: '完了' }] } },
     { type: 'asset.create', id: roleId, asset: { kind: 'role', name: 'HTTP担当Role', description: '工程の責務を担う', responsibilities: '作業結果を報告する。' } },
+    { type: 'asset.create', id: modelId, asset: { kind: 'model', name: 'HTTP Model', description: '結合試験用Model', modelName: 'provider/worker', invocationMethod: '指定Modelで起動' } },
     { type: 'binding.save', binding: { sourceId: workflowId, targetId: roleId, stageId: 'start', purpose: 'stage-role' } },
+    { type: 'binding.save', binding: { sourceId: workflowId, targetId: modelId, stageId: 'start', purpose: 'stage-model' } },
   ] });
   assert.equal(created.entities[0].id, workflowId);
   const [a, b] = await Promise.all(['claude', 'codex'].map(runtime => tool<{ run: Run; contextHandle: string; nextExecution: ExecutionPlan; context?: unknown }>('aacl_run_start', { operationId: randomUUID(), workflowId, instruction: runtime, runtime })));
   assert.equal('context' in a, false);
   assert.equal(a.nextExecution.stage.id, 'start');
-  assert.equal(a.nextExecution.executor, 'orchestrator');
+  for (const started of [a, b]) {
+    assert.equal(started.nextExecution.executor, 'subagent');
+    assert.deepEqual(started.nextExecution.role, { id: roleId, name: 'HTTP担当Role' });
+    assert.equal(started.nextExecution.task.instruction, started.run.runtime);
+    assert.equal(started.nextExecution.stage.additionalInstructions, '結果を簡潔に報告');
+    assert.equal(started.nextExecution.model?.modelName, 'provider/worker');
+    assert.ok(!JSON.stringify(started).includes('作業結果を報告する。'));
+  }
+  assert.equal(app.core.store.list('delivery').length, 0);
   assert.notEqual(a.contextHandle, b.contextHandle);
   const [contextA, contextB] = await Promise.all([a, b].map(r => tool<{ runId: string; stageRoleId: string }>('aacl_context_get', { contextHandle: r.contextHandle })));
   assert.equal(contextA.stageRoleId, roleId);
