@@ -68,7 +68,7 @@ Claude Code / Codexは、モデル起動、ファイル操作、shell・tool呼�
 
 Canonical Assetと管理記録の正本はCoreが管理するCanonical Stateとする。Asset本文はUIで確認・編集でき、ユーザーが要求したときに人間可読形式で出力できる。
 
-Workflow RunのContextは、Project Commonと、選択Workflow・現在Stage・Roleの紐づけに含まれる明示参照から構成する。`run.start`と遷移操作はContext本文を自動で返さず、次に実施するStage・実行主体・Model・Context Handleを示すExecution Planだけを返す。実際にStageを実施するオーケストレーターまたはサブエージェントがHandleでContextを取得し、Skill本文やsupporting files、Ruleを使う時点で取得する。Runを伴わないSkillの直接取得では、指定されたCanonical Skill本文を返す。
+Workflow RunのContextは、Project Commonと、選択Workflow・現在Stage・Roleの紐づけに含まれる明示参照から構成する。`run.start`と遷移操作はContext本文を自動で返さず、作業依頼と対象、次に実施するStageのID・工程名・追加指示、担当Roleの名前とID、実行主体、Model、Context Handle、継続情報を示すExecution Planを返す。Execution PlanにはRoleの詳細・責務や紐づくアセット本文・Skill catalogを含めない。Model指定時は、オーケストレーターがこの計画だけで指定Modelのサブエージェントを起動し、作業・Stage・Roleの名前とID・Handleを渡す。起動後にサブエージェント自身が固定revisionのRole詳細と紐づくアセットのContextを取得する。親のContext全体を引き継がせず、オーケストレーターは起動前に詳細を取得・転送しない。継続するサブエージェントにも次Stageの計画を渡し、Contextを再取得させる。実際にStageを実施するオーケストレーターまたはサブエージェントがHandleでContextを取得し、Skill本文やsupporting files、Ruleを使う時点で取得する。Runを伴わないSkillの直接取得では、指定されたCanonical Skill本文を返す。
 
 ---
 

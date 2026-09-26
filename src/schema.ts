@@ -287,7 +287,9 @@ export interface Context {
 }
 export interface ExecutionPlan {
   runId: string; contextHandle: string; version: number;
-  stage: { id: string; name: string };
+  task: { instruction: string; target: string };
+  stage: { id: string; name: string; additionalInstructions: string };
+  role: { id: string; name: string };
   executor: 'orchestrator' | 'subagent';
   model?: { id: string; name: string; modelName: string; invocationMethod: string; selections: Record<string, string> };
   subagent?: NonNullable<Context['subagent']>;

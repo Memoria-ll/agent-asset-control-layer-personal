@@ -131,12 +131,73 @@ test('Run start returns an execution plan before the executor retrieves Context'
   assert.equal(f.store.list('delivery').length, 0);
   assert.equal(started.nextExecution.stage.id, 'build');
   assert.equal(started.nextExecution.executor, 'orchestrator');
+  assert.deepEqual(started.nextExecution.task, { instruction: '明示した作業', target: '' });
+  assert.equal(started.nextExecution.role.name, '担当Role');
+  assert.equal(started.nextExecution.stage.additionalInstructions, '');
   assert.equal(started.nextExecution.version, started.run.version);
   const recovered = await f.call<{ nextExecution: ExecutionPlan }>('run.get', { contextHandle: started.contextHandle });
   assert.deepEqual(recovered.nextExecution, started.nextExecution);
   const context = await f.call<Context>('context.get', { contextHandle: started.contextHandle });
   assert.equal(context.runId, started.run.id);
   assert.equal(f.store.list('delivery').length, 1);
+});
+
+test('Subagent plans contain the task and Role identity; details are delivered only when the executor fetches Context', async t => {
+  const f = fixture(t);
+  const role = await f.asset('role', { name: '実装担当', responsibilities: 'ROLE_RESPONSIBILITIES_ONLY', body: 'ROLE_BODY_ONLY' });
+  const rule = await f.asset('rule', { body: 'RULE_BODY_ONLY' });
+  const skill = await f.asset('skill', { description: 'SKILL_CATALOG_ONLY', body: 'SKILL_BODY_ONLY' });
+  const model = await f.asset('model', { modelName: 'provider/worker', invocationMethod: '指定Modelで起動', body: 'MODEL_BODY_ONLY' });
+  await f.bind(role, rule); await f.bind(role, skill);
+  const draft = await f.workflow(role);
+  await f.call('asset.update', { id: draft.id, expectedRevision: draft.revision, asset: {
+    body: 'WORKFLOW_BODY_ONLY', stages: draft.stages.map(stage => ({ ...stage, additionalInstructions: `${stage.name}の追加指示` })),
+  }, provenance });
+  const workflow = f.core.asset(draft.id);
+  for (const stage of workflow.stages) await f.bind(workflow, model, { stageId: stage.id, purpose: 'stage-model' });
+  const started = await f.call<{ run: Run; contextHandle: string; nextExecution: ExecutionPlan }>('run.start', {
+    workflowId: workflow.id, runtime: 'codex', instruction: '依頼された作業', target: '対象ファイル',
+  });
+  const assertPlanOnly = (response: unknown) => {
+    const serialized = JSON.stringify(response);
+    for (const detail of [role.responsibilities, role.body, rule.body, skill.description, skill.body, model.body, workflow.body]) assert.ok(!serialized.includes(detail), detail);
+  };
+  assertPlanOnly(started);
+  assert.deepEqual(started.nextExecution.task, { instruction: '依頼された作業', target: '対象ファイル' });
+  assert.deepEqual(started.nextExecution.role, { id: role.id, name: role.name });
+  assert.deepEqual(started.nextExecution.stage, { id: 'build', name: '実装', additionalInstructions: '実装の追加指示' });
+  assert.equal(started.nextExecution.model?.modelName, model.modelName);
+  assert.equal(started.nextExecution.executor, 'subagent');
+  assert.equal(f.store.list('delivery').length, 0);
+
+  await f.call('asset.update', { id: role.id, expectedRevision: role.revision, asset: { name: '変更後の担当', responsibilities: '変更後の責務' }, provenance });
+  await f.call('asset.update', { id: workflow.id, expectedRevision: workflow.revision, asset: { stages: workflow.stages.map(stage => ({ ...stage, additionalInstructions: '変更後の指示' })) }, provenance });
+  const recovered = await f.call<{ nextExecution: ExecutionPlan }>('run.get', { contextHandle: started.contextHandle });
+  assertPlanOnly(recovered);
+  assert.deepEqual(recovered.nextExecution, started.nextExecution);
+  assert.equal(f.store.list('delivery').length, 0);
+
+  const context = await f.call<Context>('context.get', { contextHandle: started.contextHandle });
+  assert.equal(context.roles.find(asset => asset.id === role.id)?.responsibilities, role.responsibilities);
+  assert.equal(context.rules.find(asset => asset.id === rule.id)?.body, rule.body);
+  assert.equal(context.skillCatalog.find(asset => asset.id === skill.id)?.description, skill.description);
+  assert.ok(!JSON.stringify(context).includes(skill.body));
+  assert.equal(f.store.list('delivery').length, 1);
+  assert.equal((await f.call<{ body: string }>('run.skill.get', { contextHandle: started.contextHandle, assetId: skill.id })).body, skill.body);
+  const delivered = f.store.list('delivery').length;
+  const moved = await f.call<{ nextExecution: ExecutionPlan }>('run.transition', { contextHandle: started.contextHandle, version: 1, transitionId: 'next', report: '実装完了' });
+  assertPlanOnly(moved);
+  assert.deepEqual(moved.nextExecution.role, started.nextExecution.role);
+  assert.deepEqual(moved.nextExecution.task, started.nextExecution.task);
+  assert.deepEqual(moved.nextExecution.stage, { id: 'review', name: '確認', additionalInstructions: '確認の追加指示' });
+  assert.equal(moved.nextExecution.subagent?.id, started.nextExecution.subagent?.id);
+  assert.equal(moved.nextExecution.subagent?.continuity, 'same');
+  assert.equal(f.store.list('delivery').length, delivered);
+  const next = await f.call<Context>('context.get', { contextHandle: started.contextHandle });
+  assert.equal(next.stage.additionalInstructions, '確認の追加指示');
+  assert.equal(f.store.list('delivery').length, delivered + 1);
+  const completed = await f.call<object>('run.transition', { contextHandle: started.contextHandle, version: 2, transitionId: 'done', report: '確認完了' });
+  assert.equal('nextExecution' in completed, false);
 });
 
 test('Runtime Skill entries with automatic invocation carry only frontmatter metadata and the AACL entry ID', async t => {
@@ -807,6 +868,13 @@ test('Runtime entry names come from Workflow and direct Skill names, with IDs on
   assert.ok(!workflowEntry.includes('\ndescription:'));
   assert.match(workflowEntry, /MCPの aacl_run_start/); assert.ok(!workflowEntry.includes('ensure')); assert.ok(!workflowEntry.includes('shellで'));
   const codexWorkflowEntry = readFileSync(join(codexRoot, 'skills', names[0], 'SKILL.md'), 'utf8');
+  const guidance = await f.call<{ instructions: string }>('bootstrap.get');
+  for (const instructions of [workflowEntry, codexWorkflowEntry, guidance.instructions]) {
+    assert.match(instructions, /担当Roleの名前とID/);
+    assert.match(instructions, /起動前にaacl_context_get・aacl_context_handoff・Asset取得でRole詳細や紐づくアセットを読み込まない/);
+    assert.match(instructions, /起動後にサブエージェント自身がそのHandleでaacl_context_get/);
+    assert.match(instructions, /親のContext全体を引き継がせず/);
+  }
   assert.match(codexWorkflowEntry, /^description: "shared-reviewをAACLから起動する"$/m);
   const skillEntry = readFileSync(join(codexRoot, 'skills', 'architecture-review', 'SKILL.md'), 'utf8');
   assert.match(skillEntry, /MCPの aacl_skill_get/); assert.ok(!skillEntry.includes('ensure')); assert.ok(!skillEntry.includes('shellで'));

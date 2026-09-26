@@ -654,7 +654,9 @@ export class Core {
         const context = this.resolve(snapshot, run.stageId, undefined, run.subagentId && run.subagentContinuity ? { id: run.subagentId, continuity: run.subagentContinuity } : undefined);
         return {
             runId: run.id, contextHandle: run.contextHandle, version: run.version,
-            stage: { id: context.stage.id, name: context.stage.name },
+            task: { instruction: run.instruction, target: run.target },
+            stage: { id: context.stage.id, name: context.stage.name, additionalInstructions: context.stage.additionalInstructions },
+            role: { id: context.stageRoleId, name: context.roles.find(role => role.id === context.stageRoleId).name },
             executor: context.model ? 'subagent' : 'orchestrator',
             ...(context.model ? { model: { id: context.model.id, name: context.model.name, modelName: context.model.modelName, invocationMethod: context.model.invocationMethod, selections: context.modelSelections ?? {} } } : {}),
             ...(context.subagent ? { subagent: context.subagent } : {}),
