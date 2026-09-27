@@ -109,11 +109,12 @@ Claude Code / Codex (Windows または同一WSL内のLinux)
 
 ### 6.1 Run開始とContext
 
+- `usecase.search`はCoreで検索し、ID・種別・名前・description・scope・revisionとSkillのexplanationだけを返す。本文・補助ファイル・Stage・transition定義は返さない。
 - Workflow Run開始用とSkill本文取得用に、別々のtyped MCP operationを実装する。Skill取得operationはRun Contextを生成しない。
 - `run.start`の応答にRun ID、Run Context Handle、次に実施するStageのExecution Planを含め、CoreはRun IDとHandleの対応を保存する。開始応答にはContext本文を含めない。
 - Run単位のMCP operationはContext Handleを必須入力として受け取り、その値から対象Runを解決する。AIは`run.start`から受け取ったHandleを同じAI実行Contextの後続operationへ渡す。
-- Execution Planには作業依頼と対象（`task.instruction`・`task.target`）、次StageのID・表示名・追加指示（`stage.additionalInstructions`）、担当RoleのIDと名前（`role.id`・`role.name`）、実行主体（`orchestrator`または`subagent`）、指定ModelのID・選択肢展開済みのModel名・呼び出し方・選択値、サブエージェントの継続情報、Context Handle、Run versionを含める。Stage・Role・ModelはSnapshotの固定revisionから構成し、Role詳細・責務、Asset本文、Skill catalogは含めない。
-- `executor=subagent`ではオーケストレーターがExecution Planだけで指定Modelを起動し、作業・Stage・Roleの名前とID・Handleと取得手順を渡す。起動後にサブエージェント自身が`context.get`でRole詳細・明示参照Rule・Skill catalogを取得し、必要なSkill本文・補助ファイルを`run.skill.get`で取得する。起動前にオーケストレーターがContext・Asset取得で詳細を読み込んだり、親のContext全体を引き継がせたりしない。同じサブエージェントの継続時も新しいStageのPlanを渡してContextを再取得させる。この手順はBootstrapとClaude Code / CodexのWorkflow入口で共有する。Model未指定の`executor=orchestrator`は自身がContextを取得する。
+- Execution Planには作業依頼と対象（`task.instruction`・`task.target`）、次StageのID・表示名、担当RoleのIDと名前（`role.id`・`role.name`）、実行主体（`orchestrator`または`subagent`）、指定ModelのID・選択肢展開済みのModel名・呼び出し方・選択値、サブエージェントの継続情報、Context Handle、Run versionを含める。Stage・Role・ModelはSnapshotの固定revisionから構成し、Stageの追加指示、Role詳細・責務、Asset本文、Skill catalogは含めず、実施者が`context.get`で取得する。
+- `executor=subagent`ではオーケストレーターがExecution Planだけで指定Modelを起動し、作業・Stage・Roleの名前とID・Handle・versionと取得・実施・遷移・完了報告の手順を渡す。起動後にサブエージェント自身が`context.get`でRole詳細・明示参照Rule・Skill catalogを取得し、必要なSkill本文・補助ファイルを`run.skill.get`で取得する。起動前にオーケストレーターがContext・Asset取得で詳細を読み込んだり、親のContext全体を引き継がせたりしない。同じサブエージェントの継続時も新しいStageのPlanを渡してContextを再取得させる。この手順はBootstrapとClaude Code / CodexのWorkflow入口で共有する。Model未指定の`executor=orchestrator`は自身がContextを取得する。
 - Run開始transactionでWorkflowと参照revisionの境界を固定し、変更不能なExecution Snapshotを作成する。Snapshotにはrun id、Workflowとrevision、resolution revision boundary、Project、使用した紐づけとrevision、Project CommonのrevisionとRule参照、該当するStage、Role、Runtime、利用対象Assetとrevision、提供したRuleとSkill catalog、timestampを保持する。
 - Resolution recordには、利用対象になった各Assetの参照経路と解決理由を保持する。取得できなかったContextと理由も記録し、初期Contextに渡した情報と区別する。
 - Initial ContextはWorkflow Definition、現在Stageからの許可transitionと各`condition`、`stageRoleId`、担当Roleのresponsibilities、Stageの`additionalInstructions`、明示参照されたRule、利用対象Skill catalog、指定Modelの固定revision、選択肢展開済みのModel名と呼び出し方、サブエージェント継続指示で構成する。
@@ -133,6 +134,8 @@ Claude Code / Codex (Windows または同一WSL内のLinux)
 
 - Runの終端状態は`completed`、`cancelled`、`failed`。ユーザーの中止は`cancelled`、継続不能の報告またはtimeoutは`failed`とする。
 - Workflowの進行可能な遷移はCoreが管理する。AIまたはユーザーが完了判断後に遷移を選び、Coreは構造と現在状態を検証する。
+- AIによるStage実施者はRoleと追加指示に従って検証とconditionの評価を行い、受け取ったExecution Planの`version`・`contextHandle`、選んだ`transitionId`、`report`と必要な`evidence`を既存の`run.transition`へ渡して受理を確認する。`executor=subagent`ではサブエージェント自身が要求し、親への通常報告は`outcome`・`run.status`・`run.version`・返された`nextExecution`と必要な成果物参照に限る。親は受理済み遷移を再要求せず、検証・意味判断をやり直さず、次のPlanの実施者を起動・継続する。サブエージェント自身は次の工程を起動しない。Model未指定時はオーケストレーターが実施者として同じ手順を行う。
+- 指摘本文や検証ログは親の通常報告へ含めず、保存・引き渡しはRoleで定めたファイル・PR等の参照に従う。Workflowに成果物引き渡し用のAPIや保存領域を追加しない。判断が必要な場合や受理を確認できない場合だけ、状態と必要最小限の情報を親へ返す。`stale`やエラーを受理として扱わず、`nextExecution`の有無だけで完了を判断しない。この実施・報告手順はBootstrapと両RuntimeのWorkflow入口で共有する。
 - `run.start`、`run.get`、`run.transition`は、active Runで次に実施するStageのExecution Planを返す。`run.transition`でStageが進んだ場合、Runtimeは返されたPlanのexecutorに応じてサブエージェントを起動するか、自身を実施者としてContextを取得する。終端遷移では次のPlanを返さない。
 - transition更新はSQLite transactionで直列化する。同一操作の再送は`duplicate`、既に状態が進んだ後の別要求は`stale`として記録し、現在状態を不正に戻さない。
 - Run eventはappend-onlyで保存する。

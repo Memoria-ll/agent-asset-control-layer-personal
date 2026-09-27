@@ -67,6 +67,11 @@ test('C02 C17 C32 C33: real HTTP / typed MCP / loopback / two concurrent chat Ha
     { type: 'binding.save', binding: { sourceId: workflowId, targetId: modelId, stageId: 'start', purpose: 'stage-model' } },
   ] });
   assert.equal(created.entities[0].id, workflowId);
+  const search = await tool<{ assets: { id: string; name: string }[] }>('aacl_usecase_search', { query: 'HTTP Workflow' });
+  assert.equal(search.assets.length, 1);
+  assert.equal(search.assets[0].id, workflowId);
+  assert.equal(search.assets[0].name, 'HTTP Workflow');
+  for (const field of ['body', 'supportingFiles', 'stages', 'transitions']) assert.equal(field in search.assets[0], false);
   const [a, b] = await Promise.all(['claude', 'codex'].map(runtime => tool<{ run: Run; contextHandle: string; nextExecution: ExecutionPlan; context?: unknown }>('aacl_run_start', { operationId: randomUUID(), workflowId, instruction: runtime, runtime })));
   assert.equal('context' in a, false);
   assert.equal(a.nextExecution.stage.id, 'start');
@@ -74,13 +79,15 @@ test('C02 C17 C32 C33: real HTTP / typed MCP / loopback / two concurrent chat Ha
     assert.equal(started.nextExecution.executor, 'subagent');
     assert.deepEqual(started.nextExecution.role, { id: roleId, name: 'HTTP担当Role' });
     assert.equal(started.nextExecution.task.instruction, started.run.runtime);
-    assert.equal(started.nextExecution.stage.additionalInstructions, '結果を簡潔に報告');
+    assert.deepEqual(started.nextExecution.stage, { id: 'start', name: '作業' });
+    assert.ok(!JSON.stringify(started).includes('結果を簡潔に報告'));
     assert.equal(started.nextExecution.model?.modelName, 'provider/worker');
     assert.ok(!JSON.stringify(started).includes('作業結果を報告する。'));
   }
   assert.equal(app.core.store.list('delivery').length, 0);
   assert.notEqual(a.contextHandle, b.contextHandle);
-  const [contextA, contextB] = await Promise.all([a, b].map(r => tool<{ runId: string; stageRoleId: string }>('aacl_context_get', { contextHandle: r.contextHandle })));
+  const [contextA, contextB] = await Promise.all([a, b].map(r => tool<{ runId: string; stageRoleId: string; stage: { additionalInstructions: string } }>('aacl_context_get', { contextHandle: r.contextHandle })));
+  for (const context of [contextA, contextB]) assert.equal(context.stage.additionalInstructions, '結果を簡潔に報告');
   assert.equal(contextA.stageRoleId, roleId);
   assert.equal(contextA.runId, a.run.id); assert.equal(contextB.runId, b.run.id);
   await tool('aacl_run_transition', { operationId: randomUUID(), contextHandle: a.contextHandle, version: 1, transitionId: 'end', report: '確認済み' });

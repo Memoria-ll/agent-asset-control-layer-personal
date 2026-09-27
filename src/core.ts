@@ -50,6 +50,14 @@ export class Core {
     return asset;
   }
   bindings(scope?: string) { return this.store.list<Binding>('binding', scope).filter(b => b.active); }
+  searchUseCases(scope: string, query: string) {
+    return this.store.list<Asset>('asset').filter(a => !a.deletedAt && (a.scope === 'global' || a.scope === scope)
+      && (a.kind === 'workflow' || a.kind === 'skill' && a.useCase)
+      && `${a.name} ${a.description} ${a.kind === 'skill' ? a.explanation : ''}`.toLowerCase().includes(query.toLowerCase()))
+      .map(a => ({ id: a.id, kind: a.kind, name: a.name, description: a.description, scope: a.scope, revision: a.revision,
+        ...(a.kind === 'skill' ? { explanation: a.explanation } : {}),
+      }));
+  }
   private skillCatalogFrom(rootId: string, assets: Iterable<Asset>, bindings: Iterable<Binding>) {
     const assetMap = new Map([...assets].map(asset => [asset.id, asset]));
     const bindingList = [...bindings];
@@ -546,7 +554,7 @@ export class Core {
     return {
       runId: run.id, contextHandle: run.contextHandle, version: run.version,
       task: { instruction: run.instruction, target: run.target },
-      stage: { id: context.stage.id, name: context.stage.name, additionalInstructions: context.stage.additionalInstructions },
+      stage: { id: context.stage.id, name: context.stage.name },
       role: { id: context.stageRoleId, name: context.roles.find(role => role.id === context.stageRoleId)!.name },
       executor: context.model ? 'subagent' : 'orchestrator',
       ...(context.model ? { model: { id: context.model.id, name: context.model.name, modelName: context.model.modelName, invocationMethod: context.model.invocationMethod, selections: context.modelSelections ?? {} } } : {}),
