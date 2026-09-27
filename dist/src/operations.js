@@ -13,9 +13,7 @@ aacl_run_start・aacl_run_get・aacl_run_transitionは、Context本文ではな�
 ${workflowExecutionInstructions}
 Modelには自由な名前の選択肢グループを複数定義できます。各グループのoptionsとoptionIdsは同じ順序で対応し、選択値を変更するときはoptionIdを保ってください。WorkflowのStageへの紐づけではselectedChoicesに値、selectedChoiceIdsにIDを指定し、ContextのmodelSelectionsで現在の値を確認します。IDを保って値を変更すると選択は追従し、存在しないIDへの紐づけはdiagnostics.getでエラーになります。
 Model名と呼び出し方には{{choice.<選択肢名>}}を埋め込めます。ContextとExecution PlanではStageで選んだ値へ展開され、未定義または未選択の選択肢は受理されません。
-現在Stageから進む遷移のconditionを評価し、遷移判断の報告とaacl_run_getのversionを付けて許可された遷移を要求します。自己ループや差し戻しとRun全体のfailedは別です。
 ModelからSkill / Ruleへの参照にはchoiceConditionsと対応するchoiceConditionIdsを指定できます。同じ組み合わせ内はAND、複数の組み合わせはORとして、一致する参照だけをContextへ含めます。optionIdを保って値を変更すると条件も追従し、削除済みまたは存在しないIDはdiagnostics.getでエラーになります。
-現在Stageから進む遷移のconditionを評価し、遷移判断の報告とaacl_run_getのversionを付けて許可された遷移を要求します。retry・returnと自己ループ・差し戻し、Run全体のfailedは別です。
     資産管理はまずaacl_asset_list（既定は概要のみ）またはaacl_asset_get_manyで対象を確かめ、Asset ID・scope・変更内容・理由・userRequestを明示して型付き操作を実行します。既存Asset・紐づけ・Project Commonの更新／解除とChange Set内の各変更には取得時点のexpectedRevisionを必ず付け、Conflictなら最新状態を再取得して変更全体を組み直します。asset.saveは完全な全置換なのでbodyやsupportingFilesを省略しません。既存Assetの一部fieldだけを変えるときはasset.updateへ変更するfieldだけを渡し、省略したfieldを保持します。複数変更はまずaacl_changeset_previewでDry Runし、問題がなければaacl_changeset_applyを実行します。Assetを削除する前にaacl_asset_delete_previewの参照一覧をユーザーへ示し、削除と参照解除の明示承認を得てからaacl_asset_deleteを実行します。方針が曖昧なら具体案を示してユーザーへ確認します。認証情報は保存しません。
 書き込みのoperationIdにはUUIDを使用し、同じ操作の再送だけで再利用します。
 気づきがあればaacl_journal_templateのMarkdownでaacl_journal_writeへ送ります。Core IDは本文に書かず、contextHandleまたは終了後のpostRunIdを操作入力に指定します。Run外のJournalにはTaskを指定します。
@@ -72,7 +70,7 @@ export class Operations {
         read('asset.delete.preview', '削除対象Assetを参照する紐づけとProject Commonを確認', { assetId: id }, p => core.assetDeletionPreview(p.assetId));
         write('asset.delete', '影響一覧を確認したユーザーの明示承認後にAssetと参照を削除状態へ変更', { assetId: id, expectedRevision: z.int().positive(), expectedBindingRevisions: z.array(z.object({ id, revision: z.int().positive() }).strict()), expectedProjectCommonRevisions: z.array(z.object({ id, revision: z.int().positive() }).strict()), confirmed: z.literal(true), provenance }, p => core.deleteAsset(p, p.provenance), changedAssetIds);
         write('asset.restore', '過去revisionを新revisionとして復元。現在revisionが変わっていないことをexpectedRevisionで確認する', { assetId: id, revision, expectedRevision: revision }, p => core.restoreAsset(p.assetId, p.revision, p.expectedRevision), changedAssetIds);
-        read('usecase.search', 'WorkflowとuseCaseが有効なSkillを検索', { scope: scope.default('global'), query: z.string().default('') }, p => ({ assets: store.list('asset').filter(a => !a.deletedAt && (a.scope === 'global' || a.scope === p.scope) && (a.kind === 'workflow' || a.kind === 'skill' && a.useCase) && `${a.name} ${a.description} ${a.kind === 'skill' ? a.explanation : ''}`.toLowerCase().includes(p.query.toLowerCase())) }));
+        read('usecase.search', 'WorkflowとuseCaseが有効なSkillを選択用の概要だけで検索。本文・補助ファイル・工程定義を含めない', { scope: scope.default('global'), query: z.string().default('') }, p => ({ assets: core.searchUseCases(p.scope, p.query) }));
         read('skill.get', '指定Skillの本文と、bindingで参照された通常Skill候補を取得。Runを作成しない', { assetId: id, revision: revision.optional() }, p => core.skillGet(p.assetId, p.revision));
         write('skill.usecase', 'Skillの直接起動を切り替えRuntime入口を同期', { assetId: id, enabled: z.boolean(), provenance }, p => {
             const a = core.asset(p.assetId);
@@ -109,7 +107,7 @@ export class Operations {
         read('context.get', 'Stage実施者が固定revisionのRole詳細と紐づくアセットを取得。executor=subagentでは起動後のサブエージェント自身が呼ぶ', { ...handle, model: z.string().optional() }, p => core.context(p.contextHandle, undefined, p.model));
         read('context.handoff', '実施者が明示RoleのContextを取得。executor=subagentでは起動後のサブエージェント自身が呼ぶ', { ...handle, roleId: id, model: z.string().optional() }, p => core.context(p.contextHandle, p.roleId, p.model));
         read('run.skill.get', 'Runの固定revisionからSkill本文・補助ファイルを取得', { ...handle, assetId: id, file: text.optional() }, p => core.runSkillGet(p.contextHandle, p.assetId, p.file));
-        write('run.transition', '遷移条件への判断報告を付けて許可されたStage遷移を選択し、次の実行計画を返す', { ...handle, version: z.int().positive(), transitionId: text, report: text, evidence, comment: z.string().default('') }, p => core.transition(p));
+        write('run.transition', 'Stage実施者自身が検証・完了判断後、実行計画のversionと判断報告を付けて許可遷移を要求する。受理結果と次の実行計画を返す', { ...handle, version: z.int().positive(), transitionId: text, report: text, evidence, comment: z.string().default('') }, p => core.transition(p));
         write('run.cancel', 'ユーザー意思によるRunの中止', { ...handle, reason: text }, p => core.endRun(p.contextHandle, 'cancelled', p.reason));
         write('run.fail', '継続不能なRunの終了報告', { ...handle, reason: text }, p => core.endRun(p.contextHandle, 'failed', p.reason));
         write('run.report', '実際に使用したAssetと実行結果を報告', { ...handle, body: text, usedAssetIds: z.array(id).default([]), evidence }, p => {

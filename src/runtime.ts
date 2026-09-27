@@ -7,11 +7,15 @@ import { Core, normalizeRoot } from './core.ts';
 import { supportingFilePathError } from './schema.ts';
 import type { Asset, Diagnostic, RuntimeFile, RuntimeTarget, Stamp } from './schema.ts';
 
-export const workflowExecutionInstructions = `nextExecutionには作業（task）、工程名と追加指示（stage）、担当Roleの名前とID（role）、指定Model（model）、contextHandleと継続情報が含まれる。
+export const workflowExecutionInstructions = `nextExecutionには作業（task）、工程IDと名前（stage）、担当Roleの名前とID（role）、指定Model（model）、contextHandleと継続情報が含まれる。Stageの追加指示は実施者がContextから取得する。
 executorがsubagentなら、オーケストレーターはこの実行計画だけでmodel.modelName・model.invocationMethod・model.selectionsに従ってサブエージェントを起動する。起動前にaacl_context_get・aacl_context_handoff・Asset取得でRole詳細や紐づくアセットを読み込まない。
-起動時にはtask・stage・role・contextHandleを渡し、起動後にサブエージェント自身がそのHandleでaacl_context_getを呼び、固定revisionのRole詳細・紐づくRule・Skill catalogを取得するよう指示する。必要なSkill本文・補助ファイルはサブエージェント自身がaacl_run_skill_getで取得する。親のContext全体を引き継がせず、Role詳細やアセット本文をオーケストレーター経由で転送しない。
-連続する同じRole・Modelではsubagent.idとcontinuityに従って同じサブエージェントを継続し、新しい工程の実行計画を渡してContextを再取得させる。サブエージェントは作業結果と遷移判断を報告する。
-executorがorchestratorなら、オーケストレーター自身が実施者としてcontextHandleでaacl_context_getを呼ぶ。遷移後も返されたnextExecutionに同じ手順を適用し、終端では次の工程を起動しない。`;
+起動時にはtask・stage・role・contextHandle・versionと、以下の取得・実施・遷移・完了報告の手順を渡し、起動後にサブエージェント自身がそのHandleでaacl_context_getを呼び、固定revisionのRole詳細・Stageの追加指示・紐づくRule・Skill catalogを取得するよう指示する。必要なSkill本文・補助ファイルはサブエージェント自身がaacl_run_skill_getで取得する。親のContext全体を引き継がせず、Role詳細やアセット本文をオーケストレーター経由で転送しない。
+連続する同じRole・Modelではsubagent.idとcontinuityに従って同じサブエージェントを継続し、新しい工程の実行計画を渡してContextを再取得させる。
+executorがorchestratorなら、オーケストレーター自身が実施者としてcontextHandleでaacl_context_getを呼ぶ。
+Stage実施者がRoleと追加指示に従って必要な検証まで行い、現在Stageのtransition conditionを評価する。実施者自身がcontextHandle・受け取った実行計画のversion・選んだtransitionId・判断報告report・必要なevidenceをaacl_run_transitionへ渡す。書き込みには新しいUUIDのoperationIdを使い、同じ要求の再送だけで再利用する。自己ループ・差し戻しとRun全体のfailedは別として扱う。
+executorがsubagentなら、サブエージェントは遷移の受理を確認してから、親へoutcome・run.status・run.version・返されたnextExecution（ある場合）だけを完了報告する。指摘本文や検証ログ、遷移判断の詳細を親へ転送せず、Roleで定めたファイルやPRへの参照が必要なら参照だけを添える。指摘の保存・引き渡し方法はRoleに従う。
+オーケストレーターは受理済み遷移を再要求したり、実施者の検証・完了判断をやり直したりせず、返されたnextExecutionに従って次の実施者を起動・継続する。サブエージェント自身は次の工程を起動しない。終端では次の工程を起動しない。
+staleやエラーを遷移受理として報告しない。受理を確認できない場合や実施者だけで判断できない場合は、その状態と判断に必要な最小限の情報を親へ返す。nextExecutionがないことだけでRun完了とせず、run.statusを確認する。`;
 
 type Entry = Stamp & { targetId: string; assetId: string; path: string; hash: string; active: boolean; implicitInvocation?: boolean };
 const codexPolicyRelativePath = 'agents/openai.yaml';

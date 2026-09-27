@@ -68,7 +68,7 @@ Claude Code / Codexは、モデル起動、ファイル操作、shell・tool呼�
 
 Canonical Assetと管理記録の正本はCoreが管理するCanonical Stateとする。Asset本文はUIで確認・編集でき、ユーザーが要求したときに人間可読形式で出力できる。
 
-Workflow RunのContextは、Project Commonと、選択Workflow・現在Stage・Roleの紐づけに含まれる明示参照から構成する。`run.start`と遷移操作はContext本文を自動で返さず、作業依頼と対象、次に実施するStageのID・工程名・追加指示、担当Roleの名前とID、実行主体、Model、Context Handle、継続情報を示すExecution Planを返す。Execution PlanにはRoleの詳細・責務や紐づくアセット本文・Skill catalogを含めない。Model指定時は、オーケストレーターがこの計画だけで指定Modelのサブエージェントを起動し、作業・Stage・Roleの名前とID・Handleを渡す。起動後にサブエージェント自身が固定revisionのRole詳細と紐づくアセットのContextを取得する。親のContext全体を引き継がせず、オーケストレーターは起動前に詳細を取得・転送しない。継続するサブエージェントにも次Stageの計画を渡し、Contextを再取得させる。実際にStageを実施するオーケストレーターまたはサブエージェントがHandleでContextを取得し、Skill本文やsupporting files、Ruleを使う時点で取得する。Runを伴わないSkillの直接取得では、指定されたCanonical Skill本文を返す。
+Workflow RunのContextは、Project Commonと、選択Workflow・現在Stage・Roleの紐づけに含まれる明示参照から構成する。`run.start`と遷移操作はContext本文を自動で返さず、作業依頼と対象、次に実施するStageのID・工程名、担当Roleの名前とID、実行主体、Model、Context Handle、継続情報を示すExecution Planを返す。Execution PlanにはStageの追加指示、Roleの詳細・責務や紐づくアセット本文・Skill catalogを含めず、実施者がContextから取得する。Model指定時は、オーケストレーターがこの計画だけで指定Modelのサブエージェントを起動し、作業・Stage・Roleの名前とID・Handleを渡す。起動後にサブエージェント自身が固定revisionのRole詳細と紐づくアセットのContextを取得する。親のContext全体を引き継がせず、オーケストレーターは起動前に詳細を取得・転送しない。継続するサブエージェントにも次Stageの計画を渡し、Contextを再取得させる。実際にStageを実施するオーケストレーターまたはサブエージェントがHandleでContextを取得し、Skill本文やsupporting files、Ruleを使う時点で取得する。Runを伴わないSkillの直接取得では、指定されたCanonical Skill本文を返す。
 
 ---
 
@@ -340,6 +340,8 @@ Bootstrapは、MCP接続時にAIへAACLの存在と利用方法を知らせる�
 - Run StateとContextの取得方法、およびrun.startが返すContext Handleを後続のRun単位操作へ渡す方法
 - JournalとJournal Reviewの操作方法
 
+Workflow・直接起動Skillの検索は選択用の概要（ID、種別、名前、description、scope、revision、Skillのexplanation）だけを返し、本文・補助ファイル・Stage・transition定義を含めない。
+
 Bootstrapは繰り返し取得しても同じ案内として扱う。通常会話へ全Workflow・Skill・Ruleの本文を常時注入する用途にはしない。
 
 接続先で使う起動用表現は、Claude CodeではCommand、CodexではSkillとし、Canonical Assetを参照する入口として扱う。これらのRuntime固有の起動用表現と、Canonical AssetとしてのSkillを区別する。
@@ -419,6 +421,10 @@ Runの終端状態はcompleted、cancelled、failedとする。ユーザーに�
 各transitionは、その遷移先へ進むとAIまたはユーザーが判断するための必須自由記述conditionを持つ。conditionは現在Stageからの経路ごとに保存し、同じ遷移先でも遷移元や判断内容が異なる場合に別々に記述できる。
 
 AIまたはユーザーは現在Stageから選ぶtransitionのconditionを評価し、遷移すると判断した場合、遷移判断の報告と任意の根拠・コメントを添えてCoreへtransitionを要求する。conditionの意味や根拠の真偽はCoreが判定しない。
+
+AIによる実行では、Stage実施者がRoleと追加指示に従って必要な検証、完了条件の評価、transitionの要求と受理確認まで担当する。Model指定時はサブエージェント自身が実施し、親へは遷移の受理結果、Run状態・version、次のExecution Planと必要な成果物参照だけを返す。オーケストレーターは実施者の検証・完了判断をやり直さず、受理済みtransitionを再要求せず、次の実施者の起動・継続・待機と終了報告を担う。Model未指定時はオーケストレーター自身がStage実施者として一連の操作を行う。
+
+指摘や成果物の保存・引き渡し方法はRoleで定めたファイル・PR等の参照に従い、Workflow自身は本文の保存・中継を担当しない。実施者だけで判断できない場合や遷移の受理を確認できない場合に限り、状態と判断に必要な最小限の情報を親へ返す。staleやエラーを受理済みとして扱わず、次のExecution Planの欠如だけで完了と判断しない。
 
 CoreはAIやユーザーの意味判断や根拠の真偽を評価せず、現在のRun状態、許可されたtransition、必須入力の構造を検証する。`to=completed`の許可されたtransitionが受理されたとき、Runをcompletedにする。
 
