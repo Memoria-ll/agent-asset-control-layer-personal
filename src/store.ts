@@ -71,6 +71,14 @@ export class Store {
   }
   private normalize<T>(kind: string, value: unknown): T {
     if (kind === 'asset') return normalizeAssetRecord(value) as T;
+    if (kind === 'snapshot' && value && typeof value === 'object' && !Array.isArray(value)) {
+      const record = value as Record<string, unknown>;
+      return {
+        ...record,
+        workflow: normalizeAssetRecord(record.workflow),
+        assets: Array.isArray(record.assets) ? record.assets.map(normalizeAssetRecord) : record.assets,
+      } as T;
+    }
     if (kind === 'run' && value && typeof value === 'object' && !Array.isArray(value)) {
       const { taskType: _taskType, ...rest } = value as Record<string, unknown>;
       return rest as T;
