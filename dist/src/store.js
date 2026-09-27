@@ -73,6 +73,14 @@ export class Store {
     normalize(kind, value) {
         if (kind === 'asset')
             return normalizeAssetRecord(value);
+        if (kind === 'snapshot' && value && typeof value === 'object' && !Array.isArray(value)) {
+            const record = value;
+            return {
+                ...record,
+                workflow: normalizeAssetRecord(record.workflow),
+                assets: Array.isArray(record.assets) ? record.assets.map(normalizeAssetRecord) : record.assets,
+            };
+        }
         if (kind === 'run' && value && typeof value === 'object' && !Array.isArray(value)) {
             const { taskType: _taskType, ...rest } = value;
             return rest;

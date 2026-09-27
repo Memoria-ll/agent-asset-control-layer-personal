@@ -58,6 +58,46 @@ test('Skill metadata separates the human explanation from Runtime description an
   assert.equal('taskType' in run.run, false);
 });
 
+test('Legacy snapshot Model choices are normalized on read without rewriting frozen records', async t => {
+  const f = fixture(t), workflow = await f.workflow();
+  const model = await f.asset('model', {
+    modelName: 'gpt-{{choice.model}}', invocationMethod: 'effort={{choice.effort}}',
+    choices: [{ name: 'model', options: ['5.6-luna'] }, { name: 'effort', options: ['high'] }],
+  });
+  const rule = await f.asset('rule');
+  await f.bind(model, rule, { choiceConditions: [{ model: '5.6-luna' }] });
+  await f.bind(workflow, model, { stageId: 'build', purpose: 'stage-model', selectedChoices: { model: '5.6-luna', effort: 'high' } });
+  const started = await f.start(workflow);
+  const snapshot = f.store.get<Snapshot>(started.snapshotId);
+  const legacy = {
+    ...snapshot, id: randomUUID(),
+    assets: snapshot.assets.map(asset => asset.kind === 'model'
+      ? { ...asset, choices: asset.choices.map(({ optionIds: _ids, ...choice }) => choice) } : asset),
+    bindings: snapshot.bindings.map(({ selectedChoiceIds: _selected, choiceConditionIds: _conditions, ...binding }) => binding),
+  };
+  const raw = JSON.stringify(legacy);
+  f.store.db.prepare('INSERT INTO records VALUES (?,?,?,?)').run(legacy.id, 'snapshot', 'global', raw);
+  f.store.db.prepare('INSERT INTO revisions(id,revision,kind,data) VALUES(?,?,?,?)').run(legacy.id, legacy.revision, 'snapshot', raw);
+  f.store.put('run', { ...started.run, snapshotId: legacy.id });
+  await f.call('asset.update', {
+    id: model.id, expectedRevision: model.revision,
+    asset: { choices: model.choices.map(choice => choice.name === 'model' ? { ...choice, options: ['6-sol'] } : choice) }, provenance,
+  });
+
+  const normalized = f.store.get<Snapshot>(legacy.id);
+  const frozenModel = normalized.assets.find(asset => asset.id === model.id)!;
+  assert.equal(frozenModel.choices[0]!.optionIds.length, 1);
+  assert.deepEqual(f.store.revision<Snapshot>(legacy.id, legacy.revision), normalized);
+  const context = await f.call<Context>('context.get', { contextHandle: started.contextHandle });
+  assert.equal(context.model?.modelName, 'gpt-5.6-luna');
+  assert.deepEqual(context.modelSelections, { model: '5.6-luna', effort: 'high' });
+  assert.ok(context.rules.some(asset => asset.id === rule.id));
+  assert.equal(f.core.diagnostics().diagnostics.filter(d => d.code === 'snapshot').length, 0);
+  assert.equal(f.store.db.prepare('SELECT data FROM records WHERE id=?').get(legacy.id)!.data, raw);
+  assert.equal(f.store.db.prepare('SELECT data FROM revisions WHERE id=?').get(legacy.id)!.data, raw);
+  assert.throws(() => f.store.put('snapshot', normalized), /immutable/);
+});
+
 test('Diagnostic evidence resolves the concrete Asset from its assetId', async t => {
   const f = fixture(t);
   const skill = await f.asset('skill', { name: '具体的な診断対象' });
